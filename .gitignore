@@ -23,3 +23,7 @@
 # Config with secrets
 config.sexp
 .env
+.envrc
+
+# Downloaded artifacts
+quicklisp.lisp
