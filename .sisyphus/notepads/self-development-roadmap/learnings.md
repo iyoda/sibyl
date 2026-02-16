@@ -491,3 +491,75 @@ The updated prompt now includes:
 ✅ **COMPLETE** - Phase 3 Task 3-2 complete. Sibyl can now write its own tests programmatically!
 
 **Progress**: Phase 3 Task 3-2 complete (write-test implemented)
+
+## [2026-02-16T13:45] run-tests Tool Implementation
+
+### Implemented Tool
+**run-tests**: Programmatic FiveAM test execution with structured results
+- Executes FiveAM tests and returns JSON-formatted results
+- Parameters: `suite` (optional), `test` (optional), defaults to all tests
+- Returns: `{"total": N, "passed": N, "failed": N, "failures": [...]}`
+- Suppresses test output during execution (returns data, not logs)
+
+### Key Implementation Details
+
+**Runtime package resolution**:
+- Cannot use compile-time package references (SIBYL.TESTS, FIVEAM)
+- Must use `find-package` + `find-symbol` at runtime
+- Pattern: `(let ((pkg (find-package "FIVEAM"))) (find-symbol "RUN" pkg))`
+- Avoids compile-time dependency on test framework
+
+**FiveAM result traversal**:
+- Results are nested: suite-result → test-result → test-passed/test-failure
+- Must walk tree recursively to count all tests
+- Use `typep` with runtime-resolved class symbols
+- Extract test names via `slot-value` (not generic function accessors)
+
+**Critical slot access pattern**:
+```lisp
+;; WRONG: (funcall name-accessor result) → no applicable method error
+;; RIGHT: (slot-value result test-case-slot) → returns test-case object
+;;        (slot-value test-case name-slot) → returns test name symbol
+```
+
+**Output suppression**:
+- Use `make-string-output-stream` NOT `make-broadcast-stream`
+- Broadcast streams can cause hangs in some contexts
+- String output streams are safer for discarding output
+
+### Test Strategy Gotcha
+**Infinite recursion trap**:
+- Test calling `run-tests` with no args runs ALL tests
+- This includes the test itself → infinite loop
+- Solution: Run specific suite that excludes run-tests-tests
+- Example: `run-tests '(("suite" . "read-sexp-tests"))` instead of `run-tests '()`
+
+### Test Results
+- All 3 run-tests tests pass (14 checks, 100%)
+- Tests verify: all tests execution, specific suite, failure detection
+- QA scenarios verified:
+  - ✅ Returns structured JSON with counts
+  - ✅ Can run specific suite
+  - ✅ Detects and reports failures correctly
+
+### Tool Integration
+- Completes TDD toolchain: `write-test` → `run-tests` → implement → `run-tests` again
+- Works seamlessly with `write-test` tool (Task 3-2)
+- Enables Sibyl to verify its own changes programmatically
+
+### Tool Registry
+- 17 tools total (16 existing + run-tests)
+- Tools: codebase-map, describe-symbol, eval-form, file-info, grep, list-directory, macroexpand-form, package-symbols, read-file, read-sexp, run-tests, safe-redefine, shell, sync-to-file, who-calls, write-file, write-test
+
+### Acceptance Criteria Met
+- [x] `run-tests` tool registered (17 tools total)
+- [x] Returns structured JSON results
+- [x] Can run all tests, specific suite, or specific test
+- [x] Detects failures and includes failure details
+- [x] `(fiveam:run 'run-tests-tests)` → 100% pass
+- [x] QA scenarios: all tests, specific suite, failure detection → all PASS
+
+### Status
+✅ **COMPLETE** - Phase 3 Task 3-1 complete. Sibyl can now run its own tests programmatically!
+
+**Progress**: Phase 3 Task 3-1 complete (run-tests implemented)

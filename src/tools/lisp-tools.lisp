@@ -1062,10 +1062,15 @@
           (test-passed-class (find-symbol "TEST-PASSED" fiveam-pkg))
           (test-failure-class (find-symbol "TEST-FAILURE" fiveam-pkg))
           (test-suite-result-class (find-symbol "TEST-SUITE-RESULT" fiveam-pkg))
-          (name-accessor (find-symbol "NAME" fiveam-pkg))
+          (test-case-slot (find-symbol "TEST-CASE" fiveam-pkg))
+          (name-slot (find-symbol "NAME" fiveam-pkg))
           (reason-accessor (find-symbol "REASON" fiveam-pkg))
           (results-accessor (find-symbol "RESULTS" fiveam-pkg)))
-      (labels ((walk-result (result)
+      (labels ((get-test-name (result)
+                 (let ((test-case (slot-value result test-case-slot)))
+                   (when test-case
+                     (slot-value test-case name-slot))))
+               (walk-result (result)
                  (cond
                    ;; Test result
                    ((typep result test-result-class)
@@ -1075,10 +1080,12 @@
                         (progn
                           (incf failed)
                           (push (make-hash-table :test 'equal) failures)
-                          (let ((failure (car failures)))
+                          (let ((failure (car failures))
+                                (test-name (get-test-name result)))
                             (setf (gethash "test" failure)
-                                  (string-downcase
-                                   (symbol-name (funcall name-accessor result))))
+                                  (if test-name
+                                      (string-downcase (symbol-name test-name))
+                                      "unknown"))
                             (when (typep result test-failure-class)
                               (setf (gethash "reason" failure)
                                     (format nil "~a" (funcall reason-accessor result))))))))
