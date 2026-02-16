@@ -9,7 +9,8 @@
       (when (and packages (probe-file packages))
         (load packages)))
     (ignore-errors (require :asdf))
-    (when (find-package :asdf)
+    (when (and (find-package :asdf)
+               (null (find-package :yason)))
       (ignore-errors (asdf:load-system :yason)))
     (let* ((tool-package (find-package :sibyl.tools))
            (deftool-symbol (and tool-package
@@ -310,7 +311,9 @@
     (setf (gethash "name" entry) (%read-sexp-form-name-string form))
     (setf (gethash "start_line" entry) start-line)
     (setf (gethash "end_line" entry) end-line)
-    (setf (gethash "form" entry) (prin1-to-string form))
+    (setf (gethash "form" entry)
+          (let ((*print-case* :downcase))
+            (prin1-to-string form)))
     entry))
 
 (deftool "read-sexp"
@@ -588,6 +591,7 @@
            (full-expansion-p (%macroexpand-form-normalize-full full-param)))
       (handler-case
           (let* ((*read-eval* nil)
+                 (*package* (or (find-package :sibyl.tools) *package*))
                  (form (read-from-string form-string))
                  (expanded (if full-expansion-p
                                (macroexpand form)
@@ -628,6 +632,9 @@
           (do-symbols (sym package)
             (when (eq (symbol-package sym) package)
               (push (cons sym (%package-symbols-determine-type sym)) symbols))))
+      (setf symbols (remove-if (lambda (entry)
+                                 (string= (cdr entry) "unknown"))
+                               symbols))
       ;; Sort alphabetically by symbol name
       (sort symbols (lambda (a b)
                       (string< (symbol-name (car a))
@@ -850,7 +857,7 @@
                     (nested (%codebase-map-collect-file-paths
                              module-components
                              (append parent (list module-name)))))
-               (setf paths (nconc paths nested))))))))
+               (setf paths (nconc paths nested))))))))))
 
 (defun %codebase-map-collect-module-specs (components parent)
   (let ((modules nil))
@@ -869,7 +876,7 @@
             ((eq kind :file)
              (let* ((file-name (%codebase-map-normalize-name name))
                     (path (%codebase-map-path-for (append parent (list file-name)))))
-               (push (list :name file-name :paths (list path)) modules))))))))
+               (push (list :name file-name :paths (list path)) modules)))))))))
 
 (defun %codebase-map-parse-read-sexp-result (json)
   (let ((parsed (yason:parse json :object-as :hash-table)))
