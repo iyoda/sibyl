@@ -1018,7 +1018,7 @@ Phase 0 (Foundation)
 
 ---
 
-- [ ] 3-3. TDDオーケストレーション — RED→GREEN→REFACTORサイクル
+- [x] 3-3. TDDオーケストレーション — RED→GREEN→REFACTORサイクル
 
   **What to do**:
   - TDDサイクルをLLMが自律的に回すためのワークフローをsystem-promptに組み込む
@@ -1074,7 +1074,7 @@ Phase 0 (Foundation)
 ### 最初のマイルストーン: 既存ツールの改善。
 ### ═══════════════════════════════════════════
 
-- [ ] 4-1. 自己改善REPLコマンド `/improve`
+- [x] 4-1. 自己改善REPLコマンド `/improve`
 
   **What to do**:
   - REPLに`/improve`コマンドを追加
@@ -1122,7 +1122,7 @@ Phase 0 (Foundation)
 
 ---
 
-- [ ] 4-2. ブートストラップ実証 — Sibylが自分のgrepツールを改善する
+- [x] 4-2. ブートストラップ実証 — Sibylが自分のgrepツールを改善する
 
   **What to do**:
   - **これがPhase 4の最重要マイルストーン**
