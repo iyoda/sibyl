@@ -1,0 +1,94 @@
+;;;; memory.lisp — Conversation memory and context management
+;;;; Manages the sliding context window for the agent.
+
+(in-package #:sibyl.agent)
+
+;;; ============================================================
+;;; Memory — wraps conversation with context window management
+;;; ============================================================
+
+(defclass memory ()
+  ((conversation :initarg :conversation
+                 :accessor memory-conversation
+                 :initform (make-conversation))
+   (max-messages :initarg :max-messages
+                 :accessor memory-max-messages
+                 :initform 100
+                 :type integer)
+   (summary      :initarg :summary
+                 :accessor memory-summary
+                 :initform nil
+                 :type (or string null)
+                 :documentation "Compressed summary of older messages."))
+  (:documentation "Manages conversation history with context window limits."))
+
+(defun make-memory (&key (max-messages 100))
+  "Create a new memory instance."
+  (make-instance 'memory :max-messages max-messages))
+
+(defgeneric memory-push (memory message)
+  (:documentation "Add a message to memory, respecting context limits."))
+
+(defmethod memory-push ((mem memory) message)
+  "Add MESSAGE to memory. If over limit, compact older messages."
+  (conversation-push (memory-conversation mem) message)
+  (when (> (conversation-length (memory-conversation mem))
+           (memory-max-messages mem))
+    (memory-compact mem))
+  message)
+
+(defgeneric memory-context-window (memory &key system-prompt)
+  (:documentation "Return the current context window as a list of messages."))
+
+(defmethod memory-context-window ((mem memory) &key system-prompt)
+  "Build the full context window for LLM submission.
+   Prepends system prompt and any summary of compacted history."
+  (let ((messages nil))
+    ;; System prompt first
+    (when system-prompt
+      (let ((full-system
+              (if (memory-summary mem)
+                  (format nil "~a~%~%## Previous conversation summary:~%~a"
+                          system-prompt (memory-summary mem))
+                  system-prompt)))
+        (push (system-message full-system) messages)))
+    ;; Current conversation messages
+    (setf messages (append messages
+                           (conversation-to-list
+                            (memory-conversation mem))))
+    messages))
+
+(defgeneric memory-compact (memory)
+  (:documentation "Compact older messages into a summary."))
+
+(defmethod memory-compact ((mem memory))
+  "Simple compaction: keep last N/2 messages, summarize the rest.
+   In a full implementation, this would use the LLM to summarize."
+  (let* ((messages (conversation-to-list (memory-conversation mem)))
+         (keep-count (ceiling (memory-max-messages mem) 2))
+         (to-summarize (subseq messages 0 (- (length messages) keep-count)))
+         (to-keep (subseq messages (- (length messages) keep-count))))
+    ;; Simple textual summary (placeholder for LLM-based summarization)
+    (let ((summary-text
+            (format nil "~@[Previous summary: ~a~%~]~
+                         Compacted ~a messages. Key points:~%~{- [~a] ~a~%~}"
+                    (memory-summary mem)
+                    (length to-summarize)
+                    (loop for msg in to-summarize
+                          collect (message-role msg)
+                          collect (truncate-string
+                                   (or (message-content msg) "(tool call)")
+                                   80)))))
+      (setf (memory-summary mem) summary-text)
+      ;; Replace conversation with only recent messages
+      (conversation-clear (memory-conversation mem))
+      (dolist (msg to-keep)
+        (conversation-push (memory-conversation mem) msg)))))
+
+(defgeneric memory-reset (memory)
+  (:documentation "Clear all memory."))
+
+(defmethod memory-reset ((mem memory))
+  "Clear conversation and summary."
+  (conversation-clear (memory-conversation mem))
+  (setf (memory-summary mem) nil))
