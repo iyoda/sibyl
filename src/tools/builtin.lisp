@@ -79,13 +79,15 @@
                   (:name "path" :type "string" :required t
                    :description "Directory or file path to search in")
                   (:name "include" :type "string" :required nil
-                   :description "File glob pattern to include (e.g. \"*.lisp\")")))
+                   :description "File glob pattern to include (e.g. \"*.lisp\")")
+                  (:name "exclude-dir" :type "string" :required nil
+                   :description "Directory pattern to exclude (e.g. \".git\")")))
   (let* ((pattern (getf args :pattern))
          (path (getf args :path))
          (include (getf args :include))
-         (cmd (format nil "grep -rn ~a~@[ --include=~a~] ~s ~s"
-                      (if include "" "") include
-                      pattern path)))
+         (exclude-dir (getf args :exclude-dir))
+         (cmd (format nil "grep -rn~@[ --include=~a~]~@[ --exclude-dir=~a~] ~s ~s"
+                      include exclude-dir pattern path)))
     (uiop:run-program cmd
                       :output :string
                       :error-output nil

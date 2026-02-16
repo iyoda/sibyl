@@ -58,3 +58,36 @@
       (is (= 1 (length schemas)))
       (is (string= "test-schema" (getf schema :name)))
       (is (string= "Test tool for schema" (getf schema :description))))))
+
+(test grep-exclude-dir-test
+  "Auto-generated test"
+  (let ((test-dir "/tmp/grep-test-dir"))
+  ;; Setup test directory structure
+  (ensure-directories-exist (format nil "~a/.git/" test-dir))
+  (ensure-directories-exist (format nil "~a/src/" test-dir))
+  
+  ;; Create test files
+  (with-open-file (s (format nil "~a/.git/config" test-dir) 
+                     :direction :output :if-exists :supersede :if-does-not-exist :create)
+    (write-string "test-pattern-in-git" s))
+  (with-open-file (s (format nil "~a/src/main.lisp" test-dir)
+                     :direction :output :if-exists :supersede :if-does-not-exist :create)
+    (write-string "test-pattern-in-src" s))
+  
+  ;; Test without exclude-dir - should find both
+  (let ((result-without-exclude (sibyl.tools:execute-tool "grep" 
+                                                          (list :pattern "test-pattern" 
+                                                                :path test-dir))))
+    (is (search ".git/config" result-without-exclude))
+    (is (search "src/main.lisp" result-without-exclude)))
+  
+  ;; Test with exclude-dir - should exclude .git
+  (let ((result-with-exclude (sibyl.tools:execute-tool "grep" 
+                                                       (list :pattern "test-pattern" 
+                                                             :path test-dir
+                                                             :exclude-dir ".git"))))
+    (is (not (search ".git/config" result-with-exclude)))
+    (is (search "src/main.lisp" result-with-exclude)))
+  
+  ;; Cleanup
+  (uiop:delete-directory-tree test-dir :validate t)))
