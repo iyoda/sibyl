@@ -14,8 +14,60 @@
     ("/tools"   . :list-tools)
     ("/help"    . :help)
     ("/history" . :history)
-    ("/improve" . :improve))
+    ("/improve" . :improve)
+    ("/review"  . :review))
   "Mapping of REPL commands to actions.")
+
+;;; ============================================================
+;;; Suggestion state management
+;;; ============================================================
+
+(defvar *pending-suggestions* nil
+  "List of pending improvement suggestions from suggest-improvements.
+   Each suggestion is a plist with:
+   - :id (integer)
+   - :description (string) — what to improve
+   - :rationale (string) — why it should be improved
+   - :priority (string) — 'high', 'medium', or 'low'
+   - :status (string) — 'pending', 'approved', 'rejected', 'modified'")
+
+(defvar *next-suggestion-id* 1
+  "Counter for generating unique suggestion IDs.")
+
+(defun store-suggestion (description rationale priority)
+  "Store a new improvement suggestion. Returns the created suggestion."
+  (let ((suggestion (list :id *next-suggestion-id*
+                          :description description
+                          :rationale rationale
+                          :priority priority
+                          :status "pending")))
+    (push suggestion *pending-suggestions*)
+    (incf *next-suggestion-id*)
+    suggestion))
+
+(defun store-suggestions (suggestions-list)
+  "Store multiple suggestions from a list of plists.
+   Each plist should have :description, :rationale, and :priority."
+  (dolist (suggestion suggestions-list)
+    (store-suggestion (getf suggestion :description)
+                      (getf suggestion :rationale)
+                      (getf suggestion :priority))))
+
+(defun get-suggestion-by-id (id)
+  "Retrieve a suggestion by its ID. Returns NIL if not found."
+  (find id *pending-suggestions* :key (lambda (s) (getf s :id))))
+
+(defun update-suggestion-status (id new-status)
+  "Update the status of a suggestion."
+  (let ((suggestion (get-suggestion-by-id id)))
+    (when suggestion
+      (setf (getf suggestion :status) new-status)
+      t)))
+
+(defun clear-suggestions ()
+  "Clear all pending suggestions."
+  (setf *pending-suggestions* nil)
+  (setf *next-suggestion-id* 1))
 
 (defun repl-command-p (input)
   "Check if INPUT is a REPL command. Returns the command keyword or NIL.
@@ -54,6 +106,7 @@
      (format t "  /reset    — Reset conversation~%")
      (format t "  /history  — Show conversation history~%")
      (format t "  /improve  — Request self-improvement (TDD cycle)~%")
+     (format t "  /review   — Review improvement suggestions~%")
      (format t "  /quit     — Exit REPL~%")
      (format t "~%Type anything else to chat with the agent.~%")
      nil)
@@ -71,6 +124,9 @@
      nil)
     (:improve
      (handle-improve-command agent original-input)
+     nil)
+    (:review
+     (handle-review-command agent original-input)
      nil)))
 
 (defun parse-improve-args (input)
@@ -89,6 +145,136 @@
                                      (subseq args-str 0 auto-commit-pos))
                         args-str)))
     (values task-desc (not (null auto-commit-pos)))))
+
+(defun parse-review-args (input)
+  "Parse /review command arguments. Returns (values action id modification).
+   Examples:
+   - '/review' => (NIL NIL NIL) - list all
+   - '/review approve 1' => ('approve' 1 NIL)
+   - '/review reject 2' => ('reject' 2 NIL)
+   - '/review modify 3 \"add unit tests\"' => ('modify' 3 'add unit tests')"
+  (let* ((trimmed (string-trim '(#\Space #\Tab) input))
+         ;; Remove '/review' prefix
+         (args-str (if (search "/review" trimmed :test #'string-equal)
+                       (string-trim '(#\Space #\Tab)
+                                    (subseq trimmed (length "/review")))
+                       trimmed)))
+    (if (string= "" args-str)
+        ;; No arguments - list all
+        (values nil nil nil)
+        ;; Parse arguments
+        (let* ((parts (cl-ppcre:split "\\s+" args-str :limit 3))
+               (action (first parts))
+               (id-str (second parts))
+               (modification (third parts)))
+          (values action
+                  (when id-str
+                    (handler-case
+                        (parse-integer id-str)
+                      (error () nil)))
+                  modification)))))
+
+(defun list-pending-suggestions ()
+  "Display all pending suggestions."
+  (if (null *pending-suggestions*)
+      (format t "~%No pending suggestions.~%")
+      (progn
+        (format t "~%Pending improvement suggestions:~%~%")
+        (dolist (suggestion (reverse *pending-suggestions*))
+          (format t "  [~a] ~a (Priority: ~a)~%"
+                  (getf suggestion :id)
+                  (getf suggestion :description)
+                  (getf suggestion :priority))
+          (format t "      Rationale: ~a~%"
+                  (getf suggestion :rationale))
+          (format t "      Status: ~a~%~%"
+                  (getf suggestion :status))))))
+
+(defun approve-and-implement (agent id)
+  "Approve suggestion and delegate to /improve command."
+  (let ((suggestion (get-suggestion-by-id id)))
+    (if (null suggestion)
+        (format t "~%Error: Suggestion #~a not found.~%" id)
+        (progn
+          (update-suggestion-status id "approved")
+          (format t "~%Approving and implementing suggestion #~a:~%" id)
+          (format t "  ~a~%~%" (getf suggestion :description))
+          ;; Call /improve with the suggestion description
+          (handle-improve-command agent 
+                                  (format nil "/improve ~a" 
+                                          (getf suggestion :description)))))))
+
+(defun reject-suggestion (id)
+  "Reject a suggestion."
+  (let ((suggestion (get-suggestion-by-id id)))
+    (if (null suggestion)
+        (format t "~%Error: Suggestion #~a not found.~%" id)
+        (progn
+          (update-suggestion-status id "rejected")
+          (format t "~%Rejected suggestion #~a.~%" id)))))
+
+(defun modify-and-approve (agent id modification)
+  "Modify a suggestion and approve it."
+  (let ((suggestion (get-suggestion-by-id id)))
+    (if (null suggestion)
+        (format t "~%Error: Suggestion #~a not found.~%" id)
+        (progn
+          (update-suggestion-status id "modified")
+          (format t "~%Modifying and implementing suggestion #~a:~%" id)
+          (format t "  Original: ~a~%" (getf suggestion :description))
+          (format t "  Modified: ~a~%~%" modification)
+          ;; Call /improve with the modified description
+          (handle-improve-command agent
+                                  (format nil "/improve ~a" modification))))))
+
+(defun handle-review-command (agent original-input)
+  "Handle /review command for managing improvement suggestions.
+   
+   Usage:
+   - /review                    — List all pending suggestions
+   - /review approve <id>       — Approve and implement suggestion
+   - /review reject <id>        — Reject suggestion
+   - /review modify <id> <desc> — Modify and implement suggestion"
+  (multiple-value-bind (action id modification)
+      (parse-review-args original-input)
+    
+    (cond
+      ;; No action: list all suggestions
+      ((null action)
+       (list-pending-suggestions))
+      
+      ;; Approve
+      ((string-equal action "approve")
+       (if (null id)
+           (format t "~%Error: No suggestion ID provided.~%~
+                       Usage: /review approve <id>~%")
+           (approve-and-implement agent id)))
+      
+      ;; Reject
+      ((string-equal action "reject")
+       (if (null id)
+           (format t "~%Error: No suggestion ID provided.~%~
+                       Usage: /review reject <id>~%")
+           (reject-suggestion id)))
+      
+      ;; Modify
+      ((string-equal action "modify")
+       (cond
+         ((null id)
+          (format t "~%Error: No suggestion ID provided.~%~
+                      Usage: /review modify <id> <description>~%"))
+         ((null modification)
+          (format t "~%Error: No modification description provided.~%~
+                      Usage: /review modify <id> <description>~%"))
+         (t
+          (modify-and-approve agent id modification))))
+      
+      ;; Unknown action
+      (t
+       (format t "~%Error: Unknown action '~a'.~%~
+                   Valid actions: approve, reject, modify~%~
+                   Usage: /review [approve|reject|modify] <id> [description]~%"
+               action)))))
 
 (defun handle-improve-command (agent original-input)
   "Handle /improve command for self-improvement tasks.
