@@ -26,7 +26,8 @@
 ;;; ============================================================
 
 (defparameter *env-mappings*
-  '(("ANTHROPIC_API_KEY"  . "llm.anthropic.api-key")
+  '(("CLAUDE_CODE_OAUTH_TOKEN" . "llm.anthropic.api-key")
+    ("ANTHROPIC_API_KEY"  . "llm.anthropic.api-key")
     ("OPENAI_API_KEY"     . "llm.openai.api-key")
     ("SIBYL_MODEL"        . "llm.model")
     ("SIBYL_MAX_TOKENS"   . "llm.max-tokens")

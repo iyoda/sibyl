@@ -47,4 +47,5 @@
      (:file "tools-test")
      (:file "message-test"))))
   :perform (test-op (o c)
-             (uiop:symbol-call :fiveam :run! :sibyl-tests)))
+             (uiop:symbol-call :fiveam :run!
+               (uiop:find-symbol* '#:sibyl-tests '#:sibyl.tests))))

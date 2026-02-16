@@ -95,27 +95,29 @@
                 :name name
                 :system-prompt system-prompt)))
     (print-banner)
-    (loop
-      (let ((input (read-user-input)))
-        ;; EOF
-        (unless input
-          (format t "~%Goodbye.~%")
-          (return))
-        ;; Empty input
-        (when (string= (string-trim '(#\Space #\Tab) input) "")
-          (go :continue))
-        ;; REPL command
-        (let ((cmd (repl-command-p input)))
-          (when cmd
-            (when (eq (handle-repl-command cmd agent) :quit)
-              (return))
-            (go :continue)))
-        ;; Agent interaction
-        (handler-case
-            (let ((response (sibyl.agent:agent-run agent input)))
-              (format t "~%~a~%~%" response))
-          (sibyl.conditions:llm-error (e)
-            (format t "~%[LLM Error: ~a]~%~%" e))
-          (error (e)
-            (format t "~%[Error: ~a]~%~%" e))))
-      :continue)))
+    (block repl-loop
+      (tagbody
+       next-iteration
+         (let ((input (read-user-input)))
+           ;; EOF
+           (unless input
+             (format t "~%Goodbye.~%")
+             (return-from repl-loop))
+           ;; Empty input
+           (when (string= (string-trim '(#\Space #\Tab) input) "")
+             (go next-iteration))
+           ;; REPL command
+           (let ((cmd (repl-command-p input)))
+             (when cmd
+               (when (eq (handle-repl-command cmd agent) :quit)
+                 (return-from repl-loop))
+               (go next-iteration)))
+           ;; Agent interaction
+           (handler-case
+               (let ((response (sibyl.agent:agent-run agent input)))
+                 (format t "~%~a~%~%" response))
+             (sibyl.conditions:llm-error (e)
+               (format t "~%[LLM Error: ~a]~%~%" e))
+             (error (e)
+               (format t "~%[Error: ~a]~%~%" e))))
+         (go next-iteration)))))

@@ -71,6 +71,7 @@
    #:conversation-push
    #:conversation-clear
    #:conversation-to-list
+   #:conversation-length
    ;; Client protocol
    #:llm-client
    #:complete

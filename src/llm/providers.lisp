@@ -7,35 +7,64 @@
 ;;; Anthropic Claude
 ;;; ============================================================
 
+(defparameter *oauth-token-prefix* "sk-ant-oat01-"
+  "Prefix identifying OAuth access tokens from Claude Code.")
+
+(defparameter *oauth-beta-flag* "oauth-2025-04-20"
+  "Anthropic beta flag required for OAuth authentication.")
+
 (defclass anthropic-client (llm-client)
   ((api-version :initarg :api-version
                 :accessor anthropic-api-version
                 :initform "2023-06-01"
-                :type string))
+                :type string)
+   (oauth-p     :initarg :oauth-p
+                :accessor anthropic-oauth-p
+                :initform nil
+                :type boolean
+                :documentation "T when using OAuth Bearer authentication."))
   (:default-initargs
    :base-url "https://api.anthropic.com/v1"
    :model "claude-sonnet-4-20250514")
   (:documentation "Client for Anthropic's Claude API."))
 
+(defun oauth-token-p (api-key)
+  "Return T if API-KEY is an OAuth access token."
+  (and (stringp api-key)
+       (>= (length api-key) (length *oauth-token-prefix*))
+       (string= *oauth-token-prefix*
+                (subseq api-key 0 (length *oauth-token-prefix*)))))
+
 (defun make-anthropic-client (&key api-key
                                 (model "claude-sonnet-4-20250514")
                                 (max-tokens 4096)
                                 (temperature 0.0))
-  "Create an Anthropic API client."
-  (make-instance 'anthropic-client
-                 :api-key (or api-key
-                              (config-value "llm.anthropic.api-key")
-                              (error 'config-missing-key-error
-                                     :key "llm.anthropic.api-key"))
-                 :model model
-                 :max-tokens max-tokens
-                 :temperature temperature))
+  "Create an Anthropic API client.
+   Automatically detects OAuth tokens (sk-ant-oat01-...) and configures
+   Bearer authentication with the required beta flags."
+  (let ((key (or api-key
+                 (config-value "llm.anthropic.api-key")
+                 (error 'config-missing-key-error
+                        :key "llm.anthropic.api-key"))))
+    (make-instance 'anthropic-client
+                   :api-key key
+                   :oauth-p (oauth-token-p key)
+                   :model model
+                   :max-tokens max-tokens
+                   :temperature temperature)))
 
 (defun anthropic-headers (client)
-  "Build Anthropic-specific headers."
-  (list (cons "x-api-key" (client-api-key client))
-        (cons "anthropic-version" (anthropic-api-version client))
-        (cons "User-Agent" "sibyl/0.1.0")))
+  "Build Anthropic-specific headers.
+   Uses Bearer auth for OAuth tokens, x-api-key for standard API keys."
+  (let ((headers (list (cons "anthropic-version" (anthropic-api-version client))
+                       (cons "User-Agent" "sibyl/0.1.0"))))
+    (if (anthropic-oauth-p client)
+        (cons (cons "Authorization"
+                    (format nil "Bearer ~a" (client-api-key client)))
+              (cons (cons "anthropic-beta" *oauth-beta-flag*)
+                    headers))
+        (cons (cons "x-api-key" (client-api-key client))
+              headers))))
 
 (defun messages-to-anthropic-format (messages)
   "Convert message structs to Anthropic API format.
@@ -88,11 +117,14 @@
 
 (defun parse-anthropic-response (response)
   "Parse Anthropic API response into a message struct."
-  (let* ((content-blocks (gethash "content" response))
+  (let* ((raw-blocks (gethash "content" response))
+         (content-blocks (if (listp raw-blocks)
+                             raw-blocks
+                             (coerce raw-blocks 'list)))
          (text-parts nil)
          (tool-calls nil))
     (when content-blocks
-      (loop for block across content-blocks  ; yason returns arrays as vectors
+      (loop for block in content-blocks
             for block-type = (gethash "type" block)
             do (cond
                  ((string= block-type "text")
@@ -109,6 +141,13 @@
        (string-join "" (nreverse text-parts)))
      :tool-calls (nreverse tool-calls))))
 
+(defun anthropic-messages-url (client)
+  "Build the messages endpoint URL. Appends ?beta=true for OAuth."
+  (let ((base (format nil "~a/messages" (client-base-url client))))
+    (if (anthropic-oauth-p client)
+        (concatenate 'string base "?beta=true")
+        base)))
+
 (defmethod complete ((client anthropic-client) messages &key)
   "Send messages to Anthropic Claude API."
   (multiple-value-bind (system api-messages)
@@ -120,7 +159,7 @@
       (when system
         (push (cons "system" system) body))
       (let ((response (http-post-json
-                       (format nil "~a/messages" (client-base-url client))
+                       (anthropic-messages-url client)
                        (anthropic-headers client)
                        (alist-to-hash body))))
         (parse-anthropic-response response)))))
@@ -137,7 +176,7 @@
       (when system
         (push (cons "system" system) body))
       (let ((response (http-post-json
-                       (format nil "~a/messages" (client-base-url client))
+                       (anthropic-messages-url client)
                        (anthropic-headers client)
                        (alist-to-hash body))))
         (parse-anthropic-response response)))))
@@ -208,22 +247,24 @@
 
 (defun parse-openai-response (response)
   "Parse OpenAI API response into a message struct."
-  (let* ((choices (gethash "choices" response))
-         (first-choice (aref choices 0))
+  (let* ((raw-choices (gethash "choices" response))
+         (choices (if (listp raw-choices) raw-choices (coerce raw-choices 'list)))
+         (first-choice (first choices))
          (msg (gethash "message" first-choice))
          (content (gethash "content" msg))
          (raw-tool-calls (gethash "tool_calls" msg))
          (tool-calls nil))
     (when raw-tool-calls
-      (loop for tc across raw-tool-calls
-            for func = (gethash "function" tc)
-            do (push (make-tool-call
-                      :id (gethash "id" tc)
-                      :name (gethash "name" func)
-                      :arguments (hash-to-alist
-                                  (yason:parse (gethash "arguments" func)
-                                               :object-as :hash-table)))
-                     tool-calls)))
+      (let ((tcs (if (listp raw-tool-calls) raw-tool-calls (coerce raw-tool-calls 'list))))
+        (loop for tc in tcs
+              for func = (gethash "function" tc)
+              do (push (make-tool-call
+                        :id (gethash "id" tc)
+                        :name (gethash "name" func)
+                        :arguments (hash-to-alist
+                                    (yason:parse (gethash "arguments" func)
+                                                 :object-as :hash-table)))
+                       tool-calls))))
     (assistant-message content :tool-calls (nreverse tool-calls))))
 
 (defmethod complete ((client openai-client) messages &key)

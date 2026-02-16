@@ -62,16 +62,18 @@
    Within HANDLER-BODY, the variable ARGS is bound to a plist of
    the tool's arguments (keyword keys, e.g. :path, :content).
    TOOL-NAME is bound to the tool's name string."
-  (let ((tool-var (gensym "TOOL")))
+  (let ((tool-var (gensym "TOOL"))
+        (args-var (intern "ARGS" *package*))
+        (tname-var (intern "TOOL-NAME" *package*)))
     `(let ((,tool-var
              (make-tool
               :name ,name
               :description ,description
               :parameters ',parameters
-              :handler (lambda (args)
-                         (declare (ignorable args))
-                         (let ((tool-name ,name))
-                           (declare (ignorable tool-name))
+              :handler (lambda (,args-var)
+                         (declare (ignorable ,args-var))
+                         (let ((,tname-var ,name))
+                           (declare (ignorable ,tname-var))
                            ,@handler-body)))))
        (register-tool ,tool-var)
        ,tool-var)))

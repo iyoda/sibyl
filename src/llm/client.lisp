@@ -47,10 +47,34 @@
 ;;; HTTP helpers (shared across providers)
 ;;; ============================================================
 
+(defun to-json-value (value)
+  "Recursively convert nested alists to hash tables for yason encoding.
+   - Alist (list of (string . val) conses) → hash-table (JSON object)
+   - Other lists → list (JSON array)
+   - Atoms → passed through"
+  (cond
+    ((hash-table-p value)
+     (let ((ht (make-hash-table :test 'equal)))
+       (maphash (lambda (k v)
+                  (setf (gethash k ht) (to-json-value v)))
+                value)
+       ht))
+    ;; Alist: non-empty list where every element is a cons with a string key
+    ((and (consp value)
+          (every (lambda (x) (and (consp x) (stringp (car x)))) value))
+     (let ((ht (make-hash-table :test 'equal)))
+       (dolist (pair value ht)
+         (setf (gethash (car pair) ht) (to-json-value (cdr pair))))))
+    ;; Regular list → JSON array
+    ((listp value)
+     (mapcar #'to-json-value value))
+    ;; Atoms
+    (t value)))
+
 (defun http-post-json (url headers body)
   "POST JSON BODY to URL with HEADERS. Returns parsed JSON as hash-table."
   (let ((json-body (with-output-to-string (s)
-                     (yason:encode body s))))
+                     (yason:encode (to-json-value body) s))))
     (multiple-value-bind (response-body status-code)
         (handler-case
             (dex:post url
