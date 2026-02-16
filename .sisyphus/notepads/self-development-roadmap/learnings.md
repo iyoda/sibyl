@@ -563,3 +563,22 @@ The updated prompt now includes:
 ✅ **COMPLETE** - Phase 3 Task 3-1 complete. Sibyl can now run its own tests programmatically!
 
 **Progress**: Phase 3 Task 3-1 complete (run-tests implemented)
+
+## [2026-02-16T23:59] TDD Workflow Prompt Integration
+
+### Task Completed
+Embedded TDD self-modification workflow into Sibyl's system prompt and added prompt-level tests.
+
+### Changes Made
+1. **src/agent/core.lisp**:
+   - Added TDD workflow section with RED/GREEN/REFACTOR/PERSIST steps
+   - Emphasized "write test first" principle
+   - Listed TDD tools: write-test, run-tests, safe-redefine, sync-to-file
+   - Added reminder to use `sibyl.system:unprotect-file` after syncing
+
+2. **tests/agent-test.lisp**:
+   - Added tests to assert TDD keywords, tool mentions, and test-first language
+
+### Notes
+- Prompt explicitly documents the full TDD toolchain for self-modification
+- Workflow steps are structured for autonomous RED→GREEN→REFACTOR execution
