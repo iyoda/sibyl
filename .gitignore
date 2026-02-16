@@ -1,0 +1,25 @@
+# SBCL compiled files
+*.fasl
+*.fas
+*.lib
+*.o
+
+# ASDF cache
+~/.cache/common-lisp/
+
+# Editor backups
+*~
+\#*\#
+.\#*
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# Config with secrets
+config.sexp
+.env
