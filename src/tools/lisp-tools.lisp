@@ -677,6 +677,122 @@
               (format nil "Rolled back: ~a restored." name-string))))))))
 
 ;;; ============================================================
+;;; Sync in-memory definitions to file
+;;; ============================================================
+
+(defun %sync-to-file-parse-read-sexp-result (json)
+  (let ((parsed (yason:parse json :object-as :hash-table)))
+    (cond
+      ((null parsed) nil)
+      ((vectorp parsed) (coerce parsed 'list))
+      ((hash-table-p parsed) (list parsed))
+      (t parsed))))
+
+(defun %sync-to-file-entry-line (entry key)
+  (let ((value (gethash key entry)))
+    (when (integerp value)
+      value)))
+
+(defun %sync-to-file-split-lines (content)
+  (let ((lines nil)
+        (start 0)
+        (len (length content)))
+    (loop for idx from 0 below len
+          for ch = (char content idx)
+          do (when (char= ch #\Newline)
+               (push (subseq content start idx) lines)
+               (setf start (1+ idx))))
+    (push (subseq content start len) lines)
+    (nreverse lines)))
+
+(defun %sync-to-file-join-lines (lines)
+  (string-join (string #\Newline) lines))
+
+(defun %sync-to-file-trim-trailing-empty (lines)
+  (if (and lines (string= (car (last lines)) ""))
+      (butlast lines)
+      lines))
+
+(defun %sync-to-file-write-content (path content)
+  (with-open-file (stream path :direction :output
+                          :if-exists :supersede
+                          :if-does-not-exist :create)
+    (write-string content stream)))
+
+(defun %sync-to-file-validate-source (new-source)
+  (let ((*read-eval* nil))
+    (handler-case
+        (progn
+          (read-from-string new-source)
+          t)
+      (error (e)
+        (error "Invalid new-source: ~a" e)))))
+
+(deftool "sync-to-file"
+    (:description "Sync an in-memory definition back to its source file."
+     :parameters ((:name "name" :type "string" :required t
+                   :description "Definition name to replace")
+                  (:name "file" :type "string" :required t
+                   :description "Path to the source file")
+                  (:name "new-source" :type "string" :required t
+                   :description "New definition source as a string")))
+  (block sync-to-file
+    (let* ((name-input (getf args :name))
+           (file (getf args :file))
+           (new-source (getf args :new-source)))
+      (unless (and name-input (stringp name-input)
+                   (string/= name-input ""))
+        (error "Definition name not specified: ~a" name-input))
+      (unless (and file (stringp file) (string/= file ""))
+        (error "File path not specified"))
+      (unless (uiop:file-exists-p file)
+        (error "File not found: ~a" file))
+      (unless (and new-source (stringp new-source)
+                   (string/= new-source ""))
+        (error "New source not specified"))
+      (%sync-to-file-validate-source new-source)
+      (multiple-value-bind (package-name symbol-name)
+          (%split-symbol-string name-input)
+        (declare (ignore package-name))
+        (let* ((name (or symbol-name name-input))
+               (result (execute-tool "read-sexp"
+                                     (list (cons "path" file)
+                                           (cons "name" name))))
+               (entries (%sync-to-file-parse-read-sexp-result result)))
+          (unless entries
+            (error "Definition ~a not found in ~a" name file))
+          (when (> (length entries) 1)
+            (error "Multiple definitions found for ~a in ~a" name file))
+          (let* ((entry (first entries))
+                 (start-line (%sync-to-file-entry-line entry "start_line"))
+                 (end-line (%sync-to-file-entry-line entry "end_line")))
+            (unless (and start-line end-line)
+              (error "Definition ~a not found in ~a" name file))
+            (let ((original-content (uiop:read-file-string file)))
+              (restart-case
+                  (let* ((lines (%sync-to-file-split-lines original-content))
+                         (line-count (length lines))
+                         (start-index (1- start-line))
+                         (end-index end-line))
+                    (when (or (< start-line 1)
+                              (< end-line start-line)
+                              (> end-line line-count))
+                      (error "Invalid definition range for ~a in ~a: ~a-~a"
+                             name file start-line end-line))
+                    (let* ((before (subseq lines 0 start-index))
+                           (after (subseq lines end-index))
+                           (new-lines (%sync-to-file-trim-trailing-empty
+                                       (%sync-to-file-split-lines new-source)))
+                           (updated (append before new-lines after))
+                           (new-content (%sync-to-file-join-lines updated)))
+                      (%sync-to-file-write-content file new-content)
+                      (format nil "Success: ~a synced to ~a" name file)))
+                (restore-file ()
+                  :report "Restore original file content"
+                  (%sync-to-file-write-content file original-content)
+                  (format nil "Rolled back: ~a restored." file))))))))))
+
+;;; ============================================================
 ;;; Macro expansion
 ;;; ============================================================
 

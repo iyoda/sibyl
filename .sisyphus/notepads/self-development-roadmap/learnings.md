@@ -319,3 +319,20 @@ The updated prompt now includes:
 - `(fiveam:run 'safe-redefine-tests)` → PASS
 - `(asdf:test-system :sibyl)` → 176/176 checks passing
 - QA scenarios validated: success, rollback, and non-Sibyl rejection
+
+## [2026-02-16T23:55] sync-to-file Tool Implementation
+
+### Implemented Tool
+**sync-to-file**: Persist in-memory definitions back to source files with surgical precision.
+- Uses `read-sexp` to locate definition line ranges; edits raw text to preserve comments/formatting
+- Replaces only the target line span, leaving the rest of the file unchanged
+- Validates `new-source` with `read-from-string` under `*read-eval*` NIL
+- Provides `restore-file` restart to rollback original file content
+- Errors when definition is missing or ambiguous
+
+### Tests Added
+- `sync-to-file-tests`: replace middle definition in a temp file, preserve comments, and error on missing definition
+
+### Key Findings
+- Line-based editing preserves comments outside the target definition
+- Keeping trailing newline via line-split/join avoids file formatting drift

@@ -484,3 +484,105 @@
      "safe-redefine"
      '(("name" . "cl:car")
        ("new-definition" . "(defun car (x) nil)")))))
+
+(def-suite sync-to-file-tests
+  :description "Tests for sync-to-file tool."
+  :in sibyl-tests)
+
+(in-suite sync-to-file-tests)
+
+(defun %sync-to-file-join-lines (lines)
+  (with-output-to-string (stream)
+    (loop for line in lines
+          for idx from 0
+          do (write-string line stream)
+             (when (< idx (1- (length lines)))
+               (write-char #\Newline stream)))))
+
+(defun %sync-to-file-temp-path ()
+  (let* ((dir (uiop:temporary-directory))
+         (name (format nil "sibyl-sync-to-file-~a-~a.lisp"
+                       (get-universal-time)
+                       (random 1000000))))
+    (namestring (merge-pathnames name dir))))
+
+(test sync-to-file-replaces-definition
+  "sync-to-file replaces only the target definition and preserves comments."
+  (let* ((path (%sync-to-file-temp-path))
+         (original (%sync-to-file-join-lines
+                    '(";; header comment"
+                      ""
+                      "(defun first ()"
+                      "  ;; first comment"
+                      "  1)"
+                      ""
+                      ";; middle comment before"
+                      "(defun middle ()"
+                      "  ;; inside middle"
+                      "  2)"
+                      ""
+                      ";; trailing comment"
+                      "(defun last ()"
+                      "  3)"
+                      "")))
+         (new-source (%sync-to-file-join-lines
+                      '("(defun middle ()"
+                        "  ;; inside middle updated"
+                        "  42)"
+                        "")))
+         (expected (%sync-to-file-join-lines
+                    '(";; header comment"
+                      ""
+                      "(defun first ()"
+                      "  ;; first comment"
+                      "  1)"
+                      ""
+                      ";; middle comment before"
+                      "(defun middle ()"
+                      "  ;; inside middle updated"
+                      "  42)"
+                      ""
+                      ";; trailing comment"
+                      "(defun last ()"
+                      "  3)"
+                      ""))))
+    (unwind-protect
+         (progn
+           (with-open-file (stream path :direction :output
+                                   :if-exists :supersede
+                                   :if-does-not-exist :create)
+             (write-string original stream))
+           (sibyl.tools:execute-tool
+            "sync-to-file"
+            (list (cons "name" "middle")
+                  (cons "file" path)
+                  (cons "new-source" new-source)))
+           (let ((updated (uiop:read-file-string path)))
+             (is (string= expected updated))
+             (is (search "header comment" updated))
+             (is (search "trailing comment" updated))
+             (is (not (search "  2)" updated)))
+             (is (search "  42)" updated))))
+      (when (probe-file path)
+        (delete-file path)))))
+
+(test sync-to-file-missing-definition
+  "sync-to-file errors when the target definition is missing."
+  (let* ((path (%sync-to-file-temp-path))
+         (content (%sync-to-file-join-lines
+                   '("(defun alpha () 1)"
+                     ""))))
+    (unwind-protect
+         (progn
+           (with-open-file (stream path :direction :output
+                                   :if-exists :supersede
+                                   :if-does-not-exist :create)
+             (write-string content stream))
+           (signals sibyl.conditions:tool-execution-error
+             (sibyl.tools:execute-tool
+              "sync-to-file"
+              (list (cons "name" "missing")
+                    (cons "file" path)
+                    (cons "new-source" "(defun missing () 9)")))))
+      (when (probe-file path)
+        (delete-file path)))))
