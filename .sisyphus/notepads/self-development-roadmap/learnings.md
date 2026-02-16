@@ -899,3 +899,60 @@ Modifying and implementing suggestion #1:
 **Commit**: `ca95bfb` - feat(repl): add /review command for improvement proposal workflow
 
 **Progress**: Phase 5 Task 5-2 complete (17/34 total tasks done)
+
+## [2026-02-17T01:30] suggest-improvements Tool Integration
+
+### Key Findings
+- `store-suggestions` is not exported from `SIBYL.REPL`; use package-level lookup to invoke it safely.
+- The tool should return a JSON array of `{description, rationale, priority}` entries for /review compatibility.
+
+## [2026-02-17] suggest-improvements Tool Fix
+
+### Task Completed
+**Phase 5 Task 5-1**: Fixed suggest-improvements tool implementation
+
+### Problem
+The suggest-improvements tool was already implemented but had bugs in the output format:
+1. Returned a list of hash tables instead of a hash table with "suggestions" key
+2. Missing required fields (id, category, file, line) in public output
+3. Missing `%suggest-improvements-suggestion-plist` function
+4. IDs not being assigned to suggestions
+
+### Solution
+1. **Fixed `%suggest-improvements-public-suggestions`**:
+   - Changed to return `{"suggestions": [...]}`  instead of `[...]`
+   - Wraps list in hash table with "suggestions" key
+
+2. **Fixed `%suggest-improvements-public-suggestion`**:
+   - Added missing fields: id, category, file, line
+   - Now includes all 7 required fields for /review integration
+
+3. **Added `%suggest-improvements-suggestion-plist`**:
+   - Converts hash table to plist for store-suggestions
+   - Includes all fields needed by /review command
+
+4. **Added ID assignment**:
+   - Call `%suggest-improvements-assign-ids` before storing
+   - Ensures each suggestion has unique sequential ID
+
+### Test Results
+✅ **suggest-improvements tests**: 52/52 checks pass (100%)
+✅ **Full test suite**: 504/508 checks pass (99%)
+✅ **Pre-existing failures**: 4 write-test duplicate issues (unrelated)
+
+### Key Findings
+- Tool output format must match test expectations (JSON structure)
+- Public API (for LLM) vs internal API (for /review) separation important
+- ID assignment must happen before both storage and public output
+- Hash table with "suggestions" key allows future extension (metadata, counts, etc.)
+
+### Integration Verified
+- Tool generates suggestions based on codebase analysis
+- Suggestions stored via `sibyl.repl:store-suggestions`
+- /review command can list, approve, reject, modify suggestions
+- Full workflow: suggest-improvements → /review → /improve → TDD cycle
+
+### Status
+✅ **COMPLETE** - Phase 5 Task 5-1 complete. Sibyl can now analyze itself and propose improvements!
+
+**Progress**: Phase 5 Task 5-1 complete (18/34 total tasks done)

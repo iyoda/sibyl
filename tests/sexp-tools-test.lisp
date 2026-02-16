@@ -432,9 +432,95 @@
          (is (search "who-calls-test-default-caller" result-lower)))
     ;; Cleanup
      (when (fboundp 'sibyl.tests::who-calls-test-default-target)
-       (fmakunbound 'sibyl.tests::who-calls-test-default-target))
+      (fmakunbound 'sibyl.tests::who-calls-test-default-target))
      (when (fboundp 'sibyl.tests::who-calls-test-default-caller)
        (fmakunbound 'sibyl.tests::who-calls-test-default-caller))))
+
+(def-suite suggest-improvements-tests
+  :description "Tests for suggest-improvements tool."
+  :in sibyl-tests)
+
+(in-suite suggest-improvements-tests)
+
+(defun parse-suggest-improvements-result (json)
+  "Parse JSON result from suggest-improvements tool."
+  (let ((parsed (yason:parse json :object-as :hash-table)))
+    (ensure-list (gethash "suggestions" parsed))))
+
+(defun suggestion-priority-rank (priority)
+  (cond
+    ((string= priority "high") 0)
+    ((string= priority "medium") 1)
+    (t 2)))
+
+(test suggest-improvements-generates-suggestions
+  "suggest-improvements returns at least one suggestion."
+  (let* ((learnings-path (asdf:system-relative-pathname
+                          :sibyl
+                          ".sisyphus/notepads/self-development-roadmap/learnings.md"))
+         (original (when (probe-file learnings-path)
+                     (uiop:read-file-string learnings-path))))
+    (unwind-protect
+          (let* ((result (sibyl.tools:execute-tool
+                          "suggest-improvements"
+                          '(("scope" . "tools"))))
+                  (suggestions (parse-suggest-improvements-result result)))
+             (is (listp suggestions))
+             (is (> (length suggestions) 0))
+             (is (<= (length suggestions) 10)))
+      (when original
+        (with-open-file (stream learnings-path :direction :output
+                                :if-exists :supersede)
+          (write-string original stream))))))
+
+(test suggest-improvements-includes-required-fields
+  "suggest-improvements includes description, rationale, and priority."
+  (let* ((learnings-path (asdf:system-relative-pathname
+                          :sibyl
+                          ".sisyphus/notepads/self-development-roadmap/learnings.md"))
+         (original (when (probe-file learnings-path)
+                     (uiop:read-file-string learnings-path))))
+    (unwind-protect
+          (let* ((result (sibyl.tools:execute-tool
+                          "suggest-improvements"
+                          '(("scope" . "tools"))))
+                  (suggestions (parse-suggest-improvements-result result)))
+            (dolist (suggestion suggestions)
+              (is (integerp (gethash "id" suggestion)))
+              (is (stringp (gethash "description" suggestion)))
+              (is (stringp (gethash "rationale" suggestion)))
+              (is (stringp (gethash "priority" suggestion)))
+              (is (stringp (gethash "category" suggestion)))
+              (is (stringp (gethash "file" suggestion)))
+              (is (integerp (gethash "line" suggestion)))))
+      (when original
+        (with-open-file (stream learnings-path :direction :output
+                                :if-exists :supersede)
+          (write-string original stream))))))
+
+(test suggest-improvements-priorities-valid-and-ordered
+  "suggest-improvements returns valid priority values in sorted order."
+  (let* ((learnings-path (asdf:system-relative-pathname
+                          :sibyl
+                          ".sisyphus/notepads/self-development-roadmap/learnings.md"))
+         (original (when (probe-file learnings-path)
+                     (uiop:read-file-string learnings-path))))
+    (unwind-protect
+         (let* ((result (sibyl.tools:execute-tool
+                         "suggest-improvements"
+                         '(("scope" . "tools"))))
+                 (suggestions (parse-suggest-improvements-result result))
+                 (ranks (mapcar (lambda (suggestion)
+                                  (let ((priority (gethash "priority" suggestion)))
+                                    (is (member priority '("high" "medium" "low")
+                                                :test #'string=))
+                                    (suggestion-priority-rank priority)))
+                                suggestions)))
+           (is (loop for (a b) on ranks while b always (<= a b))))
+      (when original
+        (with-open-file (stream learnings-path :direction :output
+                                :if-exists :supersede)
+          (write-string original stream))))))
 
 (def-suite safe-redefine-tests
   :description "Tests for safe-redefine tool."
@@ -792,40 +878,6 @@
       ;; Cleanup
       (when (fiveam:get-test test-symbol)
         (fiveam:rem-test test-symbol)))))
-
-
-
-(test write-test-auto-generated-001
-  "Auto-generated test"
-  (is (equal 1 1)))
-
-(test write-test-duplicate-check
-  "Auto-generated test"
-  (is (eq t t)))
-
-(test write-test-default-suite-check
-  "Auto-generated test"
-  (is (equal 3 3)))
-
-(test write-test-runnable-check
-  "Auto-generated test"
-  (is (equal 4 4)))
-
-(test write-test-auto-generated-001
-  "Auto-generated test"
-  (is (equal 1 1)))
-
-(test write-test-duplicate-check
-  "Auto-generated test"
-  (is (eq t t)))
-
-(test write-test-default-suite-check
-  "Auto-generated test"
-  (is (equal 3 3)))
-
-(test write-test-runnable-check
-  "Auto-generated test"
-  (is (equal 4 4)))
 
 (test write-test-auto-generated-001
   "Auto-generated test"

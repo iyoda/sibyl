@@ -993,7 +993,7 @@
     (:description "Analyze function call relationships using sb-introspect:who-calls. Reports which functions call a given function."
      :parameters ((:name "function" :type "string" :required t
                    :description "Function name with optional package prefix (e.g., \"sibyl.tools:execute-tool-call\")")
-                  (:name "direction" :type "string" :required nil
+                   (:name "direction" :type "string" :required nil
                    :description "Direction: \"callers\" (default) or \"callees\" (not yet implemented)")))
   (block who-calls
     (let* ((function-string (getf args :function))
@@ -1022,6 +1022,530 @@
         (let ((callers (%who-calls-get-callers symbol)))
           (return-from who-calls
             (%who-calls-format-callers symbol callers)))))))
+
+;;; ============================================================
+;;; Self-analysis: suggest-improvements
+;;; ============================================================
+
+(defun %suggest-improvements-normalize-scope (scope)
+  "Normalize SCOPE string, defaulting to \"all\"."
+  (let ((value (string-downcase (string-trim-whitespace (or scope "")))))
+    (if (string= value "") "all" value)))
+
+(defun %suggest-improvements-ensure-list (value)
+  (cond
+    ((vectorp value) (coerce value 'list))
+    ((null value) nil)
+    (t value)))
+
+(defun %suggest-improvements-parse-json (json)
+  (yason:parse json :object-as :hash-table))
+
+(defun %suggest-improvements-parse-sexp-result (json)
+  (let ((parsed (%suggest-improvements-parse-json json)))
+    (cond
+      ((vectorp parsed) (coerce parsed 'list))
+      ((hash-table-p parsed) (list parsed))
+      (t parsed))))
+
+(defun %suggest-improvements-map-modules (map)
+  (%suggest-improvements-ensure-list (gethash "modules" map)))
+
+(defun %suggest-improvements-module-name (module)
+  (gethash "name" module))
+
+(defun %suggest-improvements-module-files (module)
+  (%suggest-improvements-ensure-list (gethash "files" module)))
+
+(defun %suggest-improvements-file-path (file)
+  (gethash "path" file))
+
+(defun %suggest-improvements-resolve-path (path)
+  (let ((pathname (pathname path)))
+    (if (uiop:absolute-pathname-p pathname)
+        (namestring pathname)
+        (namestring (asdf:system-relative-pathname :sibyl path)))))
+
+(defun %suggest-improvements-file-match-p (scope path)
+  (let* ((scope-lower (string-downcase scope))
+         (path-lower (string-downcase path))
+         (absolute (ignore-errors (%suggest-improvements-resolve-path path)))
+         (absolute-lower (and absolute (string-downcase absolute)))
+         (file-name (string-downcase (file-namestring (pathname path)))))
+    (or (string= scope-lower path-lower)
+        (and absolute-lower (string= scope-lower absolute-lower))
+        (string= scope-lower file-name)
+        (and (> (length path-lower) (length scope-lower))
+             (string= scope-lower
+                      (subseq path-lower (- (length path-lower)
+                                            (length scope-lower)))))
+        (and absolute-lower
+             (> (length absolute-lower) (length scope-lower))
+             (string= scope-lower
+                      (subseq absolute-lower (- (length absolute-lower)
+                                                (length scope-lower))))))))
+
+(defun %suggest-improvements-collect-scope-files (map scope)
+  "Collect file paths from MAP based on SCOPE."
+  (let* ((normalized (%suggest-improvements-normalize-scope scope))
+         (modules (%suggest-improvements-map-modules map)))
+    (cond
+      ((string= normalized "all")
+       (let ((paths nil))
+         (dolist (module modules (nreverse paths))
+           (dolist (file (%suggest-improvements-module-files module))
+             (let ((path (%suggest-improvements-file-path file)))
+               (when path
+                 (push path paths)))))))
+      (t
+       (let* ((module (find normalized modules
+                            :key (lambda (m)
+                                   (string-downcase (or (%suggest-improvements-module-name m) "")))
+                            :test #'string=)))
+         (cond
+           (module
+            (let ((paths nil))
+              (dolist (file (%suggest-improvements-module-files module) (nreverse paths))
+                (let ((path (%suggest-improvements-file-path file)))
+                  (when path
+                    (push path paths))))))
+           (t
+            (let ((matched-path nil))
+              (dolist (module modules)
+                (dolist (file (%suggest-improvements-module-files module))
+                  (let ((path (%suggest-improvements-file-path file)))
+                    (when (and path
+                               (%suggest-improvements-file-match-p normalized path))
+                      (setf matched-path path)))))
+              (if matched-path
+                  (list matched-path)
+                  (error "Unknown scope: ~a" scope))))))))))
+
+(defun %suggest-improvements-read-sexp (path)
+  (let* ((result (execute-tool "read-sexp"
+                               (list (cons "path" path))))
+         (entries (%suggest-improvements-parse-sexp-result result)))
+    (%suggest-improvements-ensure-list entries)))
+
+(defun %suggest-improvements-collect-definitions (files)
+  "Collect definition metadata from FILES using read-sexp."
+  (let ((definitions nil))
+    (dolist (path files (nreverse definitions))
+      (handler-case
+          (let* ((resolved (%suggest-improvements-resolve-path path))
+                 (entries (%suggest-improvements-read-sexp resolved)))
+            (dolist (entry entries)
+              (push (list :file path
+                          :type (gethash "type" entry)
+                          :name (gethash "name" entry)
+                          :start-line (gethash "start_line" entry)
+                          :form (gethash "form" entry))
+                    definitions)))
+        (error () nil)))))
+
+(defun %suggest-improvements-public-name-p (name)
+  (and (stringp name)
+       (string/= name "")
+       (not (char= (char name 0) #\%))))
+
+(defun %suggest-improvements-parse-form (form-string)
+  (let ((*read-eval* nil))
+    (handler-case
+        (read-from-string form-string)
+      (error () nil))))
+
+(defun %suggest-improvements-docstring-present-p (form)
+  (when (consp form)
+    (let ((head (string-downcase (symbol-name (first form)))))
+      (when (member head '("defun" "defmethod") :test #'string=)
+        (let* ((tail (rest form))
+               (lambda-pos (position-if #'listp tail)))
+          (when lambda-pos
+            (let ((candidate (nth (1+ lambda-pos) tail)))
+              (stringp candidate))))))))
+
+(defun %suggest-improvements-form-contains-symbol-p (form names)
+  (let ((targets (mapcar #'string-downcase names)))
+    (labels ((walk (node)
+               (cond
+                 ((symbolp node)
+                  (member (string-downcase (symbol-name node))
+                          targets
+                          :test #'string=))
+                 ((consp node)
+                  (or (walk (car node))
+                      (walk (cdr node))))
+                 (t nil))))
+      (walk form))))
+
+(defun %suggest-improvements-form-has-error-handling-p (form)
+  (%suggest-improvements-form-contains-symbol-p
+   form
+   '("handler-case" "ignore-errors" "handler-bind" "restart-case")))
+
+(defun %suggest-improvements-form-has-risky-ops-p (form)
+  (%suggest-improvements-form-contains-symbol-p
+   form
+   '("with-open-file" "read-file-string" "write-file-string"
+     "run-program" "execute-tool")))
+
+(defun %suggest-improvements-package-for-file (file-path)
+  (let ((lower (string-downcase file-path)))
+    (cond
+      ((search "src/tools/" lower) "SIBYL.TOOLS")
+      ((search "src/agent/" lower) "SIBYL.AGENT")
+      ((search "src/llm/" lower) "SIBYL.LLM")
+      ((search "src/repl/" lower) "SIBYL.REPL")
+      ((search "src/util/" lower) "SIBYL.UTIL")
+      ((search "src/conditions/" lower) "SIBYL.CONDITIONS")
+      ((search "src/config/" lower) "SIBYL.CONFIG")
+      ((search "src/system/" lower) "SIBYL.SYSTEM")
+      (t "SIBYL"))))
+
+(defun %suggest-improvements-callers-count (function-string)
+  "Return caller count from who-calls output, or NIL."
+  (when (find-tool "who-calls")
+    (handler-case
+        (let* ((result (execute-tool "who-calls"
+                                     (list (cons "function" function-string))))
+               (lower (string-downcase result))
+               (marker "callers ("))
+          (cond
+            ((search marker lower)
+             (let* ((start (search marker lower))
+                    (from (+ start (length marker)))
+                    (end (position #\) lower :start from)))
+               (when end
+                 (parse-integer (subseq lower from end)
+                                :junk-allowed t))))
+            ((search "none found" lower) 0)
+            ((search "not found" lower) 0)
+            (t nil)))
+      (error () nil))))
+
+(defun %suggest-improvements-make-suggestion (category priority description
+                                              file line rationale)
+  (let ((entry (make-hash-table :test 'equal)))
+    (setf (gethash "priority" entry) priority)
+    (setf (gethash "category" entry) category)
+    (setf (gethash "description" entry) description)
+    (setf (gethash "file" entry) file)
+    (setf (gethash "line" entry) (or line 0))
+    (setf (gethash "rationale" entry) rationale)
+    entry))
+
+(defun %suggest-improvements-suggestion-plist (suggestion)
+  "Convert suggestion hash table to plist for store-suggestions."
+  (list :id (gethash "id" suggestion)
+        :description (gethash "description" suggestion)
+        :rationale (gethash "rationale" suggestion)
+        :priority (gethash "priority" suggestion)
+        :category (gethash "category" suggestion)
+        :file (gethash "file" suggestion)
+        :line (gethash "line" suggestion)))
+
+(defun %suggest-improvements-split-lines (content)
+  (let ((lines nil)
+        (start 0)
+        (len (length content)))
+    (loop for idx from 0 below len
+          for ch = (char content idx)
+          do (when (char= ch #\Newline)
+               (push (subseq content start idx) lines)
+               (setf start (1+ idx))))
+    (push (subseq content start len) lines)
+    (nreverse lines)))
+
+(defun %suggest-improvements-read-tests-content ()
+  (let* ((tests-dir (asdf:system-relative-pathname :sibyl "tests/"))
+         (files (and (probe-file tests-dir)
+                     (%codebase-map-find-lisp-files tests-dir))))
+    (string-downcase
+     (string-join (string #\Newline)
+                  (mapcar (lambda (path)
+                            (uiop:read-file-string path))
+                          files)))))
+
+(defun %suggest-improvements-missing-docstrings (definitions)
+  (let ((suggestions nil)
+        (count 0))
+    (dolist (definition definitions (nreverse suggestions))
+      (let* ((type (getf definition :type))
+             (name (getf definition :name))
+             (form-string (getf definition :form))
+             (form (%suggest-improvements-parse-form form-string)))
+        (when (and (< count 3)
+                   (member type '("defun" "defmethod") :test #'string=)
+                   (%suggest-improvements-public-name-p name)
+                   form
+                   (not (%suggest-improvements-docstring-present-p form)))
+          (incf count)
+          (push (%suggest-improvements-make-suggestion
+                 "missing-docstrings"
+                 "medium"
+                 (format nil "Function \"~a\" lacks a docstring." name)
+                 (getf definition :file)
+                 (getf definition :start-line)
+                 "Public functions should document intent for maintainability and self-analysis.")
+                 suggestions))))))
+
+(defun %suggest-improvements-missing-tests (definitions tests-content baseline-callers)
+  (let ((suggestions nil)
+        (seen (make-hash-table :test 'equal))
+        (tool-count 0)
+        (function-count 0))
+    (dolist (definition definitions (nreverse suggestions))
+      (let* ((type (getf definition :type))
+             (name (getf definition :name)))
+        (when (and name (stringp name) (string/= name ""))
+          (let ((key (string-downcase name)))
+            (unless (gethash key seen)
+              (setf (gethash key seen) t)
+              (when (not (search key tests-content))
+                (cond
+                  ((and (string= type "deftool") (< tool-count 3))
+                   (incf tool-count)
+                   (push (%suggest-improvements-make-suggestion
+                          "test-coverage"
+                          (if (and baseline-callers (> baseline-callers 0))
+                              "high"
+                              "medium")
+                          (format nil "Tool \"~a\" lacks explicit test coverage." name)
+                          (getf definition :file)
+                          (getf definition :start-line)
+                          "User-facing tools should have regression tests to avoid behavioral drift.")
+                         suggestions))
+                  ((and (member type '("defun" "defmethod") :test #'string=)
+                        (%suggest-improvements-public-name-p name)
+                        (< function-count 2))
+                   (incf function-count)
+                   (let* ((package (%suggest-improvements-package-for-file
+                                    (getf definition :file)))
+                          (qualified (format nil "~a::~a"
+                                             (string-downcase package)
+                                             name))
+                          (callers (%suggest-improvements-callers-count qualified))
+                          (priority (if (and callers (> callers 0))
+                                        "high"
+                                        "medium"))
+                          (rationale (if (and callers (> callers 0))
+                                         (format nil "Function has ~a internal callers; missing tests increase regression risk."
+                                                 callers)
+                                         "Public functions benefit from explicit tests to lock in expectations.")))
+                     (push (%suggest-improvements-make-suggestion
+                            "test-coverage"
+                            priority
+                            (format nil "Function \"~a\" appears untested." name)
+                            (getf definition :file)
+                            (getf definition :start-line)
+                            rationale)
+                           suggestions))))))))))))
+
+(defun %suggest-improvements-todo-comments (files)
+  (let ((suggestions nil)
+        (count 0))
+    (dolist (path files (nreverse suggestions))
+      (when (< count 3)
+        (handler-case
+            (let* ((resolved (%suggest-improvements-resolve-path path))
+                   (content (uiop:read-file-string resolved))
+                   (lines (%suggest-improvements-split-lines content))
+                   (line-number 0))
+              (dolist (line lines)
+                (incf line-number)
+                (when (and (< count 3)
+                           (let ((lower (string-downcase line)))
+                             (or (search "todo" lower)
+                                 (search "fixme" lower))))
+                  (incf count)
+                  (push (%suggest-improvements-make-suggestion
+                         "todo"
+                         "medium"
+                         (format nil "TODO comment: ~a"
+                                 (string-trim-whitespace line))
+                         path
+                         line-number
+                         "Outstanding TODOs should be triaged or resolved to reduce uncertainty.")
+                         suggestions))))
+          (error () nil))))))
+
+(defun %suggest-improvements-error-handling (definitions)
+  (let ((suggestions nil)
+        (count 0))
+    (dolist (definition definitions (nreverse suggestions))
+      (let* ((type (getf definition :type))
+             (name (getf definition :name))
+             (form-string (getf definition :form))
+             (form (%suggest-improvements-parse-form form-string)))
+        (when (and (< count 2)
+                   (string= type "defun")
+                   (%suggest-improvements-public-name-p name)
+                   form
+                   (%suggest-improvements-form-has-risky-ops-p form)
+                   (not (%suggest-improvements-form-has-error-handling-p form)))
+          (incf count)
+          (let* ((package (%suggest-improvements-package-for-file
+                           (getf definition :file)))
+                 (qualified (format nil "~a::~a"
+                                    (string-downcase package)
+                                    name))
+                 (callers (%suggest-improvements-callers-count qualified))
+                 (priority (if (and callers (> callers 0))
+                               "high"
+                               "medium"))
+                 (rationale (if (and callers (> callers 0))
+                                (format nil "Function has ~a internal callers; missing error handling risks cascading failures."
+                                        callers)
+                                "I/O and tool calls should handle failures to avoid cascading errors.")))
+            (push (%suggest-improvements-make-suggestion
+                   "error-handling"
+                   priority
+                   (format nil "Function \"~a\" performs risky operations without error handling." name)
+                   (getf definition :file)
+                   (getf definition :start-line)
+                   rationale)
+                   suggestions)))))))
+
+(defun %suggest-improvements-duplications (definitions)
+  (let ((table (make-hash-table :test 'equal))
+        (suggestions nil)
+        (count 0))
+    (dolist (definition definitions)
+      (let ((form (getf definition :form)))
+        (when (and form (stringp form))
+          (let ((key (string-downcase (string-trim-whitespace form))))
+            (push definition (gethash key table))))))
+    (maphash
+     (lambda (key defs)
+       (declare (ignore key))
+       (when (< count 2)
+         (let* ((paths (remove-duplicates
+                        (mapcar (lambda (def) (getf def :file)) defs)
+                        :test #'string=))
+                (name (getf (first defs) :name)))
+           (when (> (length paths) 1)
+             (incf count)
+             (push (%suggest-improvements-make-suggestion
+                    "code-duplication"
+                    "low"
+                    (format nil "Identical definition~@[ for \"~a\"~] appears in: ~{~a~^, ~}."
+                            name paths)
+                    (getf (first defs) :file)
+                    (getf (first defs) :start-line)
+                    "Consolidating duplicates reduces drift and simplifies maintenance.")
+                   suggestions)))))
+     table)
+    (nreverse suggestions)))
+
+(defun %suggest-improvements-priority-rank (priority)
+  (cond
+    ((string= priority "high") 0)
+    ((string= priority "medium") 1)
+    (t 2)))
+
+(defun %suggest-improvements-sort (suggestions)
+  (sort (copy-list suggestions)
+        (lambda (a b)
+          (let ((rank-a (%suggest-improvements-priority-rank
+                         (gethash "priority" a)))
+                (rank-b (%suggest-improvements-priority-rank
+                         (gethash "priority" b))))
+            (if (/= rank-a rank-b)
+                (< rank-a rank-b)
+                (string< (gethash "category" a)
+                         (gethash "category" b)))))))
+
+(defun %suggest-improvements-dedupe (suggestions)
+  (let ((seen (make-hash-table :test 'equal))
+        (result nil))
+    (dolist (suggestion suggestions (nreverse result))
+      (let ((key (format nil "~a|~a|~a"
+                         (gethash "category" suggestion)
+                         (gethash "file" suggestion)
+                         (gethash "line" suggestion))))
+        (unless (gethash key seen)
+          (setf (gethash key seen) t)
+          (push suggestion result))))))
+
+(defun %suggest-improvements-limit (suggestions max-count)
+  (let ((count (length suggestions)))
+    (if (and max-count (> count max-count))
+        (subseq suggestions 0 max-count)
+        suggestions)))
+
+(defun %suggest-improvements-assign-ids (suggestions)
+  (loop for suggestion in suggestions
+        for idx from 1
+        do (setf (gethash "id" suggestion) idx))
+  suggestions)
+
+(defun %suggest-improvements-build-note (scope suggestions)
+  (with-output-to-string (stream)
+    (format stream "## [~a] suggest-improvements~%~%" (timestamp-now))
+    (format stream "Scope: ~a~%~%" scope)
+    (if (null suggestions)
+        (progn
+          (write-string "Suggestions: none" stream)
+          (terpri stream)
+          (terpri stream))
+        (progn
+          (write-string "Suggestions:" stream)
+          (terpri stream)
+          (dolist (suggestion suggestions)
+            (let ((line (gethash "line" suggestion)))
+              (format stream "- [~a][~a] ~a (~a:~a)~%"
+                      (gethash "priority" suggestion)
+                      (gethash "category" suggestion)
+                      (gethash "description" suggestion)
+                      (gethash "file" suggestion)
+                      (if (integerp line) line 0)))
+            (let ((rationale (gethash "rationale" suggestion)))
+              (when rationale
+                (format stream "  - Rationale: ~a~%" rationale))))
+          (terpri stream)))))
+
+(defun %suggest-improvements-append-learnings (scope suggestions)
+  (let* ((path (asdf:system-relative-pathname
+                :sibyl
+                ".sisyphus/notepads/self-development-roadmap/learnings.md"))
+         (note (%suggest-improvements-build-note scope suggestions)))
+    (ensure-directories-exist path)
+    (with-open-file (stream path :direction :output
+                            :if-exists :append
+                            :if-does-not-exist :create)
+      (write-string note stream))))
+
+(deftool "suggest-improvements"
+    (:description "Analyze the codebase and suggest improvements."
+     :parameters ((:name "scope" :type "string" :required nil
+                   :description "Scope: all, module-name, or file-path")))
+  (block suggest-improvements
+    (let* ((scope (getf args :scope))
+           (normalized-scope (%suggest-improvements-normalize-scope scope))
+           (map-result (execute-tool "codebase-map"
+                                     '(("detail-level" . "summary"))))
+           (map (%suggest-improvements-parse-json map-result))
+           (files (%suggest-improvements-collect-scope-files map normalized-scope))
+           (definitions (%suggest-improvements-collect-definitions files))
+           (tests-content (%suggest-improvements-read-tests-content))
+           (baseline-callers (%suggest-improvements-callers-count
+                              "sibyl.tools:execute-tool-call"))
+           (suggestions nil))
+      (setf suggestions
+            (append (%suggest-improvements-missing-tests
+                     definitions tests-content baseline-callers)
+                    (%suggest-improvements-missing-docstrings definitions)
+                    (%suggest-improvements-todo-comments files)
+                    (%suggest-improvements-error-handling definitions)
+                    (%suggest-improvements-duplications definitions)))
+      (setf suggestions (%suggest-improvements-dedupe suggestions))
+      (setf suggestions (%suggest-improvements-sort suggestions))
+      (setf suggestions (%suggest-improvements-limit suggestions 10))
+      (setf suggestions (%suggest-improvements-assign-ids suggestions))
+      (%suggest-improvements-append-learnings normalized-scope suggestions)
+      (let ((result (make-hash-table :test 'equal)))
+        (setf (gethash "suggestions" result) suggestions)
+        result))))
 
 ;;; ============================================================
 ;;; Programmatic test execution
