@@ -1,0 +1,87 @@
+;;;; message.lisp — Message and conversation data structures
+;;;; The core data model for LLM interactions.
+
+(in-package #:sibyl.llm)
+
+;;; ============================================================
+;;; Tool call representation
+;;; ============================================================
+
+(defstruct (tool-call (:constructor make-tool-call))
+  "Represents a tool/function call requested by the LLM."
+  (id        "" :type string)
+  (name      "" :type string)
+  (arguments nil :type list))   ; plist of (:key value ...)
+
+;;; ============================================================
+;;; Message
+;;; ============================================================
+
+(defstruct (message (:constructor %make-message))
+  "A single message in a conversation."
+  (role         :user    :type keyword)     ; :system :user :assistant :tool
+  (content      ""       :type (or string null))
+  (tool-calls   nil      :type list)        ; list of tool-call structs
+  (tool-call-id nil      :type (or string null))  ; for :tool role
+  (timestamp    ""       :type string))
+
+(defun make-message (&key role content tool-calls tool-call-id)
+  "Create a message with automatic timestamp."
+  (%make-message :role role
+                 :content content
+                 :tool-calls tool-calls
+                 :tool-call-id tool-call-id
+                 :timestamp (timestamp-now)))
+
+;;; Convenience constructors
+
+(defun system-message (content)
+  "Create a system message."
+  (make-message :role :system :content content))
+
+(defun user-message (content)
+  "Create a user message."
+  (make-message :role :user :content content))
+
+(defun assistant-message (content &key tool-calls)
+  "Create an assistant message, optionally with tool calls."
+  (make-message :role :assistant :content content :tool-calls tool-calls))
+
+(defun tool-result-message (tool-call-id content)
+  "Create a tool result message."
+  (make-message :role :tool :content content :tool-call-id tool-call-id))
+
+;;; ============================================================
+;;; Conversation — ordered sequence of messages
+;;; ============================================================
+
+(defstruct (conversation (:constructor %make-conversation))
+  "An ordered conversation of messages."
+  (messages nil :type list)
+  (lock (bt:make-lock "conversation-lock")))
+
+(defun make-conversation (&optional initial-messages)
+  "Create a new conversation, optionally with initial messages."
+  (%make-conversation :messages (copy-list initial-messages)))
+
+(defun conversation-push (conversation message)
+  "Thread-safely append MESSAGE to CONVERSATION."
+  (bt:with-lock-held ((conversation-lock conversation))
+    (setf (conversation-messages conversation)
+          (append (conversation-messages conversation) (list message))))
+  message)
+
+(defun conversation-clear (conversation)
+  "Clear all messages from CONVERSATION."
+  (bt:with-lock-held ((conversation-lock conversation))
+    (setf (conversation-messages conversation) nil)))
+
+(defun conversation-to-list (conversation)
+  "Return a copy of the conversation messages as a list."
+  (bt:with-lock-held ((conversation-lock conversation))
+    (copy-list (conversation-messages conversation))))
+
+(defun conversation-length (conversation)
+  "Return the number of messages in CONVERSATION."
+  (bt:with-lock-held ((conversation-lock conversation))
+    (length (conversation-messages conversation))))
