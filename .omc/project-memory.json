@@ -1,0 +1,66 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1771244327765,
+  "projectRoot": "/Users/iyoda/Projects/atikoro/sibyl",
+  "techStack": {
+    "languages": [],
+    "frameworks": [],
+    "packageManager": null,
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "src",
+      "tests"
+    ],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "src": {
+      "path": "src",
+      "purpose": "Source code",
+      "fileCount": 5,
+      "lastAccessed": 1771244327715,
+      "keyFiles": [
+        "conditions.lisp",
+        "config.lisp",
+        "packages.lisp",
+        "repl.lisp",
+        "util.lisp"
+      ]
+    },
+    "tests": {
+      "path": "tests",
+      "purpose": "Test files",
+      "fileCount": 4,
+      "lastAccessed": 1771244327731,
+      "keyFiles": [
+        "message-test.lisp",
+        "sexp-tools-test.lisp",
+        "suite.lisp",
+        "tools-test.lisp"
+      ]
+    }
+  },
+  "hotPaths": [],
+  "userDirectives": []
+}

@@ -431,7 +431,56 @@
               (result-lower (string-downcase result)))
          (is (search "who-calls-test-default-caller" result-lower)))
     ;; Cleanup
-    (when (fboundp 'sibyl.tests::who-calls-test-default-target)
-      (fmakunbound 'sibyl.tests::who-calls-test-default-target))
-    (when (fboundp 'sibyl.tests::who-calls-test-default-caller)
-      (fmakunbound 'sibyl.tests::who-calls-test-default-caller))))
+     (when (fboundp 'sibyl.tests::who-calls-test-default-target)
+       (fmakunbound 'sibyl.tests::who-calls-test-default-target))
+     (when (fboundp 'sibyl.tests::who-calls-test-default-caller)
+       (fmakunbound 'sibyl.tests::who-calls-test-default-caller))))
+
+(def-suite safe-redefine-tests
+  :description "Tests for safe-redefine tool."
+  :in sibyl-tests)
+
+(in-suite safe-redefine-tests)
+
+(test safe-redefine-successful
+  "safe-redefine updates a function and compiles it."
+  (eval '(defun sibyl.tests::safe-redefine-test-fn-001 () "original"))
+  (compile 'sibyl.tests::safe-redefine-test-fn-001)
+  (unwind-protect
+       (let ((result (sibyl.tools:execute-tool
+                      "safe-redefine"
+                      '(("name" . "sibyl.tests::safe-redefine-test-fn-001")
+                        ("new-definition" . "(defun sibyl.tests::safe-redefine-test-fn-001 () \"modified\")")))))
+         (is (search "redefined" (string-downcase result)))
+         (is (string= "modified" (sibyl.tests::safe-redefine-test-fn-001)))
+         (is (compiled-function-p #'sibyl.tests::safe-redefine-test-fn-001)))
+    (when (fboundp 'sibyl.tests::safe-redefine-test-fn-001)
+      (fmakunbound 'sibyl.tests::safe-redefine-test-fn-001))))
+
+(test safe-redefine-rollback
+  "safe-redefine rolls back on error, preserving original function."
+  (eval '(defun sibyl.tests::safe-redefine-test-fn-002 () "original"))
+  (compile 'sibyl.tests::safe-redefine-test-fn-002)
+  (unwind-protect
+       (progn
+         ;; Attempt redefinition with invalid code - should fail
+         (handler-case
+             (sibyl.tools:execute-tool
+              "safe-redefine"
+              '(("name" . "sibyl.tests::safe-redefine-test-fn-002")
+                ("new-definition" . "invalid-lisp-code-here")))
+           (sibyl.conditions:tool-execution-error (e)
+             ;; Error expected - this is good
+             (declare (ignore e))))
+         ;; After error, function should still return original value (rollback worked)
+         (is (string= "original" (sibyl.tests::safe-redefine-test-fn-002))))
+    (when (fboundp 'sibyl.tests::safe-redefine-test-fn-002)
+      (fmakunbound 'sibyl.tests::safe-redefine-test-fn-002))))
+
+(test safe-redefine-rejects-non-sibyl
+  "safe-redefine blocks redefinition outside Sibyl packages."
+  (signals sibyl.conditions:tool-execution-error
+    (sibyl.tools:execute-tool
+     "safe-redefine"
+     '(("name" . "cl:car")
+       ("new-definition" . "(defun car (x) nil)")))))

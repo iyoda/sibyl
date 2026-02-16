@@ -150,17 +150,18 @@
     (let ((normalized-args (normalize-args args)))
       (validate-tool-args tool normalized-args)
       (restart-case
-          (handler-case
-              (let ((result (funcall (tool-handler tool) normalized-args)))
-                (if (stringp result)
-                    result
-                    (with-output-to-string (s)
-                      (yason:encode result s))))
-            (error (e)
-              (error 'tool-execution-error
-                     :tool-name name
-                     :message (format nil "~a" e)
-                     :inner-error e)))
+          (handler-bind
+              ((error (lambda (e)
+                        (unless (typep e 'tool-execution-error)
+                          (error 'tool-execution-error
+                                 :tool-name name
+                                 :message (format nil "~a" e)
+                                 :inner-error e)))))
+            (let ((result (funcall (tool-handler tool) normalized-args)))
+              (if (stringp result)
+                  result
+                  (with-output-to-string (s)
+                    (yason:encode result s)))))
         (retry-tool ()
           :report "Retry the tool execution"
           (execute-tool name args))

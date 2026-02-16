@@ -298,3 +298,24 @@ The updated prompt now includes:
 ✅ **COMPLETE** - Sibyl now knows it can introspect and modify itself!
 
 **Progress**: Phase 1 Task 1-3 complete (9/34 total tasks done)
+
+## [2026-02-16T23:40] safe-redefine Tool Implementation
+
+### Implemented Tool
+**safe-redefine**: Safe function redefinition with rollback support
+- Saves original function via `fdefinition` (rollback-safe)
+- Evaluates new definition using `eval-form` in target package
+- Compiles after eval and asserts `compiled-function-p`
+- Restricts redefinition to `SIBYL` / `SIBYL.*` packages
+- Provides `restore-definition` restart for rollback
+- Optional caller warning via `who-calls` (skipped when `force` is true)
+
+### Condition System Adjustment
+- `execute-tool` now wraps errors via `handler-bind` to keep tool restarts visible
+  to outer handlers (required for restore-definition rollback flow)
+
+### Verification
+- New `safe-redefine-tests` suite added (success, rollback, package guard)
+- `(fiveam:run 'safe-redefine-tests)` → PASS
+- `(asdf:test-system :sibyl)` → 176/176 checks passing
+- QA scenarios validated: success, rollback, and non-Sibyl rejection

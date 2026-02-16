@@ -554,8 +554,127 @@
                                       (compile primary)))
                                   values))))
                   (finish (%eval-form-format-values values)))))
-          (sb-ext:timeout ()
-            (finish (format nil "Timeout after ~a seconds" timeout))))))))
+            (sb-ext:timeout ()
+              (finish (format nil "Timeout after ~a seconds" timeout))))))))
+
+;;; ============================================================
+;;; Safe redefinition
+;;; ============================================================
+
+(defun %safe-redefine-sibyl-package-p (symbol)
+  "Return true if SYMBOL belongs to a Sibyl package."
+  (let ((package (symbol-package symbol)))
+    (when package
+      (let ((pkg-name (string-upcase (package-name package))))
+        (or (string= pkg-name "SIBYL")
+            (and (>= (length pkg-name) 6)
+                 (string= (subseq pkg-name 0 6) "SIBYL.")))))))
+
+(defun %safe-redefine-resolve-symbol (name-string)
+  "Resolve NAME-STRING to a symbol and package, or return an error message."
+  (multiple-value-bind (package-name symbol-name)
+      (%split-symbol-string name-string)
+    (let* ((package (if package-name
+                        (find-package (string-upcase package-name))
+                        *package*))
+           (normalized-symbol-name (and symbol-name
+                                        (string-upcase symbol-name))))
+      (cond
+        ((or (null normalized-symbol-name)
+             (string= normalized-symbol-name ""))
+         (values nil nil (format nil "Symbol not specified: ~a" name-string)))
+        ((null package)
+         (values nil nil (format nil "Package not found: ~a" package-name)))
+        (t
+         (multiple-value-bind (symbol status)
+             (find-symbol normalized-symbol-name package)
+           (if (null status)
+               (values nil package
+                       (format nil "Symbol not found: ~a in package ~a"
+                               symbol-name
+                               (package-name package)))
+               (values symbol package nil))))))))
+
+(defun %safe-redefine-normalize-force (force)
+  "Normalize FORCE to a boolean. Defaults to NIL."
+  (cond
+    ((null force) nil)
+    ((stringp force)
+     (let ((lower (string-downcase force)))
+       (or (string= lower "true")
+           (string= lower "t")
+           (string= lower "yes")
+           (string= lower "1"))))
+    (t t)))
+
+(defun %safe-redefine-eval-definition (definition package)
+  "Evaluate DEFINITION in PACKAGE using eval-form."
+  (let* ((result (execute-tool "eval-form"
+                               (list (cons "form" definition)
+                                     (cons "package" (package-name package)))))
+         (lower (string-downcase result)))
+    (when (or (search "blocked unsafe form" lower)
+              (search "timeout after" lower))
+      (error "Failed to evaluate new definition: ~a" result))
+    result))
+
+(defun %safe-redefine-closure-warning (name-string force)
+  "Return a warning string about closure capture when FORCE is NIL."
+  (unless force
+    (when (find-tool "who-calls")
+      (handler-case
+          (let* ((result (execute-tool "who-calls"
+                                       (list (cons "function" name-string))))
+                 (lower (string-downcase result)))
+            (when (and (search "callers" lower)
+                       (not (search "none found" lower)))
+              "Warning: compiled callers may retain old function objects; consider recompiling dependents."))
+        (error () nil)))))
+
+(deftool "safe-redefine"
+    (:description "Safely redefine a function with rollback restart support."
+     :parameters ((:name "name" :type "string" :required t
+                   :description "Function name with package prefix (e.g., \"sibyl.tools:find-tool\")")
+                  (:name "new-definition" :type "string" :required t
+                   :description "New definition as an S-expression string")
+                  (:name "force" :type "boolean" :required nil
+                   :description "Skip caller warnings when true")))
+  (block safe-redefine
+    (let* ((name-string (getf args :name))
+           (definition (getf args :new-definition))
+           (force (%safe-redefine-normalize-force (getf args :force))))
+      (multiple-value-bind (symbol package error-msg)
+          (%safe-redefine-resolve-symbol name-string)
+        (when error-msg
+          (error error-msg))
+        (unless (fboundp symbol)
+          (error "Symbol not fbound: ~s" symbol))
+        (unless (%safe-redefine-sibyl-package-p symbol)
+          (error "safe-redefine can only modify Sibyl packages: ~a"
+                 (package-name (symbol-package symbol))))
+        ;; Save function before attempting redefinition
+        (let ((saved-function (fdefinition symbol)))
+          ;; Establish restart that covers ALL redefinition logic
+          (restart-case
+              (progn
+                ;; This will signal an error for invalid code
+                (%safe-redefine-eval-definition definition package)
+                ;; Compile the newly defined function
+                (compile symbol)
+                ;; Verify compilation succeeded
+                (let ((fn (symbol-function symbol)))
+                  (unless (compiled-function-p fn)
+                    (error "Redefinition did not compile for ~a" name-string)))
+                ;; Check for closure warnings
+                (let ((warning (%safe-redefine-closure-warning name-string force)))
+                  (if warning
+                      (format nil "Success: ~a redefined.~%~a" name-string warning)
+                      (format nil "Success: ~a redefined." name-string))))
+            ;; Restart to restore original function
+            (restore-definition ()
+              :report "Restore the original function definition"
+              (setf (fdefinition symbol) saved-function)
+              (format nil "Rolled back: ~a restored." name-string))))))))
 
 ;;; ============================================================
 ;;; Macro expansion
@@ -571,7 +690,7 @@
            (string= lower "t")
            (string= lower "yes")
            (string= lower "1"))))
-    ((booleanp full-param) full-param)
+     ((typep full-param 'boolean) full-param)
     (t t)))
 
 (defun %macroexpand-form-pretty-print (form)
