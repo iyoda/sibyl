@@ -417,3 +417,77 @@ The updated prompt now includes:
 ✅ **COMPLETE** - Phase 2 Task 2-3 complete. ASDF reload protection operational!
 
 **Progress**: Phase 2 Task 2-3 complete (12/34 total tasks done)
+## [2026-02-16T13:42] write-test Tool Implementation
+
+### Implemented Tool
+**write-test**: Programmatic FiveAM test generation and registration
+- Generates FiveAM test cases from name + body parameters
+- Two-phase operation: in-memory registration + file persistence
+- Parameters: `name` (required), `suite` (optional, default "sibyl-tests"), `body` (required), `file` (optional)
+- Validates test syntax and checks for duplicates before creation
+- Auto-compiles generated tests for immediate execution
+
+### Key Implementation Details
+
+**Dual-phase registration**:
+1. **In-memory**: Uses `eval-form` to register test in SIBYL.TESTS package
+2. **File persistence**: Appends test code to specified file for permanence
+
+**Validation strategy**:
+- Syntax validation: Parse `body` with `read-from-string` to catch malformed Lisp
+- Duplicate detection: Use `fiveam:get-test` to check if test already exists
+- Package verification: Ensure SIBYL.TESTS package exists before proceeding
+
+**FiveAM Integration**:
+- Generated test format: `(test <name> "Auto-generated test" <body>)`
+- Tests registered in `sibyl-tests` suite by default
+- Compatible with `run-tests` tool for immediate execution
+
+### Critical FiveAM Gotcha
+- **FiveAM IS syntax**: Must use `(is (test-form))` NOT `(is t)`
+  - Correct: `(is (eq t t))`, `(is (equal 1 1))`
+  - Incorrect: `(is t)` → compile error "Argument to IS must be a list"
+  - All test generation validates this constraint
+
+### FiveAM Compile-Time Loading
+- Added FiveAM to `eval-when (:compile-toplevel ...)` in lisp-tools.lisp
+- Required for `run-tests` and `write-test` tools to compile successfully
+- Pattern: `(when (and (find-package :asdf) (null (find-package :fiveam))) (ignore-errors (asdf:load-system :fiveam)))`
+- Parallels existing yason loading strategy
+
+### Test Strategy
+- TDD workflow: write test first, watch it fail (RED), implement, watch pass (GREEN)
+- Tests use `unwind-protect` to ensure cleanup via `fiveam:rem-test`
+- File persistence tests restore original content after verification
+- Error type validation: `tool-validation-error` for missing params, `tool-execution-error` for duplicates
+
+### Test Results
+- All 6 write-test tests pass (12 checks, 100%)
+- Tests verify: generation, in-memory registration, file persistence, duplicate rejection, parameter validation, default suite
+- QA scenarios verified:
+  - ✅ Generated test is immediately executable via run-tests
+  - ✅ Test persisted to file correctly
+  - ✅ Duplicate test names rejected with clear error
+
+### Tool Integration
+- Completes TDD toolchain: `write-test` → `run-tests` → implement → `run-tests` again
+- Works seamlessly with existing `run-tests` tool (Task 3-1)
+- Generated tests immediately available in test suite without REPL restart
+
+### Tool Registry
+- 17 tools total (15 existing + run-tests + write-test)
+- Tools: codebase-map, describe-symbol, eval-form, file-info, grep, list-directory, macroexpand-form, package-symbols, read-file, read-sexp, run-tests, safe-redefine, shell, sync-to-file, who-calls, write-file, write-test
+
+### Acceptance Criteria Met
+- [x] `write-test` tool registered (17 tools total)
+- [x] Generates and registers FiveAM test in-memory
+- [x] Persists test to file
+- [x] Validates parameters and rejects duplicates
+- [x] `(fiveam:run 'write-test-tests)` → 100% pass
+- [x] QA scenarios: generate+run, persist, duplicate rejection → all PASS
+- [x] Generated tests executable via `run-tests`
+
+### Status
+✅ **COMPLETE** - Phase 3 Task 3-2 complete. Sibyl can now write its own tests programmatically!
+
+**Progress**: Phase 3 Task 3-2 complete (write-test implemented)

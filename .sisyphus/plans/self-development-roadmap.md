@@ -884,7 +884,7 @@ Phase 0 (Foundation)
 
 ---
 
-- [ ] 2-3. `asdf-reload-protection` — ASDF リロード保護
+- [x] 2-3. `asdf-reload-protection` — ASDF リロード保護
 
   **What to do**:
   - `asdf:perform`に`:around`メソッドを追加し、インメモリ修正済みファイルの意図しないリロードを防止

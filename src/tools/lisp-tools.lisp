@@ -12,6 +12,9 @@
     (when (and (find-package :asdf)
                (null (find-package :yason)))
       (ignore-errors (asdf:load-system :yason)))
+    (when (and (find-package :asdf)
+               (null (find-package :fiveam)))
+      (ignore-errors (asdf:load-system :fiveam)))
     (let* ((tool-package (find-package :sibyl.tools))
            (deftool-symbol (and tool-package
                                 (find-symbol "DEFTOOL" tool-package))))
@@ -1019,6 +1022,206 @@
         (let ((callers (%who-calls-get-callers symbol)))
           (return-from who-calls
             (%who-calls-format-callers symbol callers)))))))
+
+;;; ============================================================
+;;; Programmatic test execution
+;;; ============================================================
+
+(defun %run-tests-resolve-target (suite-name test-name)
+  "Resolve suite or test name to a symbol in SIBYL.TESTS package."
+  (let ((tests-package (find-package "SIBYL.TESTS")))
+    (unless tests-package
+      (error "SIBYL.TESTS package not found. Load tests first."))
+    (cond
+      (test-name
+       (let ((sym (find-symbol (string-upcase test-name) tests-package)))
+         (unless sym
+           (error "Test not found: ~a" test-name))
+         sym))
+      (suite-name
+       (let ((sym (find-symbol (string-upcase suite-name) tests-package)))
+         (unless sym
+           (error "Suite not found: ~a" suite-name))
+         sym))
+      (t
+       (let ((default-suite (find-symbol "SIBYL-TESTS" tests-package)))
+         (unless default-suite
+           (error "Default test suite SIBYL-TESTS not found"))
+         default-suite)))))
+
+(defun %run-tests-count-results (results)
+  "Count total, passed, and failed tests from FiveAM results."
+  (let ((total 0)
+        (passed 0)
+        (failed 0)
+        (failures nil)
+        (fiveam-pkg (find-package "FIVEAM")))
+    (unless fiveam-pkg
+      (error "FiveAM package not found"))
+    (let ((test-result-class (find-symbol "TEST-RESULT" fiveam-pkg))
+          (test-passed-class (find-symbol "TEST-PASSED" fiveam-pkg))
+          (test-failure-class (find-symbol "TEST-FAILURE" fiveam-pkg))
+          (test-suite-result-class (find-symbol "TEST-SUITE-RESULT" fiveam-pkg))
+          (name-accessor (find-symbol "NAME" fiveam-pkg))
+          (reason-accessor (find-symbol "REASON" fiveam-pkg))
+          (results-accessor (find-symbol "RESULTS" fiveam-pkg)))
+      (labels ((walk-result (result)
+                 (cond
+                   ;; Test result
+                   ((typep result test-result-class)
+                    (incf total)
+                    (if (typep result test-passed-class)
+                        (incf passed)
+                        (progn
+                          (incf failed)
+                          (push (make-hash-table :test 'equal) failures)
+                          (let ((failure (car failures)))
+                            (setf (gethash "test" failure)
+                                  (string-downcase
+                                   (symbol-name (funcall name-accessor result))))
+                            (when (typep result test-failure-class)
+                              (setf (gethash "reason" failure)
+                                    (format nil "~a" (funcall reason-accessor result))))))))
+                   ;; Suite result - walk children
+                   ((typep result test-suite-result-class)
+                    (dolist (child (funcall results-accessor result))
+                      (walk-result child)))
+                   ;; List of results
+                   ((listp result)
+                    (dolist (r result)
+                      (walk-result r))))))
+        (walk-result results))
+      (values total passed failed (nreverse failures)))))
+
+(deftool "run-tests"
+    (:description "Run FiveAM tests programmatically and return structured results."
+     :parameters ((:name "suite" :type "string" :required nil
+                   :description "Suite name (e.g., \"sibyl-tests\"), defaults to all tests")
+                  (:name "test" :type "string" :required nil
+                   :description "Specific test name (e.g., \"read-sexp-basic\")")))
+  (block run-tests
+    (let* ((suite-name (getf args :suite))
+           (test-name (getf args :test))
+           (target (%run-tests-resolve-target suite-name test-name))
+           (fiveam-pkg (find-package "FIVEAM")))
+      
+      (unless fiveam-pkg
+        (error "FiveAM package not found. Load FiveAM first."))
+      
+      (let ((run-fn (find-symbol "RUN" fiveam-pkg)))
+        (unless run-fn
+          (error "FiveAM:RUN function not found"))
+        
+        ;; Suppress output during test execution
+        (let* ((*standard-output* (make-string-output-stream))
+               (*error-output* (make-string-output-stream))
+               (results (funcall run-fn target)))
+          
+          ;; Build result structure
+          (multiple-value-bind (total passed failed failures)
+              (%run-tests-count-results results)
+            (let ((result (make-hash-table :test 'equal)))
+              (setf (gethash "total" result) total)
+              (setf (gethash "passed" result) passed)
+              (setf (gethash "failed" result) failed)
+              (setf (gethash "failures" result) failures)
+              result)))))))
+
+;;; ============================================================
+;;; Programmatic test generation
+;;; ============================================================
+
+(defun %write-test-validate-name (name)
+  "Validate test NAME is a non-empty string."
+  (unless (and (stringp name) (string/= name ""))
+    (error "Test name must be a non-empty string: ~a" name))
+  name)
+
+(defun %write-test-validate-body (body)
+  "Validate test BODY is a non-empty string and valid Lisp."
+  (unless (and (stringp body) (string/= body ""))
+    (error "Test body must be a non-empty string: ~a" body))
+  ;; Validate it's valid Lisp
+  (let ((*read-eval* nil))
+    (handler-case
+        (read-from-string body)
+      (error (e)
+        (error "Invalid test body syntax: ~a" e))))
+  body)
+
+(defun %write-test-check-duplicate (name package)
+  "Check if a test with NAME already exists in PACKAGE."
+  (let* ((test-symbol (intern (string-upcase name) package))
+         (fiveam-pkg (find-package "FIVEAM"))
+         (get-test-fn (and fiveam-pkg (find-symbol "GET-TEST" fiveam-pkg))))
+    (when (and get-test-fn (funcall get-test-fn test-symbol))
+      (error "Test ~a already exists" name))))
+
+(defun %write-test-generate-code (name body)
+  "Generate test definition code."
+  (format nil "(test ~a~%  \"Auto-generated test\"~%  ~a)"
+          name body))
+
+(defun %write-test-register-in-memory (test-code package-name)
+  "Register test in memory using eval-form."
+  (let ((result (execute-tool "eval-form"
+                              (list (cons "form" test-code)
+                                    (cons "package" package-name)))))
+    (when (search "blocked unsafe form" (string-downcase result))
+      (error "Failed to register test: ~a" result))
+    (when (search "timeout" (string-downcase result))
+      (error "Failed to register test: ~a" result))
+    result))
+
+(defun %write-test-append-to-file (file test-code)
+  "Append test code to FILE."
+  (unless (uiop:file-exists-p file)
+    (error "Test file not found: ~a" file))
+  (with-open-file (stream file :direction :output
+                          :if-exists :append
+                          :if-does-not-exist :error)
+    (terpri stream)
+    (write-string test-code stream)
+    (terpri stream)))
+
+(deftool "write-test"
+    (:description "Generate and register a FiveAM test programmatically."
+     :parameters ((:name "name" :type "string" :required t
+                   :description "Test name (e.g., \"my-new-test\")")
+                  (:name "suite" :type "string" :required nil
+                   :description "Suite name (default: \"sibyl-tests\")")
+                  (:name "body" :type "string" :required t
+                   :description "Test body as S-expression string (e.g., \"(is (equal 1 1))\")")
+                  (:name "file" :type "string" :required nil
+                   :description "Target file (default: \"tests/sexp-tools-test.lisp\")")))
+  (block write-test
+    (let* ((name (%write-test-validate-name (getf args :name)))
+           (suite (or (getf args :suite) "sibyl-tests"))
+           (body (%write-test-validate-body (getf args :body)))
+           (file (or (getf args :file)
+                     (namestring
+                      (asdf:system-relative-pathname :sibyl
+                                                     "tests/sexp-tools-test.lisp"))))
+           (package-name "SIBYL.TESTS")
+           (package (find-package package-name)))
+      
+      (unless package
+        (error "Package not found: ~a" package-name))
+      
+      ;; Check for duplicate
+      (%write-test-check-duplicate name package)
+      
+      ;; Generate test code
+      (let ((test-code (%write-test-generate-code name body)))
+        
+        ;; Register in-memory
+        (%write-test-register-in-memory test-code package-name)
+        
+        ;; Persist to file
+        (%write-test-append-to-file file test-code)
+        
+        (format nil "Success: Test ~a created and registered in ~a"
+                name (file-namestring file))))))
 
 #|
 ;;; ============================================================
