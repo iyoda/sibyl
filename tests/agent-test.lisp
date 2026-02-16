@@ -6,12 +6,17 @@
                 #:*default-system-prompt*
                 #:make-agent
                 #:agent-system-prompt)
-  (:export #:agent-tests))
+  (:export #:agent-tests
+           #:tdd-orchestration-tests))
 
 (in-package #:sibyl.agent.tests)
 
 (def-suite agent-tests
   :description "Tests for agent core functionality"
+  :in sibyl.tests:sibyl-tests)
+
+(def-suite tdd-orchestration-tests
+  :description "TDD workflow system prompt tests"
   :in sibyl.tests:sibyl-tests)
 
 (in-suite agent-tests)
@@ -56,6 +61,47 @@
             (search "s-expression" prompt)
             (search "sexp" prompt))
         "System prompt should mention Lisp or S-expressions")))
+
+;;; ============================================================
+;;; TDD Workflow Tests
+;;; ============================================================
+
+(in-suite tdd-orchestration-tests)
+
+(test system-prompt-mentions-tdd-workflow
+  "System prompt should include RED/GREEN/REFACTOR workflow steps."
+  (let ((prompt (string-downcase *default-system-prompt*)))
+    (is (search "**red**" prompt)
+        "System prompt should mention RED step")
+    (is (search "**green**" prompt)
+        "System prompt should mention GREEN step")
+    (is (search "**refactor**" prompt)
+        "System prompt should mention REFACTOR step")
+    (is (search "**persist**" prompt)
+        "System prompt should mention PERSIST step")))
+
+(test system-prompt-lists-tdd-tools
+  "System prompt should list all TDD workflow tools."
+  (let ((prompt (string-downcase *default-system-prompt*)))
+    (is (search "write-test" prompt)
+        "System prompt should mention write-test tool")
+    (is (search "run-tests" prompt)
+        "System prompt should mention run-tests tool")
+    (is (search "safe-redefine" prompt)
+        "System prompt should mention safe-redefine tool")
+    (is (search "sync-to-file" prompt)
+        "System prompt should mention sync-to-file tool")
+    (is (search "sibyl.system:unprotect-file" prompt)
+        "System prompt should mention sibyl.system:unprotect-file")))
+
+(test system-prompt-emphasizes-test-first
+  "System prompt should emphasize writing tests first."
+  (let ((prompt (string-downcase *default-system-prompt*)))
+    (is (or (search "write the test first" prompt)
+            (search "writing tests first" prompt))
+        "System prompt should state the write-test-first principle")))
+
+(in-suite agent-tests)
 
 (test agent-uses-system-prompt
   "Agent created with make-agent should use the default system prompt."

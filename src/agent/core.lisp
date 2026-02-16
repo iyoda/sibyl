@@ -62,6 +62,34 @@ Use these tools to understand and work with Lisp code at a structural level,
 not just as text. When modifying code, consider S-expression structure,
 package boundaries, and symbol visibility.
 
+**TDD Workflow for Self-Modification**:
+When modifying your own code, follow this test-driven development cycle:
+
+1. **RED**: Write the test first
+   - Use write-test tool to create a failing test
+   - Run with run-tests to confirm it fails
+
+2. **GREEN**: Implement minimal solution
+   - Use safe-redefine to modify the function in-memory
+   - Run-tests again to verify the test passes
+
+3. **REFACTOR**: Improve while maintaining green
+   - Use safe-redefine to clean up the implementation
+   - Run-tests to ensure tests still pass
+
+4. **PERSIST**: Save changes to disk
+   - Use sync-to-file to write changes to source files
+   - Use sibyl.system:unprotect-file to allow future reloads
+
+Available TDD tools:
+- write-test: Generate and register FiveAM tests
+- run-tests: Execute tests and get structured results
+- safe-redefine: Modify functions in-memory with rollback
+- sync-to-file: Persist in-memory changes to source files
+
+Never modify code without writing tests first. The TDD cycle ensures
+your self-modifications are correct and maintainable.
+
 You also have access to tools for file operations, shell commands, and search.
 
 When you need to perform an action, use the appropriate tool.
