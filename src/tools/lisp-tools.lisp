@@ -1,5 +1,23 @@
 ;;;; lisp-tools.lisp — Lisp introspection tools
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (let* ((this-file (or *load-pathname* *compile-file-pathname*))
+         (root (and this-file (uiop:pathname-directory-pathname this-file)))
+         (packages (and root (merge-pathnames "../packages.lisp" root)))
+         (protocol (and root (merge-pathnames "protocol.lisp" root))))
+    (unless (find-package :sibyl.tools)
+      (when (and packages (probe-file packages))
+        (load packages)))
+    (ignore-errors (require :asdf))
+    (when (find-package :asdf)
+      (ignore-errors (asdf:load-system :yason)))
+    (let* ((tool-package (find-package :sibyl.tools))
+           (deftool-symbol (and tool-package
+                                (find-symbol "DEFTOOL" tool-package))))
+      (unless (and deftool-symbol (fboundp deftool-symbol))
+        (when (and protocol (probe-file protocol))
+          (load protocol))))))
+
 (in-package #:sibyl.tools)
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
@@ -338,6 +356,102 @@
         (nreverse results)))))
 
 ;;; ============================================================
+;;; Codebase map
+;;; ============================================================
+
+(defun %codebase-map-find-lisp-files (dir)
+  "Find all .lisp files in DIR recursively."
+  (let* ((dir-path (uiop:ensure-directory-pathname dir))
+         (files (uiop:directory-files dir-path))
+         (lisp-files (remove-if-not
+                      (lambda (path)
+                        (string= (string-downcase (or (pathname-type path) ""))
+                                 "lisp"))
+                      files))
+         (subdirs (uiop:subdirectories dir-path)))
+    (append lisp-files
+            (mapcan #'%codebase-map-find-lisp-files subdirs))))
+
+(defun %codebase-map-group-by-directory (files)
+  "Group FILES by their module directory under src/."
+  (let ((groups (make-hash-table :test 'equal)))
+    (dolist (file files)
+      (let* ((dir (pathname-directory file))
+             (src-index (and dir (position "src" dir :test #'string=)))
+             (module (cond
+                       ((and src-index (< (1+ src-index) (length dir)))
+                        (string-downcase (nth (1+ src-index) dir)))
+                       (t (string-downcase (or (pathname-name file) ""))))))
+        (when (and module (string/= module ""))
+          (push file (gethash module groups)))))
+    (let ((result nil))
+      (maphash (lambda (name files-list)
+                 (push (cons name (nreverse files-list)) result))
+               groups)
+      (sort result #'string< :key #'car))))
+
+(defun %codebase-map-analyze-file (filepath detail-level)
+  "Analyze FILEPATH with read-sexp when DETAIL-LEVEL is full."
+  (labels ((relative-path (path)
+             (let* ((dir (pathname-directory path))
+                    (components (remove-if (lambda (item) (eq item :absolute)) dir))
+                    (src-pos (position "src" components :test #'string=))
+                    (relative-components (if src-pos (subseq components src-pos) components))
+                    (name (pathname-name path))
+                    (type (pathname-type path)))
+               (if relative-components
+                   (format nil "~{~a~^/~}/~a~@[.~a~]" relative-components name type)
+                   (format nil "~a~@[.~a~]" name type)))))
+    (let* ((path (pathname filepath))
+           (path-string (namestring path))
+           (entry (make-hash-table :test 'equal)))
+      (setf (gethash "path" entry) (relative-path path))
+      (when (string= detail-level "full")
+        (handler-case
+            (let* ((result (execute-tool "read-sexp"
+                                         (list (cons "path" path-string))))
+                   (parsed (yason:parse result :object-as :hash-table))
+                   (definitions (if (vectorp parsed)
+                                    (coerce parsed 'list)
+                                    parsed)))
+              (setf (gethash "definitions" entry) definitions))
+          (error (e)
+            (setf (gethash "definitions" entry) nil)
+            (setf (gethash "error" entry)
+                  (format nil "Failed to read definitions: ~a" e)))))
+      entry)))
+
+(deftool "codebase-map"
+    (:description "Map Sibyl's codebase modules, files, and definitions."
+     :parameters ((:name "detail-level" :type "string" :required nil
+                   :description "Detail level: summary (default) or full")))
+  (block codebase-map
+    (let* ((detail-input (getf args :detail-level))
+           (detail-level (string-downcase (or detail-input "summary")))
+           (src-dir (asdf:system-relative-pathname :sibyl "src/")))
+      (unless (member detail-level '("summary" "full") :test #'string=)
+        (return-from codebase-map
+          (format nil "Error: detail-level must be \"summary\" or \"full\". Got: ~a"
+                  detail-input)))
+      (let* ((files (%codebase-map-find-lisp-files src-dir))
+             (groups (%codebase-map-group-by-directory files))
+             (modules (mapcar (lambda (group)
+                                (let* ((module-name (car group))
+                                       (module-files (cdr group))
+                                       (module (make-hash-table :test 'equal)))
+                                  (setf (gethash "name" module) module-name)
+                                  (setf (gethash "files" module)
+                                        (mapcar (lambda (file)
+                                                  (%codebase-map-analyze-file file detail-level))
+                                                module-files))
+                                  module))
+                              groups))
+             (result (make-hash-table :test 'equal)))
+        (setf (gethash "detail_level" result) detail-level)
+        (setf (gethash "modules" result) modules)
+        result))))
+
+;;; ============================================================
 ;;; Evaluation
 ;;; ============================================================
 
@@ -663,3 +777,261 @@
         (let ((callers (%who-calls-get-callers symbol)))
           (return-from who-calls
             (%who-calls-format-callers symbol callers)))))))
+
+#|
+;;; ============================================================
+;;; Codebase architecture map
+;;; ============================================================
+
+(defun %codebase-map-read-forms (path)
+  (let ((*read-eval* nil))
+    (with-open-file (stream path :direction :input)
+      (let ((eof (gensym "EOF"))
+            (forms nil))
+        (loop for form = (read stream nil eof)
+              until (eq form eof)
+              do (push form forms))
+        (nreverse forms)))))
+
+(defun %codebase-map-normalize-name (value)
+  (cond
+    ((stringp value) value)
+    ((symbolp value) (string-downcase (symbol-name value)))
+    (t (prin1-to-string value))))
+
+(defun %codebase-map-find-system-form (forms system-name)
+  (let ((target (string-downcase system-name)))
+    (find-if (lambda (form)
+               (and (consp form)
+                    (member (first form) '(asdf:defsystem defsystem) :test #'equal)
+                    (let ((name (%codebase-map-normalize-name (second form))))
+                      (and name (string= (string-downcase name) target)))))
+             forms)))
+
+(defun %codebase-map-find-src-components (components)
+  (let ((src-component
+          (find-if (lambda (component)
+                     (and (consp component)
+                          (eq (first component) :module)
+                          (string= (string-downcase
+                                    (%codebase-map-normalize-name (second component)))
+                                   "src")))
+                   components)))
+    (and src-component (getf (cddr src-component) :components))))
+
+(defun %codebase-map-extract-src-components (asdf-path)
+  (let* ((forms (%codebase-map-read-forms asdf-path))
+         (system-form (%codebase-map-find-system-form forms "sibyl")))
+    (unless system-form
+      (error "System definition not found in ~a" asdf-path))
+    (let* ((components (getf (cddr system-form) :components))
+           (src-components (%codebase-map-find-src-components components)))
+      (unless src-components
+        (error "No src module found in ~a" asdf-path))
+      src-components)))
+
+(defun %codebase-map-path-for (segments)
+  (format nil "~{~a~^/~}.lisp" segments))
+
+(defun %codebase-map-collect-file-paths (components parent)
+  (let ((paths nil))
+    (dolist (component components (nreverse paths))
+      (when (consp component)
+        (let ((kind (first component))
+              (name (second component)))
+          (cond
+            ((eq kind :file)
+             (push (%codebase-map-path-for
+                    (append parent (list (%codebase-map-normalize-name name))))
+                   paths))
+            ((eq kind :module)
+             (let* ((module-name (%codebase-map-normalize-name name))
+                    (module-components (getf (cddr component) :components))
+                    (nested (%codebase-map-collect-file-paths
+                             module-components
+                             (append parent (list module-name)))))
+               (setf paths (nconc paths nested))))))))
+
+(defun %codebase-map-collect-module-specs (components parent)
+  (let ((modules nil))
+    (dolist (component components (nreverse modules))
+      (when (consp component)
+        (let ((kind (first component))
+              (name (second component)))
+          (cond
+            ((eq kind :module)
+             (let* ((module-name (%codebase-map-normalize-name name))
+                    (module-components (getf (cddr component) :components))
+                    (paths (%codebase-map-collect-file-paths
+                            module-components
+                            (append parent (list module-name)))))
+               (push (list :name module-name :paths paths) modules)))
+            ((eq kind :file)
+             (let* ((file-name (%codebase-map-normalize-name name))
+                    (path (%codebase-map-path-for (append parent (list file-name)))))
+               (push (list :name file-name :paths (list path)) modules))))))))
+
+(defun %codebase-map-parse-read-sexp-result (json)
+  (let ((parsed (yason:parse json :object-as :hash-table)))
+    (if (vectorp parsed)
+        (coerce parsed 'list)
+        parsed)))
+
+(defun %codebase-map-safe-read-form (form-string)
+  (let ((*read-eval* nil))
+    (handler-case
+        (multiple-value-bind (form) (read-from-string form-string)
+          form)
+      (error () nil))))
+
+(defun %codebase-map-format-args (args)
+  (when args
+    (prin1-to-string args)))
+
+(defun %codebase-map-defun-details (form)
+  (let* ((tail (cddr form))
+         (lambda-list (first tail))
+         (body (rest tail))
+         (docstring (and body (stringp (first body)) (first body))))
+    (values (%codebase-map-format-args lambda-list) docstring)))
+
+(defun %codebase-map-defmethod-details (form)
+  (let ((tail (cddr form)))
+    (loop while (and tail (not (listp (first tail))))
+          do (setf tail (rest tail)))
+    (let ((lambda-list (first tail))
+          (body (rest tail)))
+      (values (%codebase-map-format-args lambda-list)
+              (and body (stringp (first body)) (first body))))))
+
+(defun %codebase-map-defclass-docstring (options)
+  (when (listp options)
+    (dolist (option options)
+      (when (and (consp option) (eq (first option) :documentation))
+        (let ((value (second option)))
+          (when (stringp value)
+            (return value)))))))
+
+(defun %codebase-map-defclass-details (form)
+  (let* ((superclasses (third form))
+         (slots (fourth form))
+         (options (cddddr form))
+         (docstring (%codebase-map-defclass-docstring options)))
+    (values (%codebase-map-format-args (list superclasses slots)) docstring)))
+
+(defun %codebase-map-deftool-details (form)
+  (let* ((options (third form))
+         (description (and (listp options) (getf options :description)))
+         (parameters (and (listp options) (getf options :parameters))))
+    (values (%codebase-map-format-args parameters)
+            (and (stringp description) description))))
+
+(defun %codebase-map-defvar-details (form)
+  (let* ((init (third form))
+         (doc (fourth form)))
+    (cond
+      ((stringp init) (values nil init))
+      ((stringp doc) (values (%codebase-map-format-args init) doc))
+      (t (values (%codebase-map-format-args init) nil)))))
+
+(defun %codebase-map-extract-definition-details (type form-string)
+  (let* ((type-key (and type (string-downcase type)))
+         (form (%codebase-map-safe-read-form form-string)))
+    (cond
+      ((and form (string= type-key "defun"))
+       (%codebase-map-defun-details form))
+      ((and form (string= type-key "defmethod"))
+       (%codebase-map-defmethod-details form))
+      ((and form (string= type-key "defclass"))
+       (%codebase-map-defclass-details form))
+      ((and form (string= type-key "deftool"))
+       (%codebase-map-deftool-details form))
+      ((and form (or (string= type-key "defvar")
+                     (string= type-key "defparameter")))
+       (%codebase-map-defvar-details form))
+      (t (values nil nil)))))
+
+(defun %codebase-map-definition-entry (entry)
+  (let* ((definition (make-hash-table :test 'equal))
+         (type (gethash "type" entry))
+         (name (gethash "name" entry))
+         (form-string (gethash "form" entry))
+         (start-line (gethash "start_line" entry))
+         (end-line (gethash "end_line" entry)))
+    (setf (gethash "name" definition) name)
+    (setf (gethash "type" definition) type)
+    (setf (gethash "args" definition) nil)
+    (setf (gethash "docstring" definition) nil)
+    (when start-line
+      (setf (gethash "start_line" definition) start-line))
+    (when end-line
+      (setf (gethash "end_line" definition) end-line))
+    (multiple-value-bind (args docstring)
+        (%codebase-map-extract-definition-details type form-string)
+      (setf (gethash "args" definition) args)
+      (setf (gethash "docstring" definition) docstring))
+    definition))
+
+(defun %codebase-map-read-definitions (path)
+  (let* ((result (execute-tool "read-sexp" (list (cons "path" path))))
+         (entries (%codebase-map-parse-read-sexp-result result)))
+    (mapcar #'%codebase-map-definition-entry entries)))
+
+(defun %codebase-map-file-entry (path detail-level)
+  (let ((entry (make-hash-table :test 'equal)))
+    (setf (gethash "path" entry) path)
+    (when (string= detail-level "full")
+      (handler-case
+          (setf (gethash "definitions" entry)
+                (%codebase-map-read-definitions path))
+        (error (e)
+          (setf (gethash "definitions" entry) nil)
+          (setf (gethash "error" entry)
+                (format nil "Failed to read definitions: ~a" e)))))
+    entry))
+
+(defun %codebase-map-module-entry (name paths detail-level)
+  (let ((module (make-hash-table :test 'equal)))
+    (setf (gethash "name" module) name)
+    (setf (gethash "files" module)
+          (mapcar (lambda (path)
+                    (%codebase-map-file-entry path detail-level))
+                  paths))
+    module))
+
+(deftool "codebase-map"
+    (:description "Map Sibyl's codebase modules, files, and definitions."
+     :parameters ((:name "detail-level" :type "string" :required nil
+                   :description "Detail level: summary (default) or full")
+                  (:name "asdf-path" :type "string" :required nil
+                   :description "Override path to sibyl.asd for diagnostics")))
+  (block codebase-map
+    (let* ((detail-input (getf args :detail-level))
+           (detail-level (string-downcase (or detail-input "summary")))
+           (asdf-path (or (getf args :asdf-path)
+                          (asdf:system-relative-pathname :sibyl "sibyl.asd"))))
+      (unless (member detail-level '("summary" "full") :test #'string=)
+        (return-from codebase-map
+          (format nil "Error: detail-level must be \"summary\" or \"full\". Got: ~a"
+                  detail-input)))
+      (unless (uiop:file-exists-p asdf-path)
+        (return-from codebase-map
+          (format nil "Error: ASDF file not found: ~a" asdf-path)))
+      (handler-case
+          (let* ((src-components (%codebase-map-extract-src-components asdf-path))
+                 (module-specs (%codebase-map-collect-module-specs
+                                src-components
+                                (list "src")))
+                 (modules (mapcar (lambda (spec)
+                                    (%codebase-map-module-entry
+                                     (getf spec :name)
+                                     (getf spec :paths)
+                                     detail-level))
+                                  module-specs))
+                 (result (make-hash-table :test 'equal)))
+            (setf (gethash "detail_level" result) detail-level)
+            (setf (gethash "modules" result) modules)
+            result)
+        (error (e)
+          (format nil "Error: ~a" e))))))
+|#
