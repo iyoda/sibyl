@@ -26,10 +26,11 @@
       ((:file "message")
        (:file "client")
        (:file "providers")))
-     (:module "tools"
-      :components
-      ((:file "protocol")
-       (:file "builtin")))
+      (:module "tools"
+       :components
+       ((:file "protocol")
+        (:file "builtin")
+        (:file "lisp-tools")))
      (:module "agent"
       :components
       ((:file "memory")
@@ -41,11 +42,12 @@
   :depends-on (#:sibyl #:fiveam)
   :serial t
   :components
-  ((:module "tests"
-    :components
-    ((:file "suite")
-     (:file "tools-test")
-     (:file "message-test"))))
+   ((:module "tests"
+     :components
+     ((:file "suite")
+      (:file "tools-test")
+      (:file "sexp-tools-test")
+      (:file "message-test"))))
   :perform (test-op (o c)
              (uiop:symbol-call :fiveam :run!
                (uiop:find-symbol* '#:sibyl-tests '#:sibyl.tests))))

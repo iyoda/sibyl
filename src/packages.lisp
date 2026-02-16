@@ -82,24 +82,30 @@
    #:make-openai-client))
 
 (defpackage #:sibyl.tools
-  (:use #:cl #:sibyl.conditions #:sibyl.util)
-  (:export
-   ;; Tool protocol
-   #:tool
-   #:tool-name
-   #:tool-description
-   #:tool-parameters
-   #:tool-handler
-   #:deftool
-   ;; Registry
-   #:*tool-registry*
-   #:register-tool
-   #:find-tool
-   #:list-tools
-   #:tools-as-schema
-   ;; Execution
-   #:execute-tool
-   #:execute-tool-call))
+   (:use #:cl #:sibyl.conditions #:sibyl.util)
+   (:export
+    ;; Tool protocol
+    #:tool
+    #:tool-name
+    #:tool-description
+    #:tool-parameters
+    #:tool-handler
+    #:deftool
+    ;; Registry
+    #:*tool-registry*
+    #:register-tool
+    #:find-tool
+    #:list-tools
+    #:tools-as-schema
+    ;; Execution
+    #:execute-tool
+    #:execute-tool-call
+    ;; Lisp introspection tools
+    #:read-sexp
+    #:describe-symbol
+    #:eval-form
+    #:macroexpand-form
+    #:package-symbols))
 
 (defpackage #:sibyl.agent
   (:use #:cl #:sibyl.conditions #:sibyl.config #:sibyl.util
