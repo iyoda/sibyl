@@ -47,7 +47,8 @@
      ((:file "suite")
       (:file "tools-test")
       (:file "sexp-tools-test")
-      (:file "message-test"))))
+      (:file "message-test")
+      (:file "agent-test"))))
   :perform (test-op (o c)
              (uiop:symbol-call :fiveam :run!
                (uiop:find-symbol* '#:sibyl-tests '#:sibyl.tests))))

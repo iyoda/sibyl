@@ -236,3 +236,65 @@ Sibyl can now:
 - Only "callers" direction currently supported
 - CLOS method extraction handles SB-PCL internal structures
 - Filter ensures only Sibyl's own code appears in results (no external libraries)
+
+## [2026-02-16T22:30] System Prompt Self-Awareness Integration
+
+### Task Completed
+**Embedded self-awareness into Sibyl's system prompt** (Phase 1, Task 1-3)
+
+### Changes Made
+1. **src/agent/core.lisp** (lines 44-52):
+   - Updated `*default-system-prompt*` to include:
+     - Self-awareness statement: "You have the ability to access, understand, and modify your own source code"
+     - List of 7 Lisp-aware tools with descriptions
+     - Guidance on using tools for structural Lisp understanding
+   
+2. **tests/agent-test.lisp** (new file):
+   - Created comprehensive test suite for system prompt content
+   - Tests verify: self-awareness mentions, all 7 tool names, Lisp-awareness
+   - Tests verify agent creation with default and custom prompts
+   
+3. **sibyl.asd** (line 50):
+   - Added `(:file "agent-test")` to test suite components
+
+### TDD Workflow Applied
+✅ **RED**: Tests failed (8/12 checks) - prompt missing self-awareness content
+✅ **GREEN**: Tests passed (12/12 checks) - prompt updated with all required content
+✅ **VERIFY**: Full test suite passed (170/170 checks, 100%)
+
+### System Prompt Content
+The updated prompt now includes:
+- **Self-awareness section**: Explicit statement about introspective capabilities
+- **7 Lisp-aware tools listed**:
+  1. read-sexp: Parse Lisp source as S-expressions
+  2. describe-symbol: Introspect functions, variables, classes, macros
+  3. eval-form: Safely evaluate Lisp expressions with auto-compilation
+  4. macroexpand-form: Expand macros to understand structure
+  5. package-symbols: List symbols in any package
+  6. who-calls: Analyze function call relationships
+  7. codebase-map: Map entire codebase architecture
+- **Guidance**: Use tools for structural understanding, consider S-expression structure, package boundaries, symbol visibility
+
+### Verification Results
+✅ **Agent creation**: `(make-agent :client nil)` → agent created successfully
+✅ **System prompt content**: Contains all 7 tool names + self-awareness language
+✅ **Test suite**: 170/170 checks pass (100%)
+✅ **No regressions**: All existing tests still pass
+
+### Token Efficiency
+- Prompt addition: ~350 tokens (well under 500 token target)
+- Concise, structured format using bullet points
+- Clear separation of concerns (self-awareness, tools, guidance)
+
+### Acceptance Criteria Met
+- [x] `*default-system-prompt*` updated with self-awareness statement
+- [x] System prompt lists all 7 Lisp-aware tools
+- [x] Tests created and passing (agent-test.lisp)
+- [x] `(asdf:test-system :sibyl)` → 100% pass rate
+- [x] Agent creation verified with new prompt
+- [x] No regressions in existing functionality
+
+### Status
+✅ **COMPLETE** - Sibyl now knows it can introspect and modify itself!
+
+**Progress**: Phase 1 Task 1-3 complete (9/34 total tasks done)
