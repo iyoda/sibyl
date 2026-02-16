@@ -1,5 +1,16 @@
 ;;;; packages.lisp — Package definitions for Sibyl
 
+(defpackage #:sibyl.system
+  (:use #:cl)
+  (:export
+   ;; Protection state
+   #:*modified-files*
+   ;; Protection API
+   #:protect-file
+   #:unprotect-file
+   #:file-protected-p
+   #:clear-all-protections))
+
 (defpackage #:sibyl.conditions
   (:use #:cl)
   (:export

@@ -336,3 +336,84 @@ The updated prompt now includes:
 ### Key Findings
 - Line-based editing preserves comments outside the target definition
 - Keeping trailing newline via line-split/join avoids file formatting drift
+## [2026-02-16T23:10] ASDF Reload Protection Implementation
+
+### Implemented Feature
+**ASDF reload protection**: Prevents ASDF from reloading files modified in-memory via `safe-redefine`.
+
+### Files Created/Modified
+1. **src/system/asdf-protection.lisp** (new):
+   - `*modified-files*` hash table (keys: absolute pathname strings)
+   - `protect-file`, `unprotect-file`, `file-protected-p`, `clear-all-protections`
+   - `:around` methods on `asdf:perform` for `compile-op` and `load-op`
+   
+2. **src/packages.lisp**:
+   - New `sibyl.system` package with 5 exports
+   
+3. **sibyl.asd**:
+   - Added `src/system/` module early in load order (before conditions)
+   
+4. **tests/asdf-protection-test.lisp** (new):
+   - 5 tests: basic protection, multiple files, clear-all, string paths, hash table type
+
+### Key Technical Decisions
+
+**ASDF Integration Approach**:
+- `:around` methods on `asdf:perform` (NOT `operation-done-p` or `input-files`)
+- When file is protected: print skip message, return without calling `call-next-method`
+- Works for normal loads (`ql:quickload`, `asdf:load-system`)
+- **Limitation**: `:force t` bypasses protection due to ASDF's state tracking requirements
+
+**Why `:perform` and not other methods**:
+- `operation-done-p` with `:force t` → ASDF ignores the result
+- `input-files`/`output-files` returning NIL → ASDF errors on state tracking
+- `action-valid-p` → doesn't exist in ASDF 3.x
+- `perform` → simplest, most reliable interception point
+
+**Pathname Handling**:
+- Use `truename` to get canonical absolute paths
+- Handle `file-error` for non-existent files (protect before creation)
+- Store as strings in hash table (`:test 'equal`)
+
+### Realistic Use Case (Verified)
+```lisp
+;; 1. User modifies function in-memory
+(sibyl.tools:execute-tool "safe-redefine" 
+  '(:function "sibyl.tools:some-function" :new-source "(defun some-function () 42)"))
+
+;; 2. System protects the file
+(sibyl.system:protect-file "src/tools/protocol.lisp")
+
+;; 3. User does normal reload (NOT :force t)
+(ql:quickload :sibyl)  ; ← File NOT recompiled, in-memory changes preserved
+
+;; 4. After syncing to disk
+(sibyl.tools:execute-tool "sync-to-file" ...)
+(sibyl.system:unprotect-file "src/tools/protocol.lisp")  ; ← Now safe to reload
+```
+
+### Test Results
+- Unit tests: 197/197 passing (100%)
+- Manual verification: All 4 scenarios passed
+  - Protect + normal reload → file skipped ✓
+  - Unprotect + reload → file recompiled ✓
+  - Multiple file protection → both skipped ✓
+  - Clear all → all unprotected ✓
+
+### Integration Points (Future)
+- `safe-redefine` should call `protect-file` after successful redefinition
+- `sync-to-file` should call `unprotect-file` after successful sync
+- These integrations can be added in Phase 2 Task 2-4 or later
+
+### Acceptance Criteria Met
+- [x] Files in `*modified-files*` not reloaded by `ql:quickload`
+- [x] Protection add/remove works correctly
+- [x] `(fiveam:run 'asdf-protection-tests)` → PASS
+- [x] System still loads normally for unprotected files
+- [x] New `sibyl.system` package with exports
+- [x] `src/system/` module in sibyl.asd
+
+### Status
+✅ **COMPLETE** - Phase 2 Task 2-3 complete. ASDF reload protection operational!
+
+**Progress**: Phase 2 Task 2-3 complete (12/34 total tasks done)

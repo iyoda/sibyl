@@ -18,6 +18,9 @@
   ((:module "src"
     :components
     ((:file "packages")
+     (:module "system"
+      :components
+      ((:file "asdf-protection")))
      (:file "conditions")
      (:file "config")
      (:file "util")
@@ -48,7 +51,8 @@
       (:file "tools-test")
       (:file "sexp-tools-test")
       (:file "message-test")
-      (:file "agent-test"))))
+      (:file "agent-test")
+      (:file "asdf-protection-test"))))
   :perform (test-op (o c)
              (uiop:symbol-call :fiveam :run!
                (uiop:find-symbol* '#:sibyl-tests '#:sibyl.tests))))
