@@ -123,13 +123,15 @@
       #:evolution-state-record-attempt
       #:evolution-state-save
       #:evolution-state-load
-      ;; Evolution progress reporting
-      #:evolution-report-cycle-start
-      #:evolution-report-improvement-start
-      #:evolution-report-step
-      #:evolution-report-improvement-result
-      #:evolution-report-cycle-summary
-      #:evolution-report-final-summary))
+       ;; Evolution progress reporting
+       #:evolution-report-cycle-start
+       #:evolution-report-improvement-start
+       #:evolution-report-step
+       #:evolution-report-improvement-result
+       #:evolution-report-cycle-summary
+       #:evolution-report-final-summary
+       ;; Self-assess guard (exported for test runner binding)
+       #:*self-assess-running*))
 
 (defpackage #:sibyl.agent
   (:use #:cl #:sibyl.conditions #:sibyl.config #:sibyl.util

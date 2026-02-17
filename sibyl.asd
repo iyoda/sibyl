@@ -57,5 +57,4 @@
        (:file "repl-test")
        (:file "evolution-state-test"))))
   :perform (test-op (o c)
-             (uiop:symbol-call :fiveam :run!
-               (uiop:find-symbol* '#:sibyl-tests '#:sibyl.tests))))
+              (uiop:symbol-call '#:sibyl.tests '#:run-sibyl-tests)))

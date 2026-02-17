@@ -574,6 +574,23 @@
     (is (>= coverage 0.0))
     (is (<= coverage 1.0))))
 
+(test self-assess-does-not-rerun-full-suite
+  "*self-assess-running* が t の時、self-assess は run-tests をスキップしキャッシュを返すべき。"
+  ;; テスト中（*self-assess-running* = t）でself-assessを呼んでも
+  ;; スイート全体が再実行されないことを確認
+  (let ((sibyl.tools::*self-assess-running* t)
+        ;; キャッシュに既存の結果をセット
+        (sibyl.tools::*self-assess-last-test-results*
+          (let ((h (make-hash-table :test 'equal)))
+            (setf (gethash "passed" h) 100
+                  (gethash "failed" h) 0
+                  (gethash "total" h) 100)
+            h)))
+    (let ((result (sibyl.tools:execute-tool "self-assess" nil)))
+      (is (stringp result))
+      ;; キャッシュ使用時は "test_coverage" セクションが存在する
+      (is (search "test_coverage" result)))))
+
 (def-suite improvement-plan-tests
   :description "Tests for improvement-plan tool."
   :in sibyl-tests)
@@ -1624,6 +1641,54 @@
              (is (string= original-content restored-content))))
       (%asdf-registration-restore-asd original-content))))
 
+
+(test write-test-auto-generated-001
+  "Auto-generated test"
+  (is (equal 1 1)))
+
+(test write-test-duplicate-check
+  "Auto-generated test"
+  (is (eq t t)))
+
+(test write-test-default-suite-check
+  "Auto-generated test"
+  (is (equal 3 3)))
+
+(test write-test-runnable-check
+  "Auto-generated test"
+  (is (equal 4 4)))
+
+(test write-test-auto-generated-001
+  "Auto-generated test"
+  (is (equal 1 1)))
+
+(test write-test-duplicate-check
+  "Auto-generated test"
+  (is (eq t t)))
+
+(test write-test-default-suite-check
+  "Auto-generated test"
+  (is (equal 3 3)))
+
+(test write-test-runnable-check
+  "Auto-generated test"
+  (is (equal 4 4)))
+
+(test write-test-auto-generated-001
+  "Auto-generated test"
+  (is (equal 1 1)))
+
+(test write-test-duplicate-check
+  "Auto-generated test"
+  (is (eq t t)))
+
+(test write-test-default-suite-check
+  "Auto-generated test"
+  (is (equal 3 3)))
+
+(test write-test-runnable-check
+  "Auto-generated test"
+  (is (equal 4 4)))
 
 (test write-test-auto-generated-001
   "Auto-generated test"

@@ -1983,6 +1983,17 @@
     (error () nil)))
 
 (defun %self-assess-run-tests ()
+  ;; When already inside a test run, return cached results to prevent
+  ;; recursive full-suite re-execution.
+  (when *self-assess-running*
+    (return-from %self-assess-run-tests
+      (if *self-assess-last-test-results*
+          (values *self-assess-last-test-results* nil)
+          (let ((default (make-hash-table :test 'equal)))
+            (setf (gethash "passed" default) 0
+                  (gethash "failed" default) 0
+                  (gethash "total" default) 0)
+            (values default nil)))))
   (when (find-tool "run-tests")
     (let ((*self-assess-running* t))
       (handler-case
