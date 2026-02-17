@@ -31,11 +31,19 @@
        (:file "client")
        (:file "providers")
        (:file "model-selector")))
+     (:module "plan"
+       :components
+       ((:file "core")))
      (:module "tools"
        :components
        ((:file "protocol")
         (:file "builtin")
-        (:file "lisp-tools")))
+        (:file "lisp-tools")
+        (:file "analysis-tools")
+        (:file "self-tools")
+        (:file "evolution-tools")
+        (:file "refactor-tools")
+        (:file "planning-tools")))
      (:module "mcp"
        :components
        ((:file "client")
@@ -71,6 +79,7 @@
      (:file "tools-test")
      (:file "sexp-tools-test")
      (:file "message-test")
+     (:file "planning-test")
      (:file "client-test")
      (:file "agent-test")
      (:file "asdf-protection-test")

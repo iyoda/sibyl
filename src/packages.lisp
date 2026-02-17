@@ -152,6 +152,34 @@
    #:model-capabilities
    #:make-openai-client))
 
+(defpackage #:sibyl.plan
+  (:use #:cl #:sibyl.util)
+  (:export
+   ;; Data constructors
+   #:make-plan
+   #:make-phase
+   #:make-task
+   ;; Status transitions
+   #:plan-update-status
+   #:plan-update-task-status
+   ;; Serialization
+   #:plan->sexp
+   #:sexp->plan
+   ;; File I/O
+   #:save-plan
+   #:load-plan
+   #:delete-plan
+   #:list-plans
+   ;; Plan mutation
+   #:plan-add-phase
+   #:plan-add-task
+   ;; Index
+   #:load-plan-index
+   ;; Formatting
+   #:format-plan
+   ;; Configuration
+   #:*default-plan-directory*))
+
 (defpackage #:sibyl.tools
    (:use #:cl #:sibyl.conditions #:sibyl.util #:sibyl.logging)
    (:export
