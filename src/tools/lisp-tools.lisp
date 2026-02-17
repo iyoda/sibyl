@@ -796,6 +796,165 @@
                   (format nil "Rolled back: ~a restored." file))))))))))
 
 ;;; ============================================================
+;;; Add new definitions to file
+;;; ============================================================
+
+(defun %add-definition-parse-read-sexp-result (json)
+  (let ((parsed (yason:parse json :object-as :hash-table)))
+    (cond
+      ((null parsed) nil)
+      ((vectorp parsed) (coerce parsed 'list))
+      ((hash-table-p parsed) (list parsed))
+      (t parsed))))
+
+(defun %add-definition-entry-line (entry key)
+  (let ((value (gethash key entry)))
+    (when (integerp value)
+      value)))
+
+(defun %add-definition-sibyl-package-name-p (package-name)
+  "Return true if PACKAGE-NAME is a Sibyl package."
+  (let ((pkg-name (string-upcase package-name)))
+    (or (string= pkg-name "SIBYL")
+        (and (>= (length pkg-name) 6)
+             (string= (subseq pkg-name 0 6) "SIBYL.")))))
+
+(defun %add-definition-extract-package (form)
+  (when (and (consp form)
+             (symbolp (car form))
+             (string= (string-downcase (symbol-name (car form))) "in-package"))
+    (let ((designator (second form)))
+      (cond
+        ((stringp designator) designator)
+        ((symbolp designator) (symbol-name designator))
+        (t nil)))))
+
+(defun %add-definition-file-package (path)
+  (let ((forms (%read-sexp-read-forms-from-file path)))
+    (loop for form in forms
+          for pkg = (%add-definition-extract-package form)
+          when pkg
+            do (return (string-upcase pkg)))))
+
+(defun %add-definition-validate-definition (definition)
+  (let ((*read-eval* nil))
+    (multiple-value-bind (form pos)
+        (handler-case
+            (read-from-string definition)
+          (error (e)
+            (error "Invalid new-definition: ~a" e)))
+      (declare (ignore pos))
+      (let ((type (%read-sexp-form-type-string form)))
+        (unless (and type
+                     (member type '("defun" "defmethod" "defclass" "deftool")
+                             :test #'string=))
+          (error "New definition must be defun, defmethod, defclass, or deftool")))
+      t)))
+
+(defun %add-definition-trim-leading-empty (lines)
+  (loop while (and lines (string= (first lines) ""))
+        do (setf lines (rest lines)))
+  lines)
+
+(defun %add-definition-prepare-lines (definition)
+  (let* ((lines (%sync-to-file-split-lines definition))
+         (trimmed (%sync-to-file-trim-trailing-empty lines))
+         (cleaned (%add-definition-trim-leading-empty trimmed)))
+    (unless (and cleaned (plusp (length cleaned)))
+      (error "New definition is empty"))
+    (append (list "") cleaned)))
+
+(defun %add-definition-eval-definition (definition package-name)
+  (let* ((result (execute-tool "eval-form"
+                               (list (cons "form" definition)
+                                     (cons "package" package-name))))
+         (lower (string-downcase result)))
+    (when (or (search "blocked unsafe form" lower)
+              (search "timeout after" lower))
+      (error 'sibyl.conditions:tool-execution-error
+             :tool-name "add-definition"
+             :message (format nil "Failed to evaluate new definition: ~a" result)
+             :inner-error nil))
+    result))
+
+(deftool "add-definition"
+    (:description "Append a new definition to an existing Lisp source file."
+     :parameters ((:name "file" :type "string" :required t
+                   :description "Path to the source file")
+                  (:name "new-definition" :type "string" :required t
+                   :description "New definition as an S-expression string")
+                  (:name "after" :type "string" :required nil
+                   :description "Optional definition name to insert after")))
+  (block add-definition
+    (let* ((file (getf args :file))
+           (definition (getf args :new-definition))
+           (after-input (getf args :after)))
+      (unless (and file (stringp file) (string/= file ""))
+        (error "File path not specified"))
+      (unless (uiop:file-exists-p file)
+        (error "File not found: ~a" file))
+      (unless (and definition (stringp definition)
+                   (string/= (string-trim-whitespace definition) ""))
+        (error "New definition not specified"))
+      (when after-input
+        (unless (and (stringp after-input)
+                     (string/= (string-trim-whitespace after-input) ""))
+          (error "After definition name not specified: ~a" after-input)))
+      (%add-definition-validate-definition definition)
+      (let ((package-name (%add-definition-file-package file)))
+        (unless package-name
+          (error "Package declaration not found in ~a" file))
+        (unless (%add-definition-sibyl-package-name-p package-name)
+          (error "add-definition can only modify Sibyl packages: ~a" package-name))
+        (let* ((after-name (when after-input
+                             (multiple-value-bind (package symbol-name)
+                                 (%split-symbol-string after-input)
+                               (declare (ignore package))
+                               (string-trim-whitespace
+                                (or symbol-name after-input)))))
+               (read-args (if after-name
+                              (list (cons "path" file)
+                                    (cons "name" after-name))
+                              (list (cons "path" file))))
+               (result (execute-tool "read-sexp" read-args))
+               (entries (%add-definition-parse-read-sexp-result result)))
+          (when (null entries)
+            (if after-name
+                (error "Definition ~a not found in ~a" after-input file)
+                (error "No definitions found in ~a" file)))
+          (when (and after-name (> (length entries) 1))
+            (error "Multiple definitions found for ~a in ~a" after-input file))
+          (let* ((entry (if after-name
+                            (first entries)
+                            (car (last entries))))
+                 (end-line (%add-definition-entry-line entry "end_line")))
+            (unless end-line
+              (error "Definition not found in ~a" file))
+            (let ((original-content (uiop:read-file-string file)))
+              (restart-case
+                  (let* ((lines (%sync-to-file-split-lines original-content))
+                         (line-count (length lines))
+                         (insert-index end-line))
+                    (when (or (< end-line 1)
+                              (> end-line line-count))
+                      (error "Invalid definition range for ~a in ~a: ~a"
+                             (or after-input "last definition")
+                             file
+                             end-line))
+                    (let* ((before (subseq lines 0 insert-index))
+                           (after (subseq lines insert-index))
+                           (new-lines (%add-definition-prepare-lines definition))
+                           (updated (append before new-lines after))
+                           (new-content (%sync-to-file-join-lines updated)))
+                      (%sync-to-file-write-content file new-content)
+                      (%add-definition-eval-definition definition package-name)
+                      (format nil "Success: definition added to ~a" file)))
+                (:undo-addition ()
+                  :report "Undo the definition addition"
+                  (%sync-to-file-write-content file original-content)
+                  (format nil "Addition undone."))))))))))
+
+;;; ============================================================
 ;;; Macro expansion
 ;;; ============================================================
 
@@ -1479,6 +1638,33 @@
         do (setf (gethash "id" suggestion) idx))
   suggestions)
 
+(defun %suggest-improvements-filter-by-priority (suggestions min-priority)
+  "Filter SUGGESTIONS to only include those at or above MIN-PRIORITY level.
+   Priority order: high (0) > medium (1) > low (2).
+   If MIN-PRIORITY is nil or \"low\", all suggestions are returned."
+  (let ((min-rank (%suggest-improvements-priority-rank (or min-priority "low"))))
+    (remove-if (lambda (s)
+                 (> (%suggest-improvements-priority-rank
+                     (gethash "priority" s))
+                    min-rank))
+               suggestions)))
+
+(defun %suggest-improvements-filter-attempted (suggestions)
+  "Filter out suggestions whose description matches previously-attempted improvements.
+   Reads from *evolution-state* (key \"attempted-improvements\").
+   If *evolution-state* is not bound or has no attempted list, returns SUGGESTIONS unchanged."
+  (if (boundp '*evolution-state*)
+      (let* ((state (symbol-value '*evolution-state*))
+             (attempted (when state
+                          (gethash "attempted-improvements" state))))
+        (if (and attempted (> (length attempted) 0))
+            (remove-if (lambda (s)
+                         (let ((desc (gethash "description" s)))
+                           (some (lambda (a) (string= desc a)) attempted)))
+                       suggestions)
+            suggestions))
+      suggestions))
+
 (defun %suggest-improvements-build-note (scope suggestions)
   (with-output-to-string (stream)
     (format stream "## [~a] suggest-improvements~%~%" (timestamp-now))
@@ -1518,9 +1704,15 @@
 (deftool "suggest-improvements"
     (:description "Analyze the codebase and suggest improvements."
      :parameters ((:name "scope" :type "string" :required nil
-                   :description "Scope: all, module-name, or file-path")))
+                   :description "Scope: all, module-name, or file-path")
+                  (:name "min-priority" :type "string" :required nil
+                   :description "Minimum priority to include: high, medium, or low (default: low)")
+                  (:name "exclude-attempted" :type "string" :required nil
+                   :description "If true, exclude improvements previously attempted (uses *evolution-state*)")))
   (block suggest-improvements
     (let* ((scope (getf args :scope))
+           (min-priority (getf args :min-priority))
+           (exclude-attempted (getf args :exclude-attempted))
            (normalized-scope (%suggest-improvements-normalize-scope scope))
            (map-result (execute-tool "codebase-map"
                                      '(("detail-level" . "summary"))))
@@ -1529,7 +1721,7 @@
            (definitions (%suggest-improvements-collect-definitions files))
            (tests-content (%suggest-improvements-read-tests-content))
            (baseline-callers (%suggest-improvements-callers-count
-                              "sibyl.tools:execute-tool-call"))
+                               "sibyl.tools:execute-tool-call"))
            (suggestions nil))
       (setf suggestions
             (append (%suggest-improvements-missing-tests
@@ -1540,6 +1732,9 @@
                     (%suggest-improvements-duplications definitions)))
       (setf suggestions (%suggest-improvements-dedupe suggestions))
       (setf suggestions (%suggest-improvements-sort suggestions))
+      (setf suggestions (%suggest-improvements-filter-by-priority suggestions min-priority))
+      (when exclude-attempted
+        (setf suggestions (%suggest-improvements-filter-attempted suggestions)))
       (setf suggestions (%suggest-improvements-limit suggestions 10))
       (setf suggestions (%suggest-improvements-assign-ids suggestions))
       (%suggest-improvements-append-learnings normalized-scope suggestions)
@@ -1567,7 +1762,7 @@
     ("lisp_introspection" "read-sexp" "describe-symbol" "macroexpand-form"
                            "package-symbols" "who-calls" "codebase-map")
     ("testing" "run-tests" "write-test")
-    ("self_modification" "safe-redefine" "sync-to-file")
+    ("self_modification" "safe-redefine" "sync-to-file" "add-definition")
     ("analysis" "suggest-improvements" "self-assess")
     ("evaluation" "eval-form"))
   "Category map for registered tool names.")
@@ -2650,3 +2845,828 @@
         (error (e)
           (format nil "Error: ~a" e))))))
 |#
+
+;;; ============================================================
+;;; Package export management
+;;; ============================================================
+
+(defun %add-export-parse-symbols (symbols-input)
+  "Parse symbols input - can be a single symbol or comma-separated list."
+  (if (stringp symbols-input)
+      (let ((trimmed (string-trim-whitespace symbols-input)))
+        (if (position #\, trimmed)
+            ;; Multiple symbols separated by commas
+            (mapcar #'string-trim-whitespace
+                    (cl-ppcre:split "," trimmed))
+            ;; Single symbol
+            (list trimmed)))
+      (list (format nil "~a" symbols-input))))
+
+(defun %add-export-find-defpackage-bounds (content package-name)
+  "Find the start and end positions of a defpackage form in content.
+   Returns (values start-pos end-pos) or (values nil nil) if not found."
+  (let* ((search-string (format nil "(defpackage #:~a" 
+                                (string-downcase package-name)))
+         (start-pos (search search-string content :test #'char-equal)))
+    (if start-pos
+        (let ((end-pos (position #\) content :start start-pos :from-end nil)))
+          ;; Find the matching closing paren
+          (let ((depth 0)
+                (pos start-pos))
+            (loop while (< pos (length content))
+                  do (let ((ch (char content pos)))
+                       (cond
+                         ((char= ch #\() (incf depth))
+                         ((char= ch #\)) (decf depth)))
+                       (when (zerop depth)
+                         (return-from %add-export-find-defpackage-bounds
+                           (values start-pos (1+ pos))))
+                       (incf pos)))
+            (values nil nil)))
+        (values nil nil))))
+
+(defun %add-export-find-export-section (defpackage-text)
+  "Find the :export section within a defpackage form.
+   Returns (values start-offset end-offset) relative to defpackage-text."
+  (let ((export-pos (search "(:export" defpackage-text :test #'char-equal)))
+    (if export-pos
+        (let ((depth 0)
+              (pos export-pos))
+          (loop while (< pos (length defpackage-text))
+                do (let ((ch (char defpackage-text pos)))
+                     (cond
+                       ((char= ch #\() (incf depth))
+                       ((char= ch #\)) (decf depth)))
+                     (when (zerop depth)
+                       (return-from %add-export-find-export-section
+                         (values export-pos (1+ pos))))
+                     (incf pos)))
+          (values nil nil))
+        (values nil nil))))
+
+(defun %add-export-insert-symbols (export-section symbols)
+  "Insert new symbols into an :export section, preserving formatting.
+   Returns the updated export section text."
+  (let* ((lines (cl-ppcre:split "\\n" export-section))
+         (last-line-idx (1- (length lines)))
+         (last-line (nth last-line-idx lines)))
+    ;; Find indentation from existing symbols
+    (let ((indent "    "))
+      (dolist (line lines)
+        (when (search "#:" line)
+          (let ((hash-pos (search "#:" line)))
+            (when hash-pos
+              (setf indent (make-string hash-pos :initial-element #\Space))
+              (return)))))
+      ;; Insert symbols before the closing paren
+      (let ((new-symbols (mapcar (lambda (sym)
+                                   (format nil "~a#:~a"
+                                           indent
+                                           (string-downcase sym)))
+                                 symbols)))
+        ;; Reconstruct the export section
+        (with-output-to-string (s)
+          (loop for line in (butlast lines)
+                do (write-line line s))
+          (dolist (new-sym new-symbols)
+            (write-line new-sym s))
+          (write-string last-line s))))))
+
+(defun %add-export-update-packages-file (packages-path package-name symbols)
+  "Update packages.lisp to add symbols to the package's :export section."
+  (let* ((content (uiop:read-file-string packages-path)))
+    (multiple-value-bind (defpkg-start defpkg-end)
+        (%add-export-find-defpackage-bounds content package-name)
+      (unless defpkg-start
+        (error "Package ~a not found in ~a" package-name packages-path))
+      (let ((defpackage-text (subseq content defpkg-start defpkg-end)))
+        (multiple-value-bind (export-start export-end)
+            (%add-export-find-export-section defpackage-text)
+          (unless export-start
+            (error "No :export section found in package ~a" package-name))
+          (let* ((export-section (subseq defpackage-text export-start export-end))
+                 (updated-export (%add-export-insert-symbols export-section symbols))
+                 (updated-defpackage (concatenate 'string
+                                                   (subseq defpackage-text 0 export-start)
+                                                   updated-export
+                                                   (subseq defpackage-text export-end)))
+                 (updated-content (concatenate 'string
+                                               (subseq content 0 defpkg-start)
+                                               updated-defpackage
+                                               (subseq content defpkg-end))))
+            (with-open-file (stream packages-path
+                                    :direction :output
+                                    :if-exists :supersede)
+              (write-string updated-content stream))
+            updated-content))))))
+
+(defun %add-export-runtime-export (package-name symbols)
+  "Export symbols at runtime using CL's export function."
+  (let ((pkg (find-package package-name)))
+    (unless pkg
+      (error "Package not found: ~a" package-name))
+    (dolist (sym-name symbols)
+      (let ((sym (intern (string-upcase sym-name) pkg)))
+        ;; Check if already exported
+        (multiple-value-bind (found-sym status)
+            (find-symbol (string sym) pkg)
+          (declare (ignore found-sym))
+          (unless (eq status :external)
+            (export sym pkg)))))))
+
+(deftool "add-export"
+    (:description "Add new symbols to a package's export list in packages.lisp and export them at runtime."
+     :parameters ((:name "package" :type "string" :required t
+                   :description "Package name (e.g., \"sibyl.tools\")")
+                  (:name "symbols" :type "string" :required t
+                   :description "Symbol name or comma-separated list of symbols to export")))
+  (block add-export
+    (let* ((package-input (getf args :package))
+           (symbols-input (getf args :symbols))
+           (packages-path (asdf:system-relative-pathname :sibyl "src/packages.lisp")))
+      
+      ;; Validate inputs
+      (unless (and package-input (stringp package-input) (string/= package-input ""))
+        (error "Package name not specified"))
+      (unless (and symbols-input (stringp symbols-input) (string/= symbols-input ""))
+        (error "Symbols not specified"))
+      
+      ;; Parse package name
+      (let* ((package-name-input (string-trim-whitespace package-input))
+             (package-name (string-upcase package-name-input))
+             (symbols (%add-export-parse-symbols symbols-input))
+             (original-content (uiop:read-file-string packages-path)))
+        
+        ;; Verify package exists
+        (unless (find-package package-name)
+          (error "Package not found: ~a" package-name-input))
+        
+        ;; Verify it's a sibyl.* package
+        (unless (or (string-equal package-name "sibyl")
+                    (cl-ppcre:scan "^sibyl\\." (string-downcase package-name)))
+          (error "Can only add exports to sibyl.* packages, got: ~a" package-name))
+        
+        (restart-case
+            (progn
+              ;; Update packages.lisp
+              (%add-export-update-packages-file packages-path package-name symbols)
+              
+              ;; Export at runtime
+              (%add-export-runtime-export package-name symbols)
+              
+              (format nil "Success: Added ~{~a~^, ~} to ~a exports"
+                      symbols package-name))
+          (undo-export ()
+            :report "Restore original packages.lisp content"
+            (with-open-file (stream packages-path
+                                    :direction :output
+                                    :if-exists :supersede)
+              (write-string original-content stream))
+            (format nil "Export undone: packages.lisp restored")))))))
+
+;;; ============================================================
+;;; create-module — Create new Lisp source files
+;;; ============================================================
+
+(defun %create-module-sibyl-package-p (package-name)
+  "Return T if PACKAGE-NAME is a valid Sibyl package name (sibyl or sibyl.*)."
+  (%add-definition-sibyl-package-name-p package-name))
+
+(defun %create-module-validate-path (path)
+  "Signal an error if PATH does not start with src/."
+  (unless (and (stringp path)
+               (>= (length path) 4)
+               (string= (subseq path 0 4) "src/"))
+    (error "Path must be within src/ directory: ~a" path)))
+
+(defun %create-module-split-definitions (defs-string)
+  "Return a list of individual S-expression strings parsed from DEFS-STRING."
+  (when (and defs-string (stringp defs-string))
+    (let ((trimmed (string-trim '(#\Space #\Tab #\Newline #\Return) defs-string)))
+      (when (string/= trimmed "")
+        (let ((results nil)
+              (pos 0)
+              (len (length defs-string))
+              (*read-eval* nil))
+          (loop
+            ;; Skip whitespace
+            (loop while (and (< pos len)
+                             (member (char defs-string pos)
+                                     '(#\Space #\Tab #\Newline #\Return)))
+                  do (incf pos))
+            (when (>= pos len) (return))
+            (let ((start pos))
+              (multiple-value-bind (form new-pos)
+                  (handler-case
+                      (read-from-string defs-string t nil :start pos)
+                    (error (e)
+                      (error "Invalid S-expression in initial-definitions: ~a" e)))
+                (declare (ignore form))
+                (push (subseq defs-string start new-pos) results)
+                (setf pos new-pos))))
+          (nreverse results))))))
+
+(defun %create-module-generate-content (package-name header-comment def-strings)
+  "Generate Lisp source file content with PACKAGE-NAME, optional HEADER-COMMENT, and DEF-STRINGS."
+  (with-output-to-string (stream)
+    (when (and header-comment
+               (stringp header-comment)
+               (string/= (string-trim '(#\Space #\Tab) header-comment) ""))
+      (format stream ";;;; ~a~%~%" header-comment))
+    (format stream "(in-package #:~a)~%" (string-downcase package-name))
+    (when def-strings
+      (dolist (def def-strings)
+        (when (and def (string/= (string-trim '(#\Space #\Tab #\Newline #\Return) def) ""))
+          (format stream "~%~a~%" def))))))
+
+(defun %create-module-eval-definitions (def-strings package-name)
+  "Compile and evaluate each definition string in DEF-STRINGS within PACKAGE-NAME."
+  (dolist (def def-strings)
+    (when (and def (stringp def)
+               (string/= (string-trim '(#\Space #\Tab #\Newline #\Return) def) ""))
+      (let* ((result (execute-tool "eval-form"
+                                   (list (cons "form" def)
+                                         (cons "package" package-name))))
+             (lower (string-downcase result)))
+        (when (or (search "blocked unsafe form" lower)
+                  (search "timeout after" lower))
+          (error 'sibyl.conditions:tool-execution-error
+                 :tool-name "create-module"
+                 :message (format nil "Failed to evaluate definition: ~a" result)
+                 :inner-error nil))))))
+
+(deftool "create-module"
+    (:description "Create a new Lisp source file within src/ with a package declaration and optional initial definitions."
+     :parameters ((:name "path" :type "string" :required t
+                   :description "File path within src/ directory, e.g. \"src/tools/new-tool.lisp\"")
+                  (:name "package" :type "string" :required t
+                   :description "Package name in sibyl.* namespace, e.g. \"sibyl.tools\"")
+                  (:name "header-comment" :type "string" :required nil
+                   :description "Optional comment for file header")
+                  (:name "initial-definitions" :type "string" :required nil
+                   :description "Optional S-expressions to include as initial definitions")))
+  (block create-module
+    (let* ((path (getf args :path))
+           (package (getf args :package))
+           (header-comment (getf args :header-comment))
+           (initial-defs-raw (getf args :initial-definitions)))
+
+      ;; Validate path
+      (unless (and path (stringp path) (string/= path ""))
+        (error "File path not specified"))
+      (%create-module-validate-path path)
+
+      ;; Validate package
+      (unless (and package (stringp package) (string/= package ""))
+        (error "Package name not specified"))
+      (let ((package-name (string-upcase package)))
+        (unless (%create-module-sibyl-package-p package-name)
+          (error "Package must be in sibyl.* namespace: ~a" package))
+
+        ;; Resolve path relative to ASDF system root
+        (let ((full-path (asdf:system-relative-pathname :sibyl path)))
+
+          ;; Check file does not already exist
+          (when (uiop:file-exists-p full-path)
+            (error "File already exists: ~a" path))
+
+          ;; Parse initial definitions
+          (let* ((def-strings (when initial-defs-raw
+                                (%create-module-split-definitions initial-defs-raw)))
+                 (content (%create-module-generate-content
+                            package-name header-comment def-strings)))
+
+            (restart-case
+                (progn
+                  ;; Write file
+                  (ensure-directories-exist full-path)
+                  (%sync-to-file-write-content full-path content)
+                  ;; Compile initial definitions
+                  (when def-strings
+                    (%create-module-eval-definitions def-strings package-name))
+                  (format nil "Success: created ~a" path))
+              (remove-module ()
+                :report "Delete the created module file"
+                (when (probe-file full-path)
+                  (delete-file full-path))
+                (format nil "Module deleted: ~a" path)))))))))
+
+;;; ============================================================
+;;; register-in-asdf — Register new files in sibyl.asd
+;;; ============================================================
+
+(defun %register-in-asdf-find-form-end (text start-pos)
+  "Return end position (exclusive) of form starting at START-POS, or NIL."
+  (when (and start-pos (< start-pos (length text))
+             (char= (char text start-pos) #\())
+    (let ((depth 0)
+          (pos start-pos)
+          (len (length text)))
+      (loop while (< pos len)
+            do (let ((ch (char text pos)))
+                 (cond
+                   ((char= ch #\() (incf depth))
+                   ((char= ch #\)) (decf depth)))
+                 (when (zerop depth)
+                   (return-from %register-in-asdf-find-form-end (1+ pos)))
+                 (incf pos)))
+      nil)))
+
+(defun %register-in-asdf-find-module-bounds (content module-name)
+  "Find the start and end positions of MODULE-NAME in CONTENT.
+   Returns (values start-pos end-pos) or (values nil nil)."
+  (let* ((search-string (format nil "(:module \"~a\"" module-name))
+         (start-pos (search search-string content :test #'char-equal)))
+    (if start-pos
+        (let ((end-pos (%register-in-asdf-find-form-end content start-pos)))
+          (values start-pos end-pos))
+        (values nil nil))))
+
+(defun %register-in-asdf-find-components-bounds (module-text)
+  "Find the start and end positions of the :components list in MODULE-TEXT.
+   Returns (values start-pos end-pos) or (values nil nil)."
+  (let ((components-pos (search ":components" module-text :test #'char-equal)))
+    (when components-pos
+      (let ((list-start (position #\( module-text :start components-pos)))
+        (when list-start
+          (values list-start
+                  (%register-in-asdf-find-form-end module-text list-start)))))))
+
+(defun %register-in-asdf-parse-entry (entry-text)
+  "Parse ENTRY-TEXT and return (values type name) if possible."
+  (handler-case
+      (let ((*read-eval* nil))
+        (multiple-value-bind (form pos)
+            (read-from-string entry-text)
+          (declare (ignore pos))
+          (when (and (consp form)
+                     (keywordp (first form))
+                     (stringp (second form)))
+            (values (string-downcase (symbol-name (first form)))
+                    (second form)))))
+    (error () (values nil nil))))
+
+(defun %register-in-asdf-collect-component-entries (components-text)
+  "Return a list of top-level component entries in COMPONENTS-TEXT.
+   Each entry is a plist with :start, :end, :type, and :name."
+  (let ((entries nil)
+        (pos 0)
+        (len (length components-text))
+        (depth 0))
+    (loop while (< pos len)
+          do (let ((ch (char components-text pos)))
+               (cond
+                 ((char= ch #\()
+                  (incf depth)
+                  (when (= depth 2)
+                    (let ((entry-start pos)
+                          (entry-end (%register-in-asdf-find-form-end components-text pos)))
+                      (unless entry-end
+                        (error "Malformed :components list"))
+                      (multiple-value-bind (entry-type entry-name)
+                          (%register-in-asdf-parse-entry
+                           (subseq components-text entry-start entry-end))
+                        (push (list :start entry-start
+                                    :end entry-end
+                                    :type entry-type
+                                    :name entry-name)
+                              entries))
+                      (setf pos (1- entry-end))
+                      (setf depth 1))))
+                 ((char= ch #\))
+                  (decf depth))))
+             (incf pos))
+    (nreverse entries)))
+
+(defun %register-in-asdf-detect-indent (components-text entries)
+  "Detect indentation for new entries within COMPONENTS-TEXT."
+  (let ((entry (find-if (lambda (item) (getf item :start)) entries)))
+    (if entry
+        (let* ((pos (getf entry :start))
+               (line-start (position #\Newline components-text :end pos :from-end t))
+               (start (if line-start (1+ line-start) 0))
+               (width (max 0 (- pos start))))
+          (make-string width :initial-element #\Space))
+        "  ")))
+
+(defun %register-in-asdf-insert-entry (components-text file-name &optional after-name)
+  "Insert FILE-NAME into COMPONENTS-TEXT after AFTER-NAME (if provided)."
+  (let* ((entries (%register-in-asdf-collect-component-entries components-text))
+         (entry-text (format nil "(:file \"~a\")" file-name))
+         (duplicate (find-if (lambda (item)
+                               (and (string-equal (getf item :type) "file")
+                                    (getf item :name)
+                                    (string-equal (getf item :name) file-name)))
+                             entries)))
+    (when duplicate
+      (error "File already registered: ~a" file-name))
+    (let* ((indent (%register-in-asdf-detect-indent components-text entries))
+           (after-entry (when after-name
+                          (find-if (lambda (item)
+                                     (and (getf item :name)
+                                          (string-equal (getf item :name) after-name)))
+                                   entries)))
+           (insert-pos (if after-name
+                           (if after-entry
+                               (getf after-entry :end)
+                               (error "Component not found: ~a" after-name))
+                           (1- (length components-text)))))
+      (concatenate 'string
+                   (subseq components-text 0 insert-pos)
+                   (format nil "~%~a~a" indent entry-text)
+                   (subseq components-text insert-pos)))))
+
+(defun %register-in-asdf-update-content (content module-name file-name after-name)
+  "Return updated CONTENT with FILE-NAME added to MODULE-NAME components."
+  (multiple-value-bind (module-start module-end)
+      (%register-in-asdf-find-module-bounds content module-name)
+    (unless module-start
+      (error "Module not found: ~a" module-name))
+    (unless module-end
+      (error "Malformed module definition: ~a" module-name))
+    (let ((module-text (subseq content module-start module-end)))
+      (multiple-value-bind (components-start components-end)
+          (%register-in-asdf-find-components-bounds module-text)
+        (unless components-start
+          (error "No :components list found for module: ~a" module-name))
+        (unless components-end
+          (error "Malformed :components list for module: ~a" module-name))
+        (let* ((components-text (subseq module-text components-start components-end))
+               (updated-components (%register-in-asdf-insert-entry
+                                    components-text file-name after-name))
+               (updated-module (concatenate 'string
+                                            (subseq module-text 0 components-start)
+                                            updated-components
+                                            (subseq module-text components-end)))
+               (updated-content (concatenate 'string
+                                             (subseq content 0 module-start)
+                                             updated-module
+                                             (subseq content module-end))))
+          updated-content)))))
+
+(deftool "register-in-asdf"
+    (:description "Register a new file component in sibyl.asd under a module."
+     :parameters ((:name "file" :type "string" :required t
+                   :description "File name without extension (e.g., new-tool).")
+                  (:name "module" :type "string" :required t
+                   :description "Module name (e.g., tools or agent).")
+                  (:name "after" :type "string" :required nil
+                   :description "Optional component name to insert after.")))
+  (block register-in-asdf
+    (let* ((file-input (getf args :file))
+           (module-input (getf args :module))
+           (after-input (getf args :after))
+           (asdf-path (asdf:system-relative-pathname :sibyl "sibyl.asd")))
+      ;; Validate inputs
+      (unless (and file-input (stringp file-input)
+                   (string/= (string-trim-whitespace file-input) ""))
+        (error "File name not specified"))
+      (unless (and module-input (stringp module-input)
+                   (string/= (string-trim-whitespace module-input) ""))
+        (error "Module name not specified"))
+      (let* ((file-name (string-downcase (string-trim-whitespace file-input)))
+             (module-name (string-downcase (string-trim-whitespace module-input)))
+             (after-name (when (and after-input (stringp after-input)
+                                    (string/= (string-trim-whitespace after-input) ""))
+                           (string-downcase (string-trim-whitespace after-input))))
+             (original-content (uiop:read-file-string asdf-path)))
+        (restart-case
+            (progn
+              (let ((updated-content (%register-in-asdf-update-content
+                                      original-content module-name file-name after-name)))
+                (with-open-file (stream asdf-path
+                                        :direction :output
+                                        :if-exists :supersede)
+                  (write-string updated-content stream))
+                (asdf:clear-system :sibyl)
+                (asdf:find-system :sibyl t)
+                (let ((component (or (asdf:find-component :sibyl (list module-name file-name))
+                                     (asdf:find-component :sibyl (list "src" module-name file-name)))))
+                  (unless component
+                    (error "ASDF registration failed for ~a/~a" module-name file-name)))
+                (format nil "Success: registered ~a in module ~a" file-name module-name)))
+          (undo-registration ()
+            :report "Restore original sibyl.asd content"
+            (with-open-file (stream asdf-path
+                                    :direction :output
+                                    :if-exists :supersede)
+              (write-string original-content stream))
+            (asdf:clear-system :sibyl)
+            (asdf:find-system :sibyl t)
+            (format nil "Registration undone: sibyl.asd restored")))))))
+
+;;; ============================================================
+;;; Dynamic REPL command registration
+;;; ============================================================
+
+(defun %register-command-validate-name (name)
+  "Validate that NAME is a non-empty string. Signals tool-execution-error if invalid."
+  (unless (and (stringp name) (string/= (string-trim-whitespace name) ""))
+    (error 'sibyl.conditions:tool-execution-error
+           :tool-name "register-command"
+           :message "Command name must be a non-empty string"
+           :inner-error nil)))
+
+(defun %register-command-parse-handler (handler-body-string)
+  "Parse and validate HANDLER-BODY-STRING as a lambda expression.
+   Returns the compiled function, or signals tool-execution-error."
+  (let ((form
+          (handler-case
+              (let ((*read-eval* nil))
+                (read-from-string handler-body-string))
+            (error (e)
+              (error 'sibyl.conditions:tool-execution-error
+                     :tool-name "register-command"
+                     :message (format nil "Invalid handler-body S-expression: ~a" e)
+                     :inner-error e)))))
+    ;; Validate it's a lambda form
+    (unless (and (consp form)
+                 (symbolp (car form))
+                 (string-equal (symbol-name (car form)) "LAMBDA"))
+      (error 'sibyl.conditions:tool-execution-error
+             :tool-name "register-command"
+             :message (format nil "handler-body must be a lambda expression, got: ~a"
+                               (if (consp form)
+                                   (string-downcase (symbol-name (car form)))
+                                   (type-of form)))
+             :inner-error nil))
+    ;; Evaluate the lambda to create a function
+    (handler-case
+        (let ((*read-eval* t))
+          (eval form))
+      (error (e)
+        (error 'sibyl.conditions:tool-execution-error
+               :tool-name "register-command"
+               :message (format nil "Failed to evaluate handler-body: ~a" e)
+               :inner-error e)))))
+
+;;; ============================================================
+;;; Evolution state management
+;;; ============================================================
+
+(defvar *evolution-state* nil
+  "Current evolution cycle state. A hash-table with keys:
+   - \"cycle-number\"           : integer, current cycle number
+   - \"attempted-improvements\" : list of strings, descriptions of attempted improvements
+   - \"results\"                : list of (description . result) pairs
+   - \"baseline-test-count\"    : integer, test count at start of evolution
+   - \"baseline-tool-count\"    : integer, tool count at start of evolution
+   - \"modified-files\"         : list of strings, files modified during evolution
+   NIL when no evolution cycle is active.")
+
+(defun evolution-state-init ()
+  "Initialize *evolution-state* with a fresh hash-table.
+   Resets all fields to their default values."
+  (let ((state (make-hash-table :test 'equal)))
+    (setf (gethash "cycle-number" state) 0)
+    (setf (gethash "attempted-improvements" state) nil)
+    (setf (gethash "results" state) nil)
+    (setf (gethash "baseline-test-count" state) 0)
+    (setf (gethash "baseline-tool-count" state) 0)
+    (setf (gethash "modified-files" state) nil)
+    (setf *evolution-state* state)
+    state))
+
+(defun evolution-state-record-attempt (description result)
+  "Record an improvement attempt in *evolution-state*.
+   DESCRIPTION is a string describing the improvement.
+   RESULT is a string describing the outcome (e.g. \"success\", \"failed\").
+   Initializes state if not already initialized."
+  (unless *evolution-state*
+    (evolution-state-init))
+  (let ((state *evolution-state*))
+    ;; Add to attempted-improvements list
+    (push description (gethash "attempted-improvements" state))
+    ;; Add to results as (description . result) pair
+    (push (cons description result) (gethash "results" state))
+    state))
+
+(defun %evolution-state-to-plist (state)
+  "Convert evolution state hash-table to a plist suitable for JSON encoding."
+  (when state
+    (let* ((attempted (gethash "attempted-improvements" state))
+           (results (gethash "results" state))
+           (results-list (mapcar (lambda (pair)
+                                   (let ((ht (make-hash-table :test 'equal)))
+                                     (setf (gethash "description" ht) (car pair))
+                                     (setf (gethash "result" ht) (cdr pair))
+                                     ht))
+                                 results)))
+      (list "cycle-number" (gethash "cycle-number" state 0)
+            "attempted-improvements" (or attempted (list))
+            "results" (or results-list (list))
+            "baseline-test-count" (gethash "baseline-test-count" state 0)
+            "baseline-tool-count" (gethash "baseline-tool-count" state 0)
+            "modified-files" (or (gethash "modified-files" state) (list))))))
+
+(defun evolution-state-save (&optional (path nil))
+  "Save *evolution-state* to a JSON file.
+   PATH defaults to .sibyl/evolution-log.json relative to the system root.
+   Creates parent directories if needed."
+  (let* ((save-path (or path
+                        (asdf:system-relative-pathname
+                         :sibyl ".sibyl/evolution-log.json")))
+         (plist (%evolution-state-to-plist *evolution-state*)))
+    (ensure-directories-exist save-path)
+    (with-open-file (stream save-path
+                            :direction :output
+                            :if-exists :supersede
+                            :if-does-not-exist :create)
+      (yason:encode-plist plist stream))
+    save-path))
+
+(defun %evolution-state-from-hash (ht)
+  "Convert a parsed JSON hash-table back to evolution state format."
+  (let ((state (make-hash-table :test 'equal)))
+    (setf (gethash "cycle-number" state)
+          (or (gethash "cycle-number" ht) 0))
+    ;; attempted-improvements: JSON array of strings
+    (let ((attempted (gethash "attempted-improvements" ht)))
+      (setf (gethash "attempted-improvements" state)
+            (when attempted
+              (coerce attempted 'list))))
+    ;; results: JSON array of {description, result} objects → list of (desc . result) pairs
+    (let ((results (gethash "results" ht)))
+      (setf (gethash "results" state)
+            (when results
+              (mapcar (lambda (r)
+                        (cons (gethash "description" r "")
+                              (gethash "result" r "")))
+                      (coerce results 'list)))))
+    (setf (gethash "baseline-test-count" state)
+          (or (gethash "baseline-test-count" ht) 0))
+    (setf (gethash "baseline-tool-count" state)
+          (or (gethash "baseline-tool-count" ht) 0))
+    (let ((files (gethash "modified-files" ht)))
+      (setf (gethash "modified-files" state)
+            (when files (coerce files 'list))))
+    state))
+
+(defun evolution-state-load (&optional (path nil))
+  "Load *evolution-state* from a JSON file.
+   PATH defaults to .sibyl/evolution-log.json relative to the system root.
+   Returns NIL gracefully if the file does not exist."
+  (let* ((load-path (or path
+                        (asdf:system-relative-pathname
+                         :sibyl ".sibyl/evolution-log.json"))))
+    (when (probe-file load-path)
+      (handler-case
+          (let* ((json-string (uiop:read-file-string load-path))
+                 (parsed (yason:parse json-string :object-as :hash-table))
+                 (state (%evolution-state-from-hash parsed)))
+            (setf *evolution-state* state)
+            state)
+        (error (e)
+          (warn "evolution-state-load: failed to parse ~a: ~a" load-path e)
+          nil)))))
+
+(defun %evolution-status-format-state (state)
+  "Format evolution state as a human-readable string."
+  (if (null state)
+      "Evolution state: not initialized (no active evolution cycle)"
+      (with-output-to-string (stream)
+        (format stream "=== Evolution Status ===~%")
+        (format stream "Cycle number: ~a~%"
+                (gethash "cycle-number" state 0))
+        (format stream "Baseline test count: ~a~%"
+                (gethash "baseline-test-count" state 0))
+        (format stream "Baseline tool count: ~a~%"
+                (gethash "baseline-tool-count" state 0))
+        (let ((attempted (gethash "attempted-improvements" state)))
+          (format stream "Attempted improvements: ~a~%"
+                  (length (or attempted nil)))
+          (when attempted
+            (dolist (desc attempted)
+              (format stream "  - ~a~%" desc))))
+        (let ((results (gethash "results" state)))
+          (format stream "Results: ~a~%"
+                  (length (or results nil)))
+          (when results
+            (dolist (pair results)
+              (format stream "  - ~a → ~a~%" (car pair) (cdr pair)))))
+        (let ((files (gethash "modified-files" state)))
+          (format stream "Modified files: ~a~%"
+                  (length (or files nil)))
+          (when files
+            (dolist (f files)
+              (format stream "  - ~a~%" f)))))))
+
+(deftool "evolution-status"
+    (:description "Return the current evolution cycle state as a formatted string."
+     :parameters ())
+  (block evolution-status
+    (%evolution-status-format-state *evolution-state*)))
+
+;;; ============================================================
+;;; Evolution Progress Reporting Functions
+;;; ============================================================
+
+(defun evolution-report-cycle-start (cycle-num max-cycles)
+  "Print the start of an evolution cycle.
+   FORMAT: === Evolution Cycle N/M ===
+   CYCLE-NUM: integer, current cycle number (1-indexed)
+   MAX-CYCLES: integer, total number of cycles"
+  (format t "~%=== Evolution Cycle ~a/~a ===~%" cycle-num max-cycles))
+
+(defun evolution-report-improvement-start (index total name)
+  "Print the start of an improvement attempt.
+   FORMAT: [N/M] Improving: NAME
+   INDEX: integer, current improvement number (1-indexed)
+   TOTAL: integer, total improvements in this cycle
+   NAME: string, description of the improvement"
+  (format t "[~a/~a] Improving: ~a~%" index total name))
+
+(defun evolution-report-step (step-name)
+  "Print a step in the improvement process.
+   FORMAT: (no newline, appends to current line)
+           Step: STEP-NAME...
+   STEP-NAME: string, name of the step (e.g. \"RED\", \"GREEN\", \"PERSIST\")"
+  (format t "      Step: ~a..." step-name))
+
+(defun evolution-report-improvement-result (success-p)
+  "Print the result of an improvement attempt.
+   FORMAT: ✓ (on success) or ✗ (skipped) (on failure)
+   SUCCESS-P: boolean, true if improvement succeeded"
+  (if success-p
+      (format t " ✓~%")
+      (format t " ✗ (test regression, skipped)~%")))
+
+(defun evolution-report-cycle-summary (succeeded skipped baseline-tests current-tests baseline-tools current-tools)
+  "Print a summary of a completed evolution cycle.
+   FORMAT:
+     Cycle N complete: S succeeded, K skipped
+     Tests: B → C (+/-D)
+     Tools: B → C
+   SUCCEEDED: integer, number of successful improvements
+   SKIPPED: integer, number of skipped improvements
+   BASELINE-TESTS: integer, test count at cycle start
+   CURRENT-TESTS: integer, test count at cycle end
+   BASELINE-TOOLS: integer, tool count at cycle start
+   CURRENT-TOOLS: integer, tool count at cycle end"
+  (let ((test-delta (- current-tests baseline-tests))
+        (test-sign (if (>= (- current-tests baseline-tests) 0) "+" "")))
+    (format t "~%Cycle complete: ~a succeeded, ~a skipped~%" succeeded skipped)
+    (format t "Tests: ~a → ~a (~a~a)~%" baseline-tests current-tests test-sign test-delta)
+    (format t "Tools: ~a → ~a~%" baseline-tools current-tools)))
+
+(defun evolution-report-final-summary (cycles productive-cycles succeeded skipped baseline-tests current-tests)
+  "Print the final summary of all evolution cycles.
+   FORMAT:
+     === Evolution Summary ===
+     Cycles: N (P productive, E empty)
+     Improvements: S succeeded, K skipped
+     Tests: B → C (+/-D)
+   CYCLES: integer, total number of cycles run
+   PRODUCTIVE-CYCLES: integer, number of cycles with improvements
+   SUCCEEDED: integer, total successful improvements
+   SKIPPED: integer, total skipped improvements
+   BASELINE-TESTS: integer, test count at evolution start
+   CURRENT-TESTS: integer, test count at evolution end"
+  (let ((empty-cycles (- cycles productive-cycles))
+        (test-delta (- current-tests baseline-tests))
+        (test-sign (if (>= (- current-tests baseline-tests) 0) "+" "")))
+    (format t "~%=== Evolution Summary ===~%")
+    (format t "Cycles: ~a (~a productive, ~a empty)~%" cycles productive-cycles empty-cycles)
+    (format t "Improvements: ~a succeeded, ~a skipped~%" succeeded skipped)
+    (format t "Tests: ~a → ~a (~a~a)~%" baseline-tests current-tests test-sign test-delta)))
+
+(defun %register-command-make-keyword (name)
+  "Convert NAME string to a keyword symbol."
+  (intern (string-upcase (string-trim-whitespace name)) :keyword))
+
+(deftool "register-command"
+    (:description "Dynamically register a new REPL command in *command-handlers*."
+     :parameters ((:name "name" :type "string" :required t
+                   :description "Command name (e.g. \"evolve\"). Used as keyword key in *command-handlers*.")
+                  (:name "description" :type "string" :required t
+                   :description "Help text describing what the command does.")
+                  (:name "handler-body" :type "string" :required t
+                   :description "Lambda expression as S-expression string: (lambda (agent input) ...)")))
+  (block register-command
+    (let* ((name (getf args :name))
+           (description (getf args :description))
+           (handler-body (getf args :handler-body)))
+      ;; Validate name
+      (%register-command-validate-name name)
+      ;; Validate description
+      (unless (and (stringp description) (string/= (string-trim-whitespace description) ""))
+        (error 'sibyl.conditions:tool-execution-error
+               :tool-name "register-command"
+               :message "Command description must be a non-empty string"
+               :inner-error nil))
+      ;; Parse and compile handler
+      (let* ((handler-fn (%register-command-parse-handler handler-body))
+             (keyword (%register-command-make-keyword name))
+             (repl-package (find-package "SIBYL.REPL"))
+             (handlers-sym (and repl-package
+                                (find-symbol "*COMMAND-HANDLERS*" repl-package))))
+        (unless (and handlers-sym (boundp handlers-sym))
+          (error 'sibyl.conditions:tool-execution-error
+                 :tool-name "register-command"
+                 :message "sibyl.repl::*command-handlers* not found or unbound"
+                 :inner-error nil))
+        ;; Push new handler to the front of the alist (overwrites on assoc lookup)
+        (push (cons keyword handler-fn) (symbol-value handlers-sym))
+        (format nil "Success: command ~a registered (~a)"
+                (string-downcase (symbol-name keyword))
+                description)))))

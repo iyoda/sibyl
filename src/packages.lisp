@@ -111,12 +111,25 @@
     ;; Execution
     #:execute-tool
     #:execute-tool-call
-    ;; Lisp introspection tools
-    #:read-sexp
-    #:describe-symbol
-    #:eval-form
-    #:macroexpand-form
-    #:package-symbols))
+     ;; Lisp introspection tools
+     #:read-sexp
+     #:describe-symbol
+     #:eval-form
+     #:macroexpand-form
+     #:package-symbols
+      ;; Evolution state management
+      #:*evolution-state*
+      #:evolution-state-init
+      #:evolution-state-record-attempt
+      #:evolution-state-save
+      #:evolution-state-load
+      ;; Evolution progress reporting
+      #:evolution-report-cycle-start
+      #:evolution-report-improvement-start
+      #:evolution-report-step
+      #:evolution-report-improvement-result
+      #:evolution-report-cycle-summary
+      #:evolution-report-final-summary))
 
 (defpackage #:sibyl.agent
   (:use #:cl #:sibyl.conditions #:sibyl.config #:sibyl.util
