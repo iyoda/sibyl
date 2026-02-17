@@ -1,9 +1,9 @@
 {
-  "active_plan": "/Users/iyoda/Projects/atikoro/sibyl/.sisyphus/plans/autonomous-evolution.md",
-  "started_at": "2026-02-17T02:34:52.664Z",
+  "active_plan": "/Users/iyoda/Projects/atikoro/sibyl/.sisyphus/plans/rich-repl.md",
+  "started_at": "2026-02-17T10:42:39.587Z",
   "session_ids": [
-    "ses_396b8c16dffedAAgZScKlpTWi8"
+    "ses_3954c162bffeQlfSjVgjT9e4lr"
   ],
-  "plan_name": "autonomous-evolution",
+  "plan_name": "rich-repl",
   "agent": "atlas"
 }

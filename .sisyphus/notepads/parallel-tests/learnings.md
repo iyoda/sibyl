@@ -101,3 +101,54 @@ asdf-protection-tests, eval-form-tests, who-calls-tests
 - Added file content save/restore to 4 tests: generates-and-registers, rejects-duplicate, uses-default-suite, generated-test-runs-successfully
 - Tests now leave sexp-tools-test.lisp unchanged after running
 - Pattern: (original-content (uiop:read-file-string test-file)) + restore in cleanup
+
+## [2026-02-17] Task 7: Parallel Runner + /test-parallel
+
+### run-tests-parallel design:
+- SAFE suites run in bt:make-thread but serialized via bt:with-lock-held(*fiveam-run-lock*)
+- FiveAM is NOT thread-safe: all calls must be serialized with a lock
+- UNSAFE suites run sequentially after all threads join
+- Wrapped with with-codebase-map-cache + *self-assess-running* = t
+
+### Package lock issue (CRITICAL):
+- `fiveam::test-failed` etc. cannot be interned at compile time: SBCL package lock on IT.BESE.FIVEAM
+- Solution: use `(find-class (find-symbol "TEST-FAILED" fiveam-pkg) nil)` at runtime
+- This avoids the compile-time package lock violation
+
+### repl.lisp cross-package reference issue:
+- `sibyl.tests` package does not exist when `repl.lisp` is compiled (it's in :sibyl, tests are in :sibyl/tests)
+- Solution: `uiop:symbol-call '#:sibyl.tests '#:run-tests-parallel` for late binding
+
+### Command registration pattern:
+- *repl-commands*: string "/test-parallel" → keyword :test-parallel
+- *command-handlers*: keyword :test-parallel → handler function
+- Handler calls sibyl.tests:run-tests-parallel via uiop:symbol-call
+
+### Test file: tests/parallel-runner-test.lisp
+- Tests existence of run-tests-parallel, /test-parallel command, *safe-suites*, *unsafe-suites*
+- Does NOT call run-tests-parallel recursively (avoids suite re-entry)
+
+### Results: 1094 checks, 0 failures (up from 1084 in Task 4 baseline)
+
+## [2026-02-17] Task 8: Final Measurement COMPLETE
+
+### Results:
+- Sequential (run-sibyl-tests): 8.79s, 1094 checks, 0 failures ✓
+- Parallel (run-tests-parallel): 12.92s, 1094 checks, 0 failures ✓
+- Baseline: ~120s → 13.6x speedup (run-sibyl-tests)
+
+### Key fixes for parallel runner check count gap (439 → 1094):
+1. Added missing suites to *unsafe-suites*: run-tests-tests, add-definition-tests,
+   add-export-tests, create-module-tests, parallel-runner-tests
+2. Cross-package suites (agent-tests etc.) require package-qualified symbols for FiveAM lookup
+   - parallel-runner-test.lisp appends them to *safe-suites* at load time
+   - suite.lisp adds %resolve-suite + %safe-suites-resolved for runtime resolution
+3. Top-level tests (sanity-check, tools-test.lisp) not in any named sub-suite
+   - Fixed by using fiveam:run 'sibyl-tests as authoritative result set
+4. repl-tests is NOT a sub-suite of sibyl-tests → should NOT be in parallel runner
+
+### Commits:
+- e369737: fix(tests): add missing suites to parallel runner and fix cross-package suite resolution
+- ec96606: chore(sisyphus): record final parallel test performance metrics
+- 4215b0f: fix(tests): fix parallel-runner-test cross-package suite initialization and assertions
+- b11d332: chore(sisyphus): add evidence files from tasks 1-7
