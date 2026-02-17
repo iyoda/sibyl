@@ -141,6 +141,107 @@
        (string-join "" (nreverse text-parts)))
      :tool-calls (nreverse tool-calls))))
 
+(defun parse-anthropic-sse-events (event-type data-str)
+  "Parse an Anthropic SSE event into a normalized plist.
+Returns NIL when parsing fails."
+  (handler-case
+      (let ((data (yason:parse data-str :object-as :hash-table)))
+        (cond
+          ((string= event-type "content_block_start")
+           (let ((block (gethash "content_block" data)))
+             (list :event event-type
+                   :content-block-type (gethash "type" block)
+                   :tool-id (gethash "id" block)
+                   :tool-name (gethash "name" block))))
+          ((string= event-type "content_block_delta")
+           (let* ((delta (gethash "delta" data))
+                  (delta-type (gethash "type" delta)))
+             (list :event event-type
+                   :delta-type delta-type
+                   :text (gethash "text" delta)
+                   :partial-json (gethash "partial_json" delta))))
+          ((string= event-type "content_block_stop")
+           (list :event event-type))
+          ((string= event-type "message_stop")
+           (list :event event-type))
+          (t
+           (list :event event-type :data data))))
+    (error () nil)))
+
+(defun complete-anthropic-streaming (client messages tools)
+  "Stream Anthropic responses, invoking *streaming-text-callback* per text delta.
+Returns a reconstructed assistant message."
+  (multiple-value-bind (system api-messages)
+      (messages-to-anthropic-format messages)
+    (let* ((body `(("model" . ,(client-model client))
+                   ("max_tokens" . ,(client-max-tokens client))
+                   ("temperature" . ,(client-temperature client))
+                   ("messages" . ,api-messages)
+                   ("stream" . t)))
+           (body-with-tools (if tools
+                                (append body `(("tools" . ,(tools-to-anthropic-format tools))))
+                                body))
+           (final-body (if system
+                           (append `(("system" . ,system)) body-with-tools)
+                           body-with-tools))
+           (text-parts nil)
+           (tool-calls nil)
+           (current-tool-id nil)
+           (current-tool-name nil)
+           (current-tool-input-parts nil))
+      (labels ((finalize-tool-call ()
+                 (when current-tool-name
+                   (let* ((json-str (if current-tool-input-parts
+                                        (format nil "~{~a~}" (nreverse current-tool-input-parts))
+                                        "{}"))
+                          (args (handler-case
+                                    (let ((parsed-args (yason:parse json-str :object-as :hash-table)))
+                                      (if (hash-table-p parsed-args)
+                                          (hash-to-alist parsed-args)
+                                          parsed-args))
+                                  (error () nil))))
+                     (push (make-tool-call
+                            :id current-tool-id
+                            :name current-tool-name
+                            :arguments args)
+                           tool-calls)
+                     (setf current-tool-id nil
+                           current-tool-name nil
+                           current-tool-input-parts nil)))))
+        (http-post-stream
+         (anthropic-messages-url client)
+         (anthropic-headers client)
+         (alist-to-hash final-body)
+         (lambda (event-type data-str)
+           (let ((parsed (parse-anthropic-sse-events event-type data-str)))
+             (when parsed
+               (let ((parsed-event (getf parsed :event)))
+                 (cond
+                   ((string= parsed-event "content_block_delta")
+                    (let ((delta-type (getf parsed :delta-type)))
+                      (cond
+                        ((string= delta-type "text_delta")
+                         (let ((text (getf parsed :text)))
+                           (when text
+                             (push text text-parts)
+                             (funcall *streaming-text-callback* text))))
+                        ((string= delta-type "input_json_delta")
+                         (let ((partial (getf parsed :partial-json)))
+                           (when partial
+                             (push partial current-tool-input-parts)))))))
+                   ((string= parsed-event "content_block_start")
+                    (when (string= (getf parsed :content-block-type) "tool_use")
+                      (setf current-tool-id (getf parsed :tool-id)
+                            current-tool-name (getf parsed :tool-name)
+                            current-tool-input-parts nil)))
+                   ((string= parsed-event "content_block_stop")
+                    (finalize-tool-call)))))))
+         (lambda () nil))
+        (assistant-message
+         (when text-parts
+           (string-join "" (nreverse text-parts)))
+         :tool-calls (nreverse tool-calls))))))
+
 (defun anthropic-messages-url (client)
   "Build the messages endpoint URL. Appends ?beta=true for OAuth."
   (let ((base (format nil "~a/messages" (client-base-url client))))
@@ -150,36 +251,40 @@
 
 (defmethod complete ((client anthropic-client) messages &key)
   "Send messages to Anthropic Claude API."
-  (multiple-value-bind (system api-messages)
-      (messages-to-anthropic-format messages)
-    (let ((body `(("model" . ,(client-model client))
-                  ("max_tokens" . ,(client-max-tokens client))
-                  ("temperature" . ,(client-temperature client))
-                  ("messages" . ,api-messages))))
-      (when system
-        (push (cons "system" system) body))
-      (let ((response (http-post-json
-                       (anthropic-messages-url client)
-                       (anthropic-headers client)
-                       (alist-to-hash body))))
-        (parse-anthropic-response response)))))
+  (if *streaming-text-callback*
+      (complete-anthropic-streaming client messages nil)
+      (multiple-value-bind (system api-messages)
+          (messages-to-anthropic-format messages)
+        (let ((body `(("model" . ,(client-model client))
+                      ("max_tokens" . ,(client-max-tokens client))
+                      ("temperature" . ,(client-temperature client))
+                      ("messages" . ,api-messages))))
+          (when system
+            (push (cons "system" system) body))
+          (let ((response (http-post-json
+                           (anthropic-messages-url client)
+                           (anthropic-headers client)
+                           (alist-to-hash body))))
+            (parse-anthropic-response response))))))
 
 (defmethod complete-with-tools ((client anthropic-client) messages tools &key)
   "Send messages with tools to Anthropic Claude API."
-  (multiple-value-bind (system api-messages)
-      (messages-to-anthropic-format messages)
-    (let ((body `(("model" . ,(client-model client))
-                  ("max_tokens" . ,(client-max-tokens client))
-                  ("temperature" . ,(client-temperature client))
-                  ("messages" . ,api-messages)
-                  ("tools" . ,(tools-to-anthropic-format tools)))))
-      (when system
-        (push (cons "system" system) body))
-      (let ((response (http-post-json
-                       (anthropic-messages-url client)
-                       (anthropic-headers client)
-                       (alist-to-hash body))))
-        (parse-anthropic-response response)))))
+  (if *streaming-text-callback*
+      (complete-anthropic-streaming client messages tools)
+      (multiple-value-bind (system api-messages)
+          (messages-to-anthropic-format messages)
+        (let ((body `(("model" . ,(client-model client))
+                      ("max_tokens" . ,(client-max-tokens client))
+                      ("temperature" . ,(client-temperature client))
+                      ("messages" . ,api-messages)
+                      ("tools" . ,(tools-to-anthropic-format tools)))))
+          (when system
+            (push (cons "system" system) body))
+          (let ((response (http-post-json
+                           (anthropic-messages-url client)
+                           (anthropic-headers client)
+                           (alist-to-hash body))))
+            (parse-anthropic-response response))))))
 
 ;;; ============================================================
 ;;; OpenAI (GPT)
