@@ -14,6 +14,7 @@
     ("/tools"         . :list-tools)
     ("/help"          . :help)
     ("/history"       . :history)
+    ("/mcp"           . :mcp)
     ("/improve"       . :improve)
     ("/review"        . :review)
     ("/evolve"        . :evolve)
@@ -202,6 +203,7 @@
               (sibyl.tools:tool-description tool))))
   nil)
 
+
 (defun handle-help-command (agent input)
   "Handler for :help command with enhanced formatting."
   (declare (ignore agent input))
@@ -211,41 +213,85 @@
         (format-colored-text "Sibyl REPL Commands:" :cyan)
         (format t "~%~%")
         (format-colored-text "  /help" :green)
-        (format t "     — Show this help~%")
+        (format t "          — Show this help~%")
         (format-colored-text "  /tools" :green)
-        (format t "    — List registered tools~%")
+        (format t "         — List registered tools~%")
         (format-colored-text "  /reset" :green)
-        (format t "    — Reset conversation~%")
+        (format t "         — Reset conversation~%")
         (format-colored-text "  /history" :green)
-        (format t "  — Show conversation history~%")
+        (format t "       — Show conversation history~%")
+        (format-colored-text "  /mcp" :green)
+        (format t "           — Show MCP server status and tools~%")
         (format-colored-text "  /improve" :green)
-        (format t "  — Request self-improvement (TDD cycle)~%")
+        (format t "       — Request self-improvement (TDD cycle)~%")
         (format-colored-text "  /review" :green)
-        (format t "   — Review improvement suggestions~%")
+        (format t "        — Review improvement suggestions~%")
         (format-colored-text "  /evolve" :green)
-        (format t "   — Autonomous continuous improvement loop~%")
+        (format t "        — Autonomous continuous improvement loop~%")
         (format-colored-text "  /test-parallel" :green)
-        (format t " — Run test suite in parallel mode~%")
+        (format t "  — Run test suite in parallel mode~%")
         (format-colored-text "  /colors" :green)
-        (format t "   — Toggle color output (on/off)~%")
+        (format t "        — Toggle color output (on/off)~%")
         (format-colored-text "  /quit" :green)
-        (format t "     — Exit REPL~%~%")
+        (format t "          — Exit REPL~%~%")
         (format-colored-text "Type anything else to chat with the agent." :yellow)
         (format t "~%"))
-      ;; Fallback to original help if colors disabled
       (progn
         (format t "~%Sibyl REPL commands:~%")
-        (format t "  /help     — Show this help~%")
-        (format t "  /tools    — List registered tools~%")
-        (format t "  /reset    — Reset conversation~%")
-        (format t "  /history  — Show conversation history~%")
-        (format t "  /improve  — Request self-improvement (TDD cycle)~%")
-        (format t "  /review   — Review improvement suggestions~%")
-        (format t "  /evolve        — Autonomous continuous improvement loop~%")
-        (format t "  /test-parallel — Run test suite in parallel mode~%")
-        (format t "  /colors        — Toggle color output (on/off)~%")
-        (format t "  /quit          — Exit REPL~%")
+        (format t "  /help            — Show this help~%")
+        (format t "  /tools           — List registered tools~%")
+        (format t "  /reset           — Reset conversation~%")
+        (format t "  /history         — Show conversation history~%")
+        (format t "  /mcp             — Show MCP server status and tools~%")
+        (format t "  /improve         — Request self-improvement (TDD cycle)~%")
+        (format t "  /review          — Review improvement suggestions~%")
+        (format t "  /evolve          — Autonomous continuous improvement loop~%")
+        (format t "  /test-parallel   — Run test suite in parallel mode~%")
+        (format t "  /colors          — Toggle color output (on/off)~%")
+        (format t "  /quit            — Exit REPL~%")
         (format t "~%Type anything else to chat with the agent.~%")))
+  nil)
+
+(defun handle-mcp-command (agent input)
+  "Handler for :mcp command. Shows MCP server status and tools."
+  (declare (ignore agent input))
+  (let ((servers (sibyl.mcp:list-mcp-servers)))
+    (if servers
+        (progn
+          (format t "~%MCP Servers (~a):~%" (length servers))
+          (dolist (entry servers)
+            (let* ((name (car entry))
+                   (client (cdr entry))
+                   (status (sibyl.mcp:mcp-client-status client))
+                   (info (sibyl.mcp:mcp-client-server-info client))
+                   (server-name (when (and info (hash-table-p info))
+                                  (gethash "name" info))))
+              (if *use-colors*
+                  (progn
+                    (format-colored-text (format nil "  ~a" name)
+                                         (if (eq status :connected) :green :red))
+                    (format t " (~a)~@[ — ~a~]~%"
+                            status
+                            server-name)
+                    (format t "    URL: ~a~%" (sibyl.mcp:mcp-client-url client)))
+                  (format t "  ~a (~a)~@[ — ~a~]~%    URL: ~a~%"
+                          name status server-name
+                          (sibyl.mcp:mcp-client-url client)))
+              ;; List tools from this server
+              (let ((prefix (format nil "~a:" name))
+                    (tool-count 0))
+                (dolist (tool (sibyl.tools:list-tools))
+                  (when (and (>= (length (sibyl.tools:tool-name tool)) (length prefix))
+                             (string= prefix (subseq (sibyl.tools:tool-name tool)
+                                                     0 (length prefix))))
+                    (incf tool-count)
+                    (format t "    · ~a — ~a~%"
+                            (sibyl.tools:tool-name tool)
+                            (sibyl.util:truncate-string
+                             (sibyl.tools:tool-description tool) 60))))
+                (when (zerop tool-count)
+                  (format t "    (no tools)~%"))))))
+        (format t "~%No MCP servers connected.~%")))
   nil)
 
 (defun handle-history-command (agent input)
@@ -292,16 +338,18 @@
   nil)
 
 ;;; Command handler registry
+
 (defparameter *command-handlers*
-  (list (cons :quit #'handle-quit-command)
-        (cons :reset #'handle-reset-command)
+  (list (cons :quit    #'handle-quit-command)
+        (cons :reset   #'handle-reset-command)
         (cons :list-tools #'handle-tools-command)
-        (cons :help #'handle-help-command)
+        (cons :help    #'handle-help-command)
         (cons :history #'handle-history-command)
+        (cons :mcp     #'handle-mcp-command)
         (cons :improve #'handle-improve-command-wrapper)
-         (cons :review #'handle-review-command-wrapper)
-         (cons :evolve #'handle-evolve-command-wrapper)
-         (cons :test-parallel #'handle-test-parallel-command))
+        (cons :review  #'handle-review-command-wrapper)
+        (cons :evolve  #'handle-evolve-command-wrapper)
+        (cons :test-parallel #'handle-test-parallel-command))
   "Mapping of command keywords to handler functions.")
 
 (defun handle-repl-command (command agent &optional original-input)
@@ -885,6 +933,13 @@
                 (cons :after-step (make-after-step-hook))
                 (cons :on-error (make-on-error-hook))))
     (print-banner)
+    ;; Connect to configured MCP servers
+    (handler-case
+        (let ((count (sibyl.mcp:connect-configured-mcp-servers)))
+          (when (plusp count)
+            (format t "~%[Connected to ~a MCP server~:p]~%" count)))
+      (error (e)
+        (log-warn "repl" "MCP auto-connect failed: ~a" e)))
     ;; Load readline history if cl-readline is available
     (when (and (readline-available-p) (probe-file "~/.sibyl_history"))
       (funcall (find-symbol "READ-HISTORY" :cl-readline) "~/.sibyl_history"))
@@ -893,11 +948,15 @@
                  (when (readline-available-p)
                    (funcall (find-symbol "WRITE-HISTORY" :cl-readline) "~/.sibyl_history")))
                 (exit-repl (&optional message)
-                  (when message
-                    (format t "~%~a~%" message))
-                  (log-info "repl" "Shutting down REPL")
-                  (save-history)
-                  (return-from repl-loop))
+                   (when message
+                     (format t "~%~a~%" message))
+                   (log-info "repl" "Shutting down REPL")
+                   ;; Disconnect MCP servers
+                   (handler-case (sibyl.mcp:disconnect-all-mcp-servers)
+                     (error (e)
+                       (log-debug "repl" "MCP disconnect error: ~a" e)))
+                   (save-history)
+                   (return-from repl-loop))
                (repl-body ()
                    (tagbody
                     next-iteration

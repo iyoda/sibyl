@@ -37,6 +37,7 @@ Side effects: Modifies the global *config* hash table."
   '(("CLAUDE_CODE_OAUTH_TOKEN" . "llm.anthropic.api-key")
     ("ANTHROPIC_API_KEY"  . "llm.anthropic.api-key")
     ("OPENAI_API_KEY"     . "llm.openai.api-key")
+    ("EXA_API_KEY"        . "mcp.servers.exa.api-key")
     ("SIBYL_MODEL"        . "llm.model")
     ("SIBYL_MAX_TOKENS"   . "llm.max-tokens")
     ("SIBYL_TEMPERATURE"  . "llm.temperature")
@@ -92,7 +93,9 @@ Side effects: Modifies the global *config* hash table."
                     ;; Agent defaults
                     ("agent.max-steps"          . 50)
                     ("agent.name"               . "Sibyl")
-                    ("log.level"                . "info"))))
+                    ("log.level"                . "info")
+                    ;; MCP server defaults
+                    ("mcp.servers.exa.url"      . "https://mcp.exa.ai/mcp"))))
     (dolist (pair defaults)
       (unless (config-value (car pair))
         (setf (config-value (car pair)) (cdr pair))))))

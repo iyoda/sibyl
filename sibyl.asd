@@ -23,24 +23,28 @@
       ((:file "asdf-protection")))
      (:file "conditions")
      (:file "config")
-      (:file "util")
+     (:file "util")
      (:file "logging")
      (:module "llm"
       :components
       ((:file "message")
        (:file "client")
        (:file "providers")
- (:file "model-selector")))
-      (:module "tools"
+       (:file "model-selector")))
+     (:module "tools"
        :components
        ((:file "protocol")
         (:file "builtin")
         (:file "lisp-tools")))
+     (:module "mcp"
+       :components
+       ((:file "client")
+        (:file "tools")))
      (:module "agent"
-      :components
-      ((:file "memory")
- (:file "multi-agent")
-       (:file "core")))
+       :components
+       ((:file "memory")
+        (:file "multi-agent")
+        (:file "core")))
      (:module "repl-module"
       :pathname "repl"
       :components
@@ -61,19 +65,20 @@
   :depends-on (#:sibyl #:fiveam)
   :serial t
   :components
-   ((:module "tests"
-     :components
-     ((:file "suite")
-      (:file "tools-test")
-      (:file "sexp-tools-test")
-      (:file "message-test")
-      (:file "client-test")
-      (:file "agent-test")
-       (:file "asdf-protection-test")
-        (:file "repl-test")
-        (:file "rich-repl-test")
-         (:file "evolution-state-test")
-        (:file "parallel-runner-test")
- (:file "parallel-agent-test"))))
-   :perform (test-op (o c)
-              (uiop:symbol-call '#:sibyl.tests '#:run-sibyl-tests)))
+  ((:module "tests"
+    :components
+    ((:file "suite")
+     (:file "tools-test")
+     (:file "sexp-tools-test")
+     (:file "message-test")
+     (:file "client-test")
+     (:file "agent-test")
+     (:file "asdf-protection-test")
+     (:file "repl-test")
+     (:file "rich-repl-test")
+     (:file "evolution-state-test")
+     (:file "parallel-runner-test")
+     (:file "parallel-agent-test")
+     (:file "mcp-test"))))
+  :perform (test-op (o c)
+             (uiop:symbol-call '#:sibyl.tests '#:run-sibyl-tests)))

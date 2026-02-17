@@ -271,6 +271,43 @@
    #:generate-agent-id
    #:agent-reset))
 
+(defpackage #:sibyl.mcp
+  (:use #:cl #:sibyl.conditions #:sibyl.config #:sibyl.util #:sibyl.logging)
+  (:export
+   ;; MCP client protocol
+   #:mcp-client
+   #:make-mcp-client
+   #:mcp-client-name
+   #:mcp-client-url
+   #:mcp-client-session-id
+   #:mcp-client-status
+   #:mcp-client-server-info
+   #:mcp-client-server-capabilities
+   ;; Lifecycle
+   #:mcp-initialize
+   #:mcp-disconnect
+   ;; Tool operations
+   #:mcp-list-tools
+   #:mcp-call-tool
+   ;; Conditions
+   #:mcp-error
+   #:mcp-protocol-error
+   #:mcp-transport-error
+   #:mcp-error-code
+   #:mcp-error-server-name
+   ;; Tool adapter — bridge MCP tools into Sibyl registry
+   #:register-mcp-server-tools
+   #:unregister-mcp-server-tools
+   #:connect-and-register-mcp-server
+   #:disconnect-mcp-server
+   ;; Server registry
+   #:*mcp-servers*
+   #:list-mcp-servers
+   #:find-mcp-server
+   ;; Config-based auto-connect
+   #:connect-configured-mcp-servers
+   #:disconnect-all-mcp-servers))
+
 (defpackage #:sibyl.repl.spinner
   (:use #:cl)
   (:export
@@ -299,6 +336,10 @@
                 #:make-agent #:agent-run #:agent-step #:agent-reset)
   (:import-from #:sibyl.repl
                 #:start-repl)
+  (:import-from #:sibyl.mcp
+                #:connect-configured-mcp-servers
+                #:disconnect-all-mcp-servers
+                #:list-mcp-servers)
   (:export
    ;; Top-level API
    #:load-config
@@ -312,4 +353,8 @@
    #:agent-run
    #:agent-step
    #:agent-reset
-   #:start-repl))
+   #:start-repl
+   ;; MCP
+   #:connect-configured-mcp-servers
+   #:disconnect-all-mcp-servers
+   #:list-mcp-servers))
