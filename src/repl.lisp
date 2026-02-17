@@ -40,6 +40,15 @@
   "Recursive lock protecting *command-handlers* and *pending-suggestions*.
    Lock order: tool-registry (1st) < evolution-state (2nd) < modified-files (3rd) < command-handlers (4th)")
 
+(defvar *use-colors* t
+  "Whether to use colored output in the REPL. Defaults to t (colors enabled).")
+
+(defvar *command-count* 0
+  "Counter tracking the number of commands executed in the current REPL session.")
+
+(defvar *command-history* nil
+  "List of command strings entered in the current REPL session, in reverse chronological order.")
+
 (defun store-suggestion (description rationale priority)
   "Store a new improvement suggestion. Returns the created suggestion."
   (bt:with-recursive-lock-held (*command-handlers-lock*)
