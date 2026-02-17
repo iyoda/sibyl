@@ -57,6 +57,11 @@
   (:report (lambda (c s)
              (format s "Invalid LLM response: ~a" (sibyl-error-message c)))))
 
+(define-condition llm-cancelled (llm-error)
+  ()
+  (:report (lambda (c s)
+             (format s "LLM call cancelled: ~a" (sibyl-error-message c)))))
+
 ;;; ============================================================
 ;;; Tool conditions
 ;;; ============================================================
