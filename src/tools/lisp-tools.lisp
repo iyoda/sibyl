@@ -526,10 +526,31 @@
         (format nil "~@[STDOUT: ~a~%~]~@[STDERR: ~a~%~]~a"
                 stdout stderr values-string))))
 
+(defun %eval-form-read-all-forms (form-string package)
+  "Read all Lisp forms from FORM-STRING. Returns a list of forms.
+   Reads in PACKAGE context so unqualified symbols resolve correctly."
+  (let ((*package* package)
+        (*read-eval* nil)
+        (forms nil)
+        (pos 0)
+        (len (length form-string)))
+    (loop
+      ;; Skip whitespace
+      (loop while (and (< pos len)
+                       (member (char form-string pos) '(#\Space #\Tab #\Newline #\Return)))
+            do (incf pos))
+      (when (>= pos len) (return (nreverse forms)))
+      (multiple-value-bind (form new-pos)
+          (read-from-string form-string t nil :start pos)
+        (push form forms)
+        (setf pos new-pos)))))
+
 (deftool "eval-form"
-    (:description "Evaluate a Lisp form in the current image."
+    (:description "Evaluate one or more Lisp forms in the current image.
+Multiple forms are read and evaluated in sequence; the result of the last form is returned.
+Use the package parameter to set the evaluation context (e.g. \"SIBYL.AGENT\")."
      :parameters ((:name "form" :type "string" :required t
-                   :description "Lisp form to evaluate (string).")
+                   :description "Lisp form(s) to evaluate. Multiple forms are supported.")
                   (:name "package" :type "string" :required nil
                    :description "Package to bind *package* to (default: SIBYL).")
                   (:name "timeout" :type "integer" :required nil
@@ -551,19 +572,22 @@
                    (*error-output* stderr-stream)
                    (*package* package)
                    (*read-eval* nil))
-              (multiple-value-bind (form read-position)
-                  (read-from-string form-string)
-                (declare (ignore read-position))
-                (let ((blocked (%eval-form-find-blocked-symbol form)))
-                  (when blocked
-                    (finish (format nil "Blocked unsafe form: ~a"
-                                    (symbol-name blocked)))))
-                (let ((values (sb-ext:with-timeout timeout
-                                (let ((values (multiple-value-list (eval form))))
-                                  (let ((primary (first values)))
-                                    (when (and (symbolp primary) (fboundp primary))
-                                      (compile primary)))
-                                  values))))
+              (let ((forms (%eval-form-read-all-forms form-string package)))
+                ;; Safety check all forms before evaluating any
+                (dolist (form forms)
+                  (let ((blocked (%eval-form-find-blocked-symbol form)))
+                    (when blocked
+                      (finish (format nil "Blocked unsafe form: ~a"
+                                      (symbol-name blocked))))))
+                ;; Evaluate all forms sequentially
+                (let ((values nil))
+                  (sb-ext:with-timeout timeout
+                    (dolist (form forms)
+                      (setf values (multiple-value-list (eval form)))
+                      ;; Auto-compile newly defined functions
+                      (let ((primary (first values)))
+                        (when (and (symbolp primary) (fboundp primary))
+                          (compile primary)))))
                   (finish (%eval-form-format-values values)))))
             (sb-ext:timeout ()
               (finish (format nil "Timeout after ~a seconds" timeout))))))))
