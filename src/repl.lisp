@@ -8,15 +8,16 @@
 ;;; ============================================================
 
 (defparameter *repl-commands*
-  '(("/quit"    . :quit)
-    ("/exit"    . :quit)
-    ("/reset"   . :reset)
-    ("/tools"   . :list-tools)
-    ("/help"    . :help)
-    ("/history" . :history)
-    ("/improve" . :improve)
-    ("/review"  . :review)
-    ("/evolve"  . :evolve))
+  '(("/quit"          . :quit)
+    ("/exit"          . :quit)
+    ("/reset"         . :reset)
+    ("/tools"         . :list-tools)
+    ("/help"          . :help)
+    ("/history"       . :history)
+    ("/improve"       . :improve)
+    ("/review"        . :review)
+    ("/evolve"        . :evolve)
+    ("/test-parallel" . :test-parallel))
   "Mapping of REPL commands to actions.")
 
 ;;; ============================================================
@@ -200,6 +201,8 @@
         (format t "   — Review improvement suggestions~%")
         (format-colored-text "  /evolve" :green)
         (format t "   — Autonomous continuous improvement loop~%")
+        (format-colored-text "  /test-parallel" :green)
+        (format t " — Run test suite in parallel mode~%")
         (format-colored-text "  /colors" :green)
         (format t "   — Toggle color output (on/off)~%")
         (format-colored-text "  /quit" :green)
@@ -215,9 +218,10 @@
         (format t "  /history  — Show conversation history~%")
         (format t "  /improve  — Request self-improvement (TDD cycle)~%")
         (format t "  /review   — Review improvement suggestions~%")
-        (format t "  /evolve   — Autonomous continuous improvement loop~%")
-        (format t "  /colors   — Toggle color output (on/off)~%")
-        (format t "  /quit     — Exit REPL~%")
+        (format t "  /evolve        — Autonomous continuous improvement loop~%")
+        (format t "  /test-parallel — Run test suite in parallel mode~%")
+        (format t "  /colors        — Toggle color output (on/off)~%")
+        (format t "  /quit          — Exit REPL~%")
         (format t "~%Type anything else to chat with the agent.~%")))
   nil)
 
@@ -251,6 +255,19 @@
   (handle-evolve-command agent input)
   nil)
 
+(defun handle-test-parallel-command (agent input)
+  "Handler for /test-parallel command. Runs test suite using parallel runner.
+   Uses uiop:symbol-call for late binding since sibyl.tests is only available
+   when sibyl/tests system is loaded (not at repl.lisp compile time)."
+  (declare (ignore agent input))
+  (format t "~%Running tests in parallel mode...~%~%")
+  (handler-case
+      (let ((results (uiop:symbol-call '#:sibyl.tests '#:run-tests-parallel)))
+        (format t "~%Parallel test run complete. ~a total checks.~%" (length results)))
+    (error (e)
+      (format t "~%Test run error: ~a~%" e)))
+  nil)
+
 ;;; Command handler registry
 (defparameter *command-handlers*
   (list (cons :quit #'handle-quit-command)
@@ -259,8 +276,9 @@
         (cons :help #'handle-help-command)
         (cons :history #'handle-history-command)
         (cons :improve #'handle-improve-command-wrapper)
-        (cons :review #'handle-review-command-wrapper)
-        (cons :evolve #'handle-evolve-command-wrapper))
+         (cons :review #'handle-review-command-wrapper)
+         (cons :evolve #'handle-evolve-command-wrapper)
+         (cons :test-parallel #'handle-test-parallel-command))
   "Mapping of command keywords to handler functions.")
 
 (defun handle-repl-command (command agent &optional original-input)
