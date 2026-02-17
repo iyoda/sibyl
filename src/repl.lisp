@@ -749,12 +749,16 @@
   (/ (- (get-internal-real-time) start-time) 
      (float internal-time-units-per-second)))
 
-(defun format-elapsed-time (seconds &optional (stream *standard-output*))
-  "Format elapsed time as [elapsed: X.Xs] with optional dim styling.
+(defun format-elapsed-time (seconds &key (stream *standard-output*) model)
+  "Format elapsed time as [model · elapsed: X.Xs] with optional dim styling.
+   When MODEL is non-NIL, includes the model name before the elapsed time.
    When *use-colors* is nil, outputs plain text. Otherwise uses ANSI dim code."
-  (if *use-colors*
-      (format stream "~C[2m[elapsed: ~,1fs]~C[0m" #\Escape seconds #\Escape)
-      (format stream "[elapsed: ~,1fs]" seconds)))
+  (let ((label (if model
+                   (format nil "~a · elapsed: ~,1fs" model seconds)
+                   (format nil "elapsed: ~,1fs" seconds))))
+    (if *use-colors*
+        (format stream "~C[2m[~a]~C[0m" #\Escape label #\Escape)
+        (format stream "[~a]" label))))
 
 (defmacro with-elapsed-time (&body body)
   "Execute BODY and measure wall-clock elapsed time."
@@ -960,7 +964,10 @@
                                 (format t "~%~a~%" response))
                               (unless first-chunk-p
                                 (format t "~%"))
-                              (format-elapsed-time (elapsed-seconds start-time))
+                              (format-elapsed-time (elapsed-seconds start-time)
+                                                   :model (ignore-errors
+                                                            (sibyl.llm::client-model
+                                                             (sibyl.agent:agent-client agent))))
                               (format t "~%")))
                                                #+sbcl (sb-sys:interactive-interrupt (e)
                                                        (declare (ignore e))
