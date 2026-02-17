@@ -96,6 +96,7 @@
 
 (defun http-post-json (url headers body)
   "POST JSON BODY to URL with HEADERS. Returns parsed JSON as hash-table."
+  (log-debug "llm" "HTTP POST JSON to ~a" url)
   (let ((json-body (with-output-to-string (s)
                      (yason:encode (to-json-value body) s))))
     (multiple-value-bind (response-body status-code)
@@ -107,6 +108,7 @@
           (dex:http-request-failed (e)
             (let ((code (dex:response-status e))
                   (body (dex:response-body e)))
+              (log-error "llm" "HTTP error ~a for ~a" code url)
               (if (= code 429)
                   (error 'llm-rate-limit-error
                          :message "Rate limited"
@@ -162,6 +164,7 @@
    ON-EVENT — called with (event-type data-string) per SSE event
    ON-DONE  — called when stream completes
    ON-ERROR — optional error handler"
+  (log-debug "llm" "HTTP POST stream to ~a" url)
   (let ((json-body (with-output-to-string (s)
                      (yason:encode (to-json-value body) s))))
     (handler-case
@@ -176,6 +179,7 @@
       (dex:http-request-failed (e)
         (let ((code (dex:response-status e))
               (body (dex:response-body e)))
+          (log-error "llm" "HTTP error ~a for ~a" code url)
           (if (= code 429)
               (error 'llm-rate-limit-error
                      :message "Rate limited"

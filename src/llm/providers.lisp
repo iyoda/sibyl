@@ -42,10 +42,11 @@
   "Create an Anthropic API client.
    Automatically detects OAuth tokens (sk-ant-oat01-...) and configures
    Bearer authentication with the required beta flags."
+  (log-debug "llm" "Creating Anthropic client (model: ~a)" model)
   (let ((key (or api-key
                  (config-value "llm.anthropic.api-key")
                  (error 'config-missing-key-error
-                        :key "llm.anthropic.api-key"))))
+                         :key "llm.anthropic.api-key"))))
     (make-instance 'anthropic-client
                    :api-key key
                    :oauth-p (oauth-token-p key)
@@ -251,6 +252,9 @@ Returns a reconstructed assistant message."
 
 (defmethod complete ((client anthropic-client) messages &key)
   "Send messages to Anthropic Claude API."
+  (log-info "llm" "Anthropic complete (model: ~a, streaming: ~a)"
+            (client-model client)
+            (if *streaming-text-callback* "yes" "no"))
   (if *streaming-text-callback*
       (complete-anthropic-streaming client messages nil)
       (multiple-value-bind (system api-messages)
@@ -269,6 +273,10 @@ Returns a reconstructed assistant message."
 
 (defmethod complete-with-tools ((client anthropic-client) messages tools &key)
   "Send messages with tools to Anthropic Claude API."
+  (log-info "llm" "Anthropic complete-with-tools (model: ~a, tools: ~a, streaming: ~a)"
+            (client-model client)
+            (length tools)
+            (if *streaming-text-callback* "yes" "no"))
   (if *streaming-text-callback*
       (complete-anthropic-streaming client messages tools)
       (multiple-value-bind (system api-messages)
@@ -302,6 +310,7 @@ Returns a reconstructed assistant message."
                              (max-tokens 4096)
                              (temperature 0.0))
   "Create an OpenAI API client."
+  (log-debug "llm" "Creating OpenAI client (model: ~a)" model)
   (make-instance 'openai-client
                  :api-key (or api-key
                               (config-value "llm.openai.api-key")
@@ -463,6 +472,9 @@ Returns a reconstructed assistant message."
 
 (defmethod complete ((client openai-client) messages &key)
   "Send messages to OpenAI GPT API."
+  (log-info "llm" "OpenAI complete (model: ~a, streaming: ~a)"
+            (client-model client)
+            (if *streaming-text-callback* "yes" "no"))
   (if *streaming-text-callback*
       (complete-openai-streaming client messages nil)
       (let* ((body `(("model" . ,(client-model client))
@@ -478,6 +490,10 @@ Returns a reconstructed assistant message."
 
 (defmethod complete-with-tools ((client openai-client) messages tools &key)
   "Send messages with tools to OpenAI GPT API."
+  (log-info "llm" "OpenAI complete-with-tools (model: ~a, tools: ~a, streaming: ~a)"
+            (client-model client)
+            (length tools)
+            (if *streaming-text-callback* "yes" "no"))
   (if *streaming-text-callback*
       (complete-openai-streaming client messages tools)
       (let* ((openai-tools

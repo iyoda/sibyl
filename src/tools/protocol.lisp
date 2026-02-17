@@ -32,7 +32,8 @@
 (defun register-tool (tool)
   "Register a TOOL in the global registry. Overwrites if exists."
   (bt:with-recursive-lock-held (*tool-registry-lock*)
-    (setf (gethash (tool-name tool) *tool-registry*) tool)))
+    (setf (gethash (tool-name tool) *tool-registry*) tool))
+  (log-debug "tools" "Registered tool ~a" (tool-name tool)))
 
 (defun find-tool (name)
   "Find a tool by NAME. Returns the tool struct or NIL."
@@ -150,6 +151,7 @@
 (defun execute-tool (name args)
   "Execute tool NAME with ARGS. Handles errors via the condition system.
    Provides restarts: RETRY-TOOL, SKIP-TOOL, USE-VALUE."
+  (log-debug "tools" "Executing tool ~a" name)
   (let ((tool (find-tool name)))
     (unless tool
       (error 'tool-not-found-error
@@ -166,10 +168,14 @@
                                  :message (format nil "~a" e)
                                  :inner-error e)))))
             (let ((result (funcall (tool-handler tool) normalized-args)))
-              (if (stringp result)
-                  result
-                  (with-output-to-string (s)
-                    (yason:encode result s)))))
+              (let ((result-text (if (stringp result)
+                                     result
+                                     (with-output-to-string (s)
+                                       (yason:encode result s)))))
+                (log-debug "tools" "Tool ~a succeeded (result length: ~a)"
+                           name
+                           (length result-text))
+                result-text)))
         (retry-tool ()
           :report "Retry the tool execution"
           (execute-tool name args))
@@ -200,8 +206,10 @@
                                   tool-name
                                   "unknown")
                    :message "Tool call missing name"))
+          (log-info "tools" "Executing tool call ~a" tool-name)
           (execute-tool tool-name tool-args)))
     (tool-error (e)
+      (log-warn "tools" "Tool call error: ~a" e)
       (format nil "Error: ~a" e))
     (error (e)
       (let* ((name (ignore-errors (sibyl.llm:tool-call-name tool-call-struct)))
@@ -212,4 +220,5 @@
                                       :tool-name tool-name
                                       :message (format nil "~a" e)
                                       :inner-error e)))
+        (log-warn "tools" "Tool call failed for ~a: ~a" tool-name e)
         (format nil "Error: ~a" wrapped)))))

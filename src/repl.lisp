@@ -308,6 +308,7 @@
   "Handle a REPL command. Returns :quit to exit, or NIL to continue.
    ORIGINAL-INPUT is the full command string including arguments.
    Uses dynamic dispatch via *command-handlers* alist."
+  (log-debug "repl" "Command ~a" command)
   (let ((handler (cdr (assoc command *command-handlers*))))
     (if handler
         (funcall handler agent original-input)
@@ -710,6 +711,7 @@
   (lambda (tc)
     (let* ((tool-name (sibyl.llm:tool-call-name tc))
            (active-spinner (or spinner *current-spinner*)))
+      (log-info "agent" "Tool call: ~a" tool-name)
       (if *use-colors*
           (progn
             (format-colored-text (format nil "🔧 ~a を実行中..." tool-name) :cyan)
@@ -723,8 +725,8 @@
   "Return a closure suitable for the :before-step agent hook.
    Currently a no-op stub; Task 7 will wire the spinner into this."
   (declare (ignore spinner))
-  (lambda (&rest args)
-    (declare (ignore args))))
+  (lambda (step-count)
+    (log-debug "agent" "Starting step ~a" step-count)))
 
 (defun make-after-step-hook (&optional spinner)
   "Return a closure suitable for the :after-step agent hook.
@@ -732,6 +734,11 @@
   (declare (ignore spinner))
   (lambda (&rest args)
     (declare (ignore args))))
+
+(defun make-on-error-hook ()
+  "Return a closure suitable for the :on-error agent hook."
+  (lambda (err)
+    (log-error "agent" "Agent error: ~a" err)))
 
 ;;; ============================================================
 ;;; Elapsed time utilities
@@ -864,10 +871,15 @@
                 :client client
                 :name name
                 :system-prompt system-prompt)))
+    (let ((model (and client (ignore-errors (sibyl.llm::client-model client)))))
+      (if model
+          (log-info "repl" "Starting REPL (model: ~a)" model)
+          (log-info "repl" "Starting REPL")))
     (setf (sibyl.agent:agent-hooks agent)
           (list (cons :on-tool-call (make-tool-call-hook))
                 (cons :before-step (make-before-step-hook))
-                (cons :after-step (make-after-step-hook))))
+                (cons :after-step (make-after-step-hook))
+                (cons :on-error (make-on-error-hook))))
     (print-banner)
     ;; Load readline history if cl-readline is available
     (when (and (readline-available-p) (probe-file "~/.sibyl_history"))
@@ -876,11 +888,12 @@
       (labels ((save-history ()
                  (when (readline-available-p)
                    (funcall (find-symbol "WRITE-HISTORY" :cl-readline) "~/.sibyl_history")))
-               (exit-repl (&optional message)
-                 (when message
-                   (format t "~%~a~%" message))
-                 (save-history)
-                 (return-from repl-loop))
+                (exit-repl (&optional message)
+                  (when message
+                    (format t "~%~a~%" message))
+                  (log-info "repl" "Shutting down REPL")
+                  (save-history)
+                  (return-from repl-loop))
                (repl-body ()
                    (tagbody
                     next-iteration
@@ -954,12 +967,14 @@
                                                        (stop-current-spinner)
                                                        (setf *cancel-requested* nil)
                                                        (format t "~%[Cancelled]~%~%"))
-                                               (sibyl.conditions:llm-error (e)
-                                                 (stop-current-spinner)
-                                                 (format t "~%[LLM Error: ~a]~%~%" e))
-                                               (error (e)
-                                                 (stop-current-spinner)
-                                                 (format t "~%[Error: ~a]~%~%" e))))))
+                                                (sibyl.conditions:llm-error (e)
+                                                  (stop-current-spinner)
+                                                  (log-error "repl" "LLM error: ~a" e)
+                                                  (format t "~%[LLM Error: ~a]~%~%" e))
+                                                (error (e)
+                                                  (stop-current-spinner)
+                                                  (log-error "repl" "Error: ~a" e)
+                                                  (format t "~%[Error: ~a]~%~%" e))))))
                                    (when (eq result :cancelled)
                                      (stop-current-spinner)
                                      (setf *cancel-requested* nil)

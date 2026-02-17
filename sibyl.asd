@@ -23,7 +23,8 @@
       ((:file "asdf-protection")))
      (:file "conditions")
      (:file "config")
-     (:file "util")
+      (:file "util")
+     (:file "logging")
      (:module "llm"
       :components
       ((:file "message")

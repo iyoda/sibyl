@@ -112,6 +112,12 @@ Side effects: Modifies the global *config* hash table."
   (when config-file
     (load-config-file config-file))
   (load-env-config)
+  ;; Sync log level from config
+  (let ((level-str (config-value "log.level")))
+    (when level-str
+      (let ((level-kw (intern (string-upcase level-str) :keyword)))
+        (when (assoc level-kw sibyl.logging:*log-levels*)
+          (setf sibyl.logging:*log-level* level-kw)))))
   *config*)
 
 (defmacro with-config ((&key config-file) &body body)
