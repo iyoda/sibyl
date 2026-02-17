@@ -43,6 +43,9 @@
 (defvar *use-colors* t
   "Whether to use colored output in the REPL. Defaults to t (colors enabled).")
 
+(defvar *stream-enabled* t
+  "When T, LLM responses are streamed token-by-token to the terminal.")
+
 (defvar *command-count* 0
   "Counter tracking the number of commands executed in the current REPL session.")
 
@@ -52,6 +55,9 @@
 (defvar *cancel-requested* nil
   "When non-NIL, the current LLM call should be cancelled.
    Set to T by the Ctrl+C handler (single press); reset to NIL before each agent-run call.")
+
+(defvar *current-spinner* nil
+  "Currently active spinner for LLM calls, or NIL when idle.")
 
 (defvar *last-interrupt-time* 0
   "Internal real time (from GET-INTERNAL-REAL-TIME) of the most recent Ctrl+C press.
@@ -702,15 +708,16 @@
    Usage:
      (cons :on-tool-call (make-tool-call-hook spinner))"
   (lambda (tc)
-    (let ((tool-name (sibyl.llm:tool-call-name tc)))
+    (let* ((tool-name (sibyl.llm:tool-call-name tc))
+           (active-spinner (or spinner *current-spinner*)))
       (if *use-colors*
           (progn
             (format-colored-text (format nil "🔧 ~a を実行中..." tool-name) :cyan)
             (format t "~%"))
           (format t "🔧 ~a を実行中...~%" tool-name))
-      (when spinner
+      (when active-spinner
         (sibyl.repl.spinner:update-spinner-message
-         spinner (format nil "🔧 ~a" tool-name))))))
+         active-spinner (format nil "🔧 ~a" tool-name))))))
 
 (defun make-before-step-hook (&optional spinner)
   "Return a closure suitable for the :before-step agent hook.
@@ -857,37 +864,110 @@
                 :client client
                 :name name
                 :system-prompt system-prompt)))
+    (setf (sibyl.agent:agent-hooks agent)
+          (list (cons :on-tool-call (make-tool-call-hook))
+                (cons :before-step (make-before-step-hook))
+                (cons :after-step (make-after-step-hook))))
     (print-banner)
     ;; Load readline history if cl-readline is available
     (when (and (readline-available-p) (probe-file "~/.sibyl_history"))
       (funcall (find-symbol "READ-HISTORY" :cl-readline) "~/.sibyl_history"))
     (block repl-loop
-      (tagbody
-       next-iteration
-         (let ((input (read-user-input)))
-           ;; EOF
-            (unless input
-              (format t "~%Goodbye.~%")
-              (when (readline-available-p)
-                (funcall (find-symbol "WRITE-HISTORY" :cl-readline) "~/.sibyl_history"))
-              (return-from repl-loop))
-           ;; Empty input
-           (when (string= (string-trim '(#\Space #\Tab) input) "")
-             (go next-iteration))
-            ;; REPL command
-            (let ((cmd (repl-command-p input)))
-              (when cmd
-                (when (eq (handle-repl-command cmd agent input) :quit)
-                  (when (readline-available-p)
-                    (funcall (find-symbol "WRITE-HISTORY" :cl-readline) "~/.sibyl_history"))
-                  (return-from repl-loop))
-                (go next-iteration)))
-           ;; Agent interaction
-           (handler-case
-               (let ((response (sibyl.agent:agent-run agent input)))
-                 (format t "~%~a~%~%" response))
-             (sibyl.conditions:llm-error (e)
-               (format t "~%[LLM Error: ~a]~%~%" e))
-             (error (e)
-               (format t "~%[Error: ~a]~%~%" e))))
-         (go next-iteration)))))
+      (labels ((save-history ()
+                 (when (readline-available-p)
+                   (funcall (find-symbol "WRITE-HISTORY" :cl-readline) "~/.sibyl_history")))
+               (exit-repl (&optional message)
+                 (when message
+                   (format t "~%~a~%" message))
+                 (save-history)
+                 (return-from repl-loop))
+               (repl-body ()
+                   (tagbody
+                    next-iteration
+                      (let ((input (read-user-input)))
+                        ;; EOF
+                        (unless input
+                          (exit-repl "Goodbye."))
+                        ;; Empty input
+                        (when (string= (string-trim '(#\Space #\Tab) input) "")
+                          (go next-iteration))
+                        ;; REPL command
+                        (let ((cmd (repl-command-p input)))
+                          (when cmd
+                            (when (eq (handle-repl-command cmd agent input) :quit)
+                              (exit-repl))
+                            (go next-iteration)))
+                        ;; Agent interaction
+                        (let ((spinner nil)
+                              (start-time nil))
+                          (setf *cancel-requested* nil)
+                          (flet ((stop-current-spinner ()
+                                   (when spinner
+                                     (sibyl.repl.spinner:stop-spinner spinner)
+                                     (setf spinner nil
+                                           *current-spinner* nil))))
+                            (unwind-protect
+                                 (let ((result nil))
+                                   (setf result
+                                         (catch 'repl-cancelled
+                                           (handler-bind
+                                               #+sbcl ((sb-sys:interactive-interrupt
+                                                         (lambda (c)
+                                                           (declare (ignore c))
+                                                           (let ((now (get-internal-real-time))
+                                                                 (window (* 2 internal-time-units-per-second)))
+                                                             (if (< (- now *last-interrupt-time*) window)
+                                                                 (progn
+                                                                   (stop-current-spinner)
+                                                                   (exit-repl))
+                                                                 (progn
+                                                                   (setf *cancel-requested* t
+                                                                         *last-interrupt-time* now)
+                                                                   (throw 'repl-cancelled :cancelled)))))))
+                                             (handler-case
+                                                 (progn
+                                                   (setf start-time (get-internal-real-time)
+                                                         spinner (sibyl.repl.spinner:start-spinner "考え中...")
+                                                         *current-spinner* spinner)
+                            (let* ((first-chunk-p t)
+                                   (sibyl.llm:*streaming-text-callback*
+                                     (when *stream-enabled*
+                                       (lambda (text)
+                                         (when first-chunk-p
+                                           (stop-current-spinner)
+                                           (format t "~%")
+                                           (setf first-chunk-p nil))
+                                         (write-string text *standard-output*)
+                                         (force-output *standard-output*))))
+                                   (response (sibyl.agent:agent-run agent input)))
+                              (stop-current-spinner)
+                              (when (or (not *stream-enabled*)
+                                        (not sibyl.llm:*streaming-text-callback*)
+                                        first-chunk-p)
+                                (format t "~%~a~%" response))
+                              (unless first-chunk-p
+                                (format t "~%"))
+                              (format-elapsed-time (elapsed-seconds start-time))
+                              (format t "~%")))
+                                               #+sbcl (sb-sys:interactive-interrupt (e)
+                                                       (declare (ignore e))
+                                                       (stop-current-spinner)
+                                                       (setf *cancel-requested* nil)
+                                                       (format t "~%[Cancelled]~%~%"))
+                                               (sibyl.conditions:llm-error (e)
+                                                 (stop-current-spinner)
+                                                 (format t "~%[LLM Error: ~a]~%~%" e))
+                                               (error (e)
+                                                 (stop-current-spinner)
+                                                 (format t "~%[Error: ~a]~%~%" e))))))
+                                   (when (eq result :cancelled)
+                                     (stop-current-spinner)
+                                     (setf *cancel-requested* nil)
+                                     (format t "~%[Cancelled]~%~%"))))
+                              (stop-current-spinner))))
+                      (go next-iteration))))
+        #+sbcl
+        (let ((wrapper (install-interrupt-handler (lambda () (exit-repl)))))
+          (funcall wrapper #'repl-body))
+        #-sbcl
+        (repl-body)))))

@@ -203,3 +203,22 @@
 (test command-history-defvar
   "*command-history* is bound (initial value NIL = empty history)"
   (is (boundp 'sibyl.repl::*command-history*)))
+
+;;; ============================================================
+;;; streaming defaults
+;;; ============================================================
+
+(test stream-enabled-default
+  "Test that *stream-enabled* is T by default"
+  (is (eq t sibyl.repl::*stream-enabled*)))
+
+(test streaming-callback-invoked
+  "Test that *streaming-text-callback* is invoked when bound"
+  (let ((collected nil))
+    (let ((sibyl.llm:*streaming-text-callback*
+            (lambda (text) (push text collected))))
+      (is (functionp sibyl.llm:*streaming-text-callback*))
+      (funcall sibyl.llm:*streaming-text-callback* "hello")
+      (funcall sibyl.llm:*streaming-text-callback* " world"))
+    (is (null sibyl.llm:*streaming-text-callback*))
+    (is (equal '(" world" "hello") collected))))
