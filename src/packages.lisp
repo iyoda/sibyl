@@ -41,6 +41,7 @@
   (:use #:cl #:sibyl.conditions)
   (:export
    #:*config*
+   #:*default-config-path*
    #:load-config
    #:config-value
    #:with-config))
@@ -94,6 +95,37 @@
    #:*streaming-text-callback*
    ;; Provider construction
    #:make-anthropic-client
+   #:model-tier
+   #:model-config
+   #:task-analyzer
+   #:complexity-analysis
+   #:model-selector
+   #:adaptive-agent
+   #:make-task-analyzer
+   #:make-model-selector
+   #:make-adaptive-agent
+   #:analyze-task-complexity
+   #:select-model-for-task
+   #:create-client-for-model
+   #:adapt-model-for-task
+   #:agent-run-adaptive
+   #:complexity-reasoning
+   #:complexity-score
+   #:complexity-factors
+   #:recommended-tier
+   #:tier-name
+   #:tier-description
+   #:tier-models
+   #:model-name
+   #:model-provider
+   #:enhanced-model-config
+   #:latest-model-selector
+   #:make-latest-model-selector
+   #:select-latest-model-for-task
+   #:model-release-date
+   #:model-version
+   #:model-context-window
+   #:model-capabilities
    #:make-openai-client))
 
 (defpackage #:sibyl.tools
@@ -164,6 +196,35 @@
    #:agent-hooks
    #:agent-step
    #:agent-run
+   #:agent-role
+   #:specialized-agent
+   #:agent-coordinator
+   #:agent-task
+   #:inter-agent-message
+   #:make-specialized-agent
+   #:make-agent-coordinator
+   #:*default-roles*
+   #:add-agent
+   #:remove-agent
+   #:find-agent
+   #:list-agents
+   #:create-task
+   #:assign-task
+   #:complete-task
+   #:send-message
+   #:broadcast-message
+   #:execute-tasks
+   #:role-name
+   #:role-description
+   #:role-system-prompt
+   #:role-tools
+   #:role-capabilities
+   #:agent-id
+   #:agent-status
+   #:task-id
+   #:task-description
+   #:task-status
+   #:task-result
    #:agent-reset))
 
 (defpackage #:sibyl.repl.spinner

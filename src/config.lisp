@@ -64,17 +64,35 @@ Side effects: Modifies the global *config* hash table."
           (setf (config-value (string-downcase (string key))) value))))))
 
 ;;; ============================================================
+;;; Default config file path
+;;; ============================================================
+
+(defparameter *default-config-path*
+  (merge-pathnames ".sibyl/config.lisp" (user-homedir-pathname))
+  "Default path for the Sibyl configuration file (~/.sibyl/config.lisp).")
+
+;;; ============================================================
 ;;; Default values
 ;;; ============================================================
 
 (defun set-defaults ()
   "Set default configuration values."
-  (let ((defaults '(("llm.model"         . "claude-sonnet-4-20250514")
-                    ("llm.max-tokens"    . 4096)
-                    ("llm.temperature"   . 0.0)
-                    ("agent.max-steps"   . 50)
-                    ("agent.name"        . "Sibyl")
-                    ("log.level"         . "info"))))
+  (let ((defaults '(;; LLM defaults
+                    ("llm.model"                . "claude-sonnet-4-20250514")
+                    ("llm.max-tokens"           . 4096)
+                    ("llm.temperature"          . 0.0)
+                    ;; Model selection defaults
+                    ("models.preferred-provider" . "anthropic")
+                    ("models.light.anthropic"   . "claude-3-5-haiku-20241022")
+                    ("models.light.openai"      . "gpt-4.1-mini")
+                    ("models.medium.anthropic"  . "claude-sonnet-4-20250514")
+                    ("models.medium.openai"     . "gpt-5.2")
+                    ("models.heavy.anthropic"   . "claude-opus-4-20250514")
+                    ("models.heavy.openai"      . "gpt-5.3-codex")
+                    ;; Agent defaults
+                    ("agent.max-steps"          . 50)
+                    ("agent.name"               . "Sibyl")
+                    ("log.level"                . "info"))))
     (dolist (pair defaults)
       (unless (config-value (car pair))
         (setf (config-value (car pair)) (cdr pair))))))
@@ -84,10 +102,13 @@ Side effects: Modifies the global *config* hash table."
 ;;; ============================================================
 
 (defun load-config (&key (config-file nil))
-  "Load all configuration: defaults, then config file, then env vars.
+  "Load all configuration: defaults, then ~/.sibyl/config.lisp, then explicit config file, then env vars.
    Later sources override earlier ones."
   (clrhash *config*)
   (set-defaults)
+  ;; Auto-load user config from ~/.sibyl/config.lisp
+  (load-config-file *default-config-path*)
+  ;; Explicit config file overrides user config
   (when config-file
     (load-config-file config-file))
   (load-env-config)
