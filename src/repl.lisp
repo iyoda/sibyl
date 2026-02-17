@@ -727,6 +727,30 @@
     (declare (ignore args))))
 
 ;;; ============================================================
+;;; Elapsed time utilities
+;;; ============================================================
+
+(defun elapsed-seconds (start-time)
+  "Compute elapsed seconds since START-TIME (from get-internal-real-time)."
+  (/ (- (get-internal-real-time) start-time) 
+     (float internal-time-units-per-second)))
+
+(defun format-elapsed-time (seconds &optional (stream *standard-output*))
+  "Format elapsed time as [elapsed: X.Xs] with optional dim styling.
+   When *use-colors* is nil, outputs plain text. Otherwise uses ANSI dim code."
+  (if *use-colors*
+      (format stream "~C[2m[elapsed: ~,1fs]~C[0m" #\Escape seconds #\Escape)
+      (format stream "[elapsed: ~,1fs]" seconds)))
+
+(defmacro with-elapsed-time (&body body)
+  "Execute BODY and measure wall-clock elapsed time."
+  (let ((start-time (gensym "START-TIME-")))
+    `(let ((,start-time (get-internal-real-time)))
+       (prog1
+           (progn ,@body)
+         (format-elapsed-time (elapsed-seconds ,start-time))))))
+
+;;; ============================================================
 ;;; Main REPL loop
 ;;; ============================================================
 
