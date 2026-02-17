@@ -1,0 +1,9 @@
+results-a count: 0
+results-b count: 0
+results-a failures: 0
+results-b failures: 0
+
+=== CONCLUSION ===
+FiveAM thread safety: UNSAFE
+Reason: Source shows global specials mutated without per-run binding (e.g., RUN psetf updates *!*/*!!*/*!!!* and %RUN mutates global *test-dribble-indent*). These shared globals can race across threads even though *on-error*/*on-failure* are let-bound. Empirical parallel run matched sequential counts (both 0), so no discrepancy observed, but source indicates shared mutable state.
+Impact on Task 7: Need wrapper/serialization or isolated runs (no concurrent fiveam:run) if correctness matters.
