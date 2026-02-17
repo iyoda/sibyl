@@ -218,3 +218,117 @@ sbcl --eval '(ql:quickload :sibyl :silent t)' \
 → CTRLC-OK ✓
 (asdf:test-system :sibyl) → 1094 checks, 100% pass
 ```
+
+## [2026-02-17] Task 1 — Elapsed Time Display Utility
+
+### What Was Done
+- Added `elapsed-seconds` function: computes wall-clock elapsed time from `get-internal-real-time`
+- Added `format-elapsed-time` function: formats seconds as `[elapsed: X.Xs]` with ANSI dim styling
+  - When `*use-colors*` is T: uses `~C[2m...[elapsed: ~,1fs]~C[0m` (escape + dim code + text + reset)
+  - When `*use-colors*` is nil: plain text `[elapsed: ~,1fs]`
+- Added `with-elapsed-time` macro: wraps body, measures elapsed time, prints result
+  - Uses `gensym` for hygiene; captures start time before body execution
+  - Returns body result (via `prog1`)
+
+### Location
+- `src/repl.lisp:729-751` — new "Elapsed time utilities" section
+- Inserted BEFORE `print-banner` function (line 757)
+
+### Implementation Details
+- `elapsed-seconds` divides `(- (get-internal-real-time) start-time)` by `(float internal-time-units-per-second)`
+- `format-elapsed-time` uses `#\Escape` for ANSI escape character (portable across Lisps)
+- Dim code: `~C[2m` (escape + literal `[2m`), reset: `~C[0m` (escape + literal `[0m`)
+- One decimal place: `~,1fs` format directive
+
+### Verification
+```bash
+sbcl --eval '(ql:quickload :sibyl :silent t)' \
+     --eval '(let ((output (with-output-to-string (*standard-output*) (let ((*use-colors* nil)) (sibyl.repl::format-elapsed-time 2.345))))) (assert (search "elapsed" output)) (assert (search "2.3" output)) (format t "ELAPSED-OK~%"))' --quit
+→ ELAPSED-OK ✓
+(asdf:test-system :sibyl) → 1094 checks, 100% pass ✓
+```
+
+### Commit
+- `feat(repl): add elapsed time display utility` (3aa7b14)
+
+## [2026-02-17] Task 8 — rich-repl-test Registration & Phase 1 Coverage
+
+### What Was Done
+- Rewrote `tests/rich-repl-test.lisp` (31 lines → 239 lines):
+  - Changed `defpackage` + `in-package #:sibyl.tests.rich-repl` → `in-package #:sibyl.tests`
+  - Added `:in sibyl-tests` to `def-suite` → child suite of top-level
+  - Kept original 3 format-helper tests (they reference real functions)
+  - Added 19 new tests covering all Phase 1 features
+- Registered `(:file "rich-repl-test")` in `sibyl.asd` after `repl-test`
+
+### Test Count
+- Before: 1094 checks
+- After: 1127 checks (+33), 100% pass, 0 failures
+
+### Pitfalls Encountered
+
+#### FiveAM IS Macro Requires a Form
+- `(is *some-var*)` fails with "Argument to IS must be a list, not *SOME-VAR*"
+- Fix: `(is (not (null *some-var*)))` or any predicate expression
+
+#### *use-colors* Package Qualification
+- In `sibyl.tests` package, `(let ((*use-colors* nil)) ...)` binds `sibyl.tests::*use-colors*`
+  which is DIFFERENT from `sibyl.repl::*use-colors*`
+- Fix: always qualify as `(let ((sibyl.repl::*use-colors* nil)) ...)`
+- The hook code reads `*use-colors*` which resolves to `sibyl.repl::*use-colors*` at runtime
+
+#### sibyl-error-message Not Exported
+- `sibyl.conditions:sibyl-error-message` → compile error (not in :export list)
+- Fix: use `(format nil "~a" c)` to get the condition report string instead
+
+### Spinner in Tests
+- Redirect spinner output via `(let* ((*standard-output* (make-string-output-stream)) ...)`
+  to avoid polluting test output with ANSI escape sequences
+- `spinner-thread-terminates` test sleeps 300ms after stop — acceptable latency for CI
+
+### Commit
+- `test(repl): register and expand rich-repl-test with Phase 1 coverage` (29c7fcf)
+
+## [2026-02-17] Phase 1 Integration — start-repl
+
+### Integration Gotchas
+- `install-interrupt-handler` remains the outer Ctrl+C handler, but agent-run needs an inner `handler-bind` to cancel active LLM calls without unwinding through the whole loop.
+- Use a dynamic `*current-spinner*` so tool-call hooks can update the active spinner created per LLM call.
+- `unwind-protect` around spinner + agent-run is required to clear the terminal even on interrupts or errors.
+- Centralize REPL exit to ensure cl-readline history writes occur on EOF, `/quit`, and double Ctrl+C exits.
+- `agent-hooks` accessor was not exported; exporting it in `sibyl.agent` avoids `SIBYL.AGENT:AGENT-HOOKS` reader errors.
+
+### SSE Streaming Infrastructure (client.lisp)
+- Added `*streaming-text-callback*` (defvar, default nil) for provider streaming toggle.
+- Added `parse-sse-stream` to parse SSE lines and emit events with concatenated data parts.
+- Added `http-post-stream` using `dex:post :want-stream t`, parsing SSE, and raising `llm-rate-limit-error` or `llm-api-error` on HTTP failure.
+- Added `llm-stream-error` condition under `llm-error`; exported from `sibyl.conditions`.
+
+## [2026-02-17] Anthropic Streaming Support
+
+### Provider Integration Notes
+- `providers.lisp` now defines `parse-anthropic-sse-events` to normalize SSE event payloads for Anthropic.
+- `complete-anthropic-streaming` reconstructs assistant text and tool calls from `content_block_delta`/`content_block_start`/`content_block_stop`.
+- Streaming path uses `http-post-stream` with `"stream": true`, invokes `*streaming-text-callback*` per `text_delta`.
+
+## [2026-02-17] Task 11 — OpenAI Streaming + REPL Integration
+
+### What Was Done
+- Added `complete-openai-streaming` in providers.lisp (analogous to Anthropic streaming)
+- Modified `complete` and `complete-with-tools` for `openai-client` to check `*streaming-text-callback*`
+- Added `*stream-enabled*` defvar in repl.lisp (default T)
+- Bound `*streaming-text-callback*` around `agent-run` in start-repl
+- Spinner stops on first streamed token; response not re-printed when streaming
+- Added 2 new tests; total test count: 1131 checks, 100% pass
+
+### OpenAI SSE Differences from Anthropic
+- No `event:` lines — only `data:` lines (event-type is nil/empty)
+- Text at `choices[0].delta.content`
+- Tool calls at `choices[0].delta.tool_calls[0].function.arguments`
+- Tool call finalized in on-done callback (no content_block_stop equivalent)
+- [DONE] sentinel already handled by parse-sse-stream (skips it)
+
+### Key Pattern
+- `let*` binding of `*streaming-text-callback*` captures `first-chunk-p` closure variable
+- `first-chunk-p` tracks whether any tokens were streamed (to decide whether to print response)
+- Fully-qualified `sibyl.llm:*streaming-text-callback*` required (sibyl.repl doesn't use sibyl.llm)
