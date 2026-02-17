@@ -57,6 +57,13 @@
   (:report (lambda (c s)
              (format s "Invalid LLM response: ~a" (sibyl-error-message c)))))
 
+(define-condition llm-stream-error (llm-error)
+  ((stream-position :initarg :stream-position
+                    :initform nil
+                    :reader llm-stream-error-position))
+  (:report (lambda (c s)
+             (format s "LLM stream error: ~a" (sibyl-error-message c)))))
+
 (define-condition llm-cancelled (llm-error)
   ()
   (:report (lambda (c s)

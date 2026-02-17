@@ -3,6 +3,18 @@
 
 (in-package #:sibyl.llm)
 
+(defvar *streaming-text-callback* nil
+  "When non-nil, a function (lambda (text) ...) called with each text chunk
+   during streaming LLM responses. When nil (default), non-streaming mode.
+
+   Providers check this variable and use streaming if non-nil:
+     (when *streaming-text-callback*
+       (funcall *streaming-text-callback* text-chunk))
+
+   The REPL binds this around agent-run:
+     (let ((*streaming-text-callback* #'write-token))
+       (agent-run agent input))")
+
 ;;; ============================================================
 ;;; Client protocol (CLOS generic functions)
 ;;; ============================================================
@@ -106,6 +118,73 @@
                          :body body)))))
       (declare (ignore status-code))
       (yason:parse response-body :object-as :hash-table))))
+
+(defun parse-sse-stream (stream on-event on-done &key (on-error nil))
+  "Parse a Server-Sent Events (SSE) stream.
+   STREAM   — readable stream from dexador :want-stream t
+   ON-EVENT — (lambda (event-type data-string) ...) called per event
+   ON-DONE  — (lambda () ...) called when stream ends
+   ON-ERROR — optional (lambda (condition) ...) for errors
+
+   SSE format:
+     event: message_start    <- event type line (optional)
+     data: {\"key\":\"val\"}   <- data line (JSON string)
+                             <- empty line = event boundary"
+  (let ((event-type nil)
+        (data-parts nil))
+    (loop
+      (let ((line (handler-case
+                      (read-line stream nil :eof)
+                    (error (e)
+                      (when on-error (funcall on-error e))
+                      (return)))))
+        (when (eq line :eof)
+          (funcall on-done)
+          (return))
+        (cond
+          ((and (>= (length line) 6)
+                (string= "event:" (subseq line 0 6)))
+           (setf event-type (string-trim '(#\Space #\Tab) (subseq line 6))))
+          ((and (>= (length line) 5)
+                (string= "data:" (subseq line 0 5)))
+           (let ((data (string-trim '(#\Space #\Tab) (subseq line 5))))
+             (push data data-parts)))
+          ((string= line "")
+           (when data-parts
+             (let ((data-str (apply #'concatenate 'string (nreverse data-parts))))
+               (unless (string= data-str "[DONE]")
+                 (funcall on-event (or event-type "data") data-str)))
+             (setf event-type nil
+                   data-parts nil))))))))
+
+(defun http-post-stream (url headers body on-event on-done &key (on-error nil))
+  "POST JSON BODY to URL, read response as SSE stream.
+   ON-EVENT — called with (event-type data-string) per SSE event
+   ON-DONE  — called when stream completes
+   ON-ERROR — optional error handler"
+  (let ((json-body (with-output-to-string (s)
+                     (yason:encode (to-json-value body) s))))
+    (handler-case
+        (let ((stream (dex:post url
+                                :headers (append headers
+                                                 '(("Content-Type" . "application/json")))
+                                :content json-body
+                                :want-stream t)))
+          (unwind-protect
+               (parse-sse-stream stream on-event on-done :on-error on-error)
+            (close stream)))
+      (dex:http-request-failed (e)
+        (let ((code (dex:response-status e))
+              (body (dex:response-body e)))
+          (if (= code 429)
+              (error 'llm-rate-limit-error
+                     :message "Rate limited"
+                     :status-code code
+                     :body body)
+              (error 'llm-api-error
+                     :message (format nil "HTTP ~a" code)
+                     :status-code code
+                     :body body)))))))
 
 (defun build-headers (client &rest extra-headers)
   "Build HTTP headers for CLIENT with optional EXTRA-HEADERS."

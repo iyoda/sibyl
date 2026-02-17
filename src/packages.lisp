@@ -23,6 +23,7 @@
    #:llm-api-error
    #:llm-rate-limit-error
    #:llm-invalid-response
+   #:llm-stream-error
    #:llm-cancelled
    #:llm-error-status-code
    #:llm-error-body
@@ -90,6 +91,7 @@
    #:complete
    #:complete-with-tools
    #:count-tokens
+   #:*streaming-text-callback*
    ;; Provider construction
    #:make-anthropic-client
    #:make-openai-client))
@@ -159,6 +161,7 @@
    #:agent-client
    #:agent-memory
    #:agent-system-prompt
+   #:agent-hooks
    #:agent-step
    #:agent-run
    #:agent-reset))
