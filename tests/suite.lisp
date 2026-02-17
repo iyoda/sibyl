@@ -59,8 +59,9 @@ Called at run-tests-parallel invocation time, after all packages are loaded."
             (%resolve-suite 'agent-tests             '#:sibyl.agent.tests)
             (%resolve-suite 'tdd-orchestration-tests '#:sibyl.agent.tests)
             (%resolve-suite 'run-hook-tests          '#:sibyl.agent.tests)
-            (%resolve-suite 'evolution-state-tests   '#:sibyl.evolution.tests)
-            (%resolve-suite 'evolution-report-tests  '#:sibyl.evolution.tests)))))
+             (%resolve-suite 'memory-compact-tests    '#:sibyl.agent.tests)
+             (%resolve-suite 'evolution-state-tests   '#:sibyl.evolution.tests)
+             (%resolve-suite 'evolution-report-tests  '#:sibyl.evolution.tests)))))
 
 (defparameter *unsafe-suites*
   '(suggest-improvements-tests

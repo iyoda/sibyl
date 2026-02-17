@@ -63,27 +63,42 @@
 
 (defmethod memory-compact ((mem memory))
   "Simple compaction: keep last N/2 messages, summarize the rest.
-   In a full implementation, this would use the LLM to summarize."
+   In a full implementation, this would use the LLM to summarize.
+   Adjusts the split point to avoid orphaning tool_result messages
+   from their corresponding assistant tool_use messages."
   (let* ((messages (conversation-to-list (memory-conversation mem)))
+         (total (length messages))
          (keep-count (ceiling (memory-max-messages mem) 2))
-         (to-summarize (subseq messages 0 (- (length messages) keep-count)))
-         (to-keep (subseq messages (- (length messages) keep-count))))
-    ;; Simple textual summary (placeholder for LLM-based summarization)
-    (let ((summary-text
-            (format nil "~@[Previous summary: ~a~%~]~
-                         Compacted ~a messages. Key points:~%~{- [~a] ~a~%~}"
-                    (memory-summary mem)
-                    (length to-summarize)
-                    (loop for msg in to-summarize
-                          collect (message-role msg)
-                          collect (truncate-string
-                                   (or (message-content msg) "(tool call)")
-                                   80)))))
-      (setf (memory-summary mem) summary-text)
-      ;; Replace conversation with only recent messages
-      (conversation-clear (memory-conversation mem))
-      (dolist (msg to-keep)
-        (conversation-push (memory-conversation mem) msg)))))
+         (split-idx (- total keep-count)))
+    ;; Adjust split-idx forward past any :tool messages at the boundary.
+    ;; A :tool message (tool_result) requires its preceding assistant
+    ;; (tool_use) to be present in the conversation. If the assistant
+    ;; was already moved into the summarized portion, its orphaned
+    ;; tool_results must also be summarized to maintain API invariants.
+    (loop while (and (< split-idx total)
+                     (eq :tool (message-role (nth split-idx messages))))
+          do (incf split-idx))
+    ;; Guard: ensure we keep at least one message
+    (when (>= split-idx total)
+      (setf split-idx (max 0 (1- total))))
+    (let ((to-summarize (subseq messages 0 split-idx))
+          (to-keep (subseq messages split-idx)))
+      ;; Simple textual summary (placeholder for LLM-based summarization)
+      (let ((summary-text
+              (format nil "~@[Previous summary: ~a~%~]~
+                           Compacted ~a messages. Key points:~%~{- [~a] ~a~%~}"
+                      (memory-summary mem)
+                      (length to-summarize)
+                      (loop for msg in to-summarize
+                            collect (message-role msg)
+                            collect (truncate-string
+                                     (or (message-content msg) "(tool call)")
+                                     80)))))
+        (setf (memory-summary mem) summary-text)
+        ;; Replace conversation with only recent messages
+        (conversation-clear (memory-conversation mem))
+        (dolist (msg to-keep)
+          (conversation-push (memory-conversation mem) msg))))))
 
 (defgeneric memory-reset (memory)
   (:documentation "Clear all memory."))

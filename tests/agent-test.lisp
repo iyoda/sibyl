@@ -7,9 +7,21 @@
                 #:agent-hooks
                 #:make-agent
                 #:agent-system-prompt
-                #:run-hook)
+                #:run-hook
+                #:make-memory
+                #:memory-push
+                #:memory-compact
+                #:memory-conversation)
+  (:import-from #:sibyl.llm
+                #:user-message
+                #:assistant-message
+                #:tool-result-message
+                #:make-tool-call
+                #:message-role
+                #:conversation-to-list)
   (:export #:agent-tests
-            #:tdd-orchestration-tests))
+            #:tdd-orchestration-tests
+            #:memory-compact-tests))
 
 (in-package #:sibyl.agent.tests)
 
@@ -190,3 +202,104 @@
         "run-hook should call the hook matching the name")
     (is (eq :after selected)
         "Correct hook should be selected")))
+
+;;; ============================================================
+;;; Memory Compact Tests — tool_use/tool_result pair integrity
+;;; ============================================================
+
+(def-suite memory-compact-tests
+  :description "Tests for memory-compact tool_use/tool_result boundary handling."
+  :in sibyl.tests:sibyl-tests)
+
+(in-suite memory-compact-tests)
+
+(test compact-skips-orphaned-tool-results
+  "memory-compact must not leave orphaned tool_result messages at the
+   start of the kept portion. When the split point lands on a :tool
+   message, it should advance past all consecutive :tool messages."
+  ;; max-messages=6 → keep-count=3 → split-idx = total - 3
+  ;; We push 7 messages so compaction triggers. We arrange the messages
+  ;; so that the naive split-idx (4) lands on a :tool message.
+  (let ((mem (make-memory :max-messages 6)))
+    ;; msg 0: user
+    (memory-push mem (user-message "hello"))
+    ;; msg 1: assistant (plain)
+    (memory-push mem (assistant-message "hi"))
+    ;; msg 2: user
+    (memory-push mem (user-message "read file"))
+    ;; msg 3: assistant with tool_calls — will be summarized
+    (memory-push mem (assistant-message "let me check"
+                       :tool-calls (list (make-tool-call
+                                          :id "toolu_orphan_test"
+                                          :name "read-file"
+                                          :arguments '(("path" . "/tmp/x"))))))
+    ;; msg 4: tool result — naive split lands HERE (orphaned!)
+    (memory-push mem (tool-result-message "toolu_orphan_test" "file contents"))
+    ;; msg 5: assistant
+    (memory-push mem (assistant-message "the file contains..."))
+    ;; msg 6: user — triggers compaction (7 > 6)
+    (memory-push mem (user-message "thanks"))
+
+    ;; After compaction, the first remaining message must NOT be :tool
+    (let* ((remaining (conversation-to-list (memory-conversation mem)))
+           (first-role (message-role (first remaining))))
+      (is (not (eq :tool first-role))
+          "First message after compaction must not be an orphaned :tool (tool_result)"))))
+
+(test compact-skips-multiple-consecutive-tool-results
+  "When multiple consecutive :tool messages sit at the split boundary,
+   all of them must be moved into the summarized portion."
+  ;; max-messages=6 → keep-count=3 → split-idx = total - 3
+  ;; 8 messages → split-idx = 5
+  (let ((mem (make-memory :max-messages 6)))
+    ;; msg 0: user
+    (memory-push mem (user-message "hello"))
+    ;; msg 1: assistant (plain)
+    (memory-push mem (assistant-message "hi"))
+    ;; msg 2: user
+    (memory-push mem (user-message "do two things"))
+    ;; msg 3: assistant with 2 tool calls
+    (memory-push mem (assistant-message nil
+                       :tool-calls (list (make-tool-call
+                                          :id "tc_a" :name "tool-a"
+                                          :arguments nil)
+                                         (make-tool-call
+                                          :id "tc_b" :name "tool-b"
+                                          :arguments nil))))
+    ;; msg 4: tool result for tc_a
+    (memory-push mem (tool-result-message "tc_a" "result a"))
+    ;; msg 5: tool result for tc_b — split lands HERE for 8 msgs
+    (memory-push mem (tool-result-message "tc_b" "result b"))
+    ;; msg 6: assistant
+    (memory-push mem (assistant-message "both done"))
+    ;; msg 7: user — triggers compaction (8 > 6)
+    (memory-push mem (user-message "great"))
+
+    (let* ((remaining (conversation-to-list (memory-conversation mem)))
+           (roles (mapcar #'message-role remaining)))
+      ;; No :tool message should appear at the start of remaining
+      (is (not (eq :tool (first roles)))
+          "First remaining message must not be :tool")
+      ;; Verify the remaining conversation starts cleanly
+      (is (member (first roles) '(:user :assistant))
+          "Remaining conversation should start with :user or :assistant"))))
+
+(test compact-no-adjustment-when-split-is-clean
+  "When the split point does not land on a :tool message, compaction
+   should behave identically to the original algorithm."
+  ;; max-messages=6 → keep-count=3 → split-idx = 4
+  ;; All messages are user/assistant, no tool results at boundary
+  (let ((mem (make-memory :max-messages 6)))
+    (memory-push mem (user-message "m0"))
+    (memory-push mem (assistant-message "m1"))
+    (memory-push mem (user-message "m2"))
+    (memory-push mem (assistant-message "m3"))
+    (memory-push mem (user-message "m4"))
+    (memory-push mem (assistant-message "m5"))
+    ;; msg 6 triggers compaction
+    (memory-push mem (user-message "m6"))
+
+    (let ((remaining (conversation-to-list (memory-conversation mem))))
+      ;; keep-count=3, so exactly 3 messages should remain
+      (is (= 3 (length remaining))
+          "Clean split should keep exactly ceiling(max/2) messages"))))
