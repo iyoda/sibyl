@@ -78,17 +78,17 @@ Side effects: Modifies the global *config* hash table."
 (defun set-defaults ()
   "Set default configuration values."
   (let ((defaults '(;; LLM defaults
-                    ("llm.model"                . "claude-sonnet-4-20250514")
+                    ("llm.model"                . "claude-sonnet-4-5-20250929")
                     ("llm.max-tokens"           . 4096)
                     ("llm.temperature"          . 0.0)
                     ;; Model selection defaults
                     ("models.preferred-provider" . "anthropic")
-                    ("models.light.anthropic"   . "claude-3-5-haiku-20241022")
-                    ("models.light.openai"      . "gpt-4.1-mini")
-                    ("models.medium.anthropic"  . "claude-sonnet-4-20250514")
-                    ("models.medium.openai"     . "gpt-5.2")
-                    ("models.heavy.anthropic"   . "claude-opus-4-20250514")
-                    ("models.heavy.openai"      . "gpt-5.3-codex")
+                    ("models.light.anthropic"   . "claude-haiku-4-5-20251015")
+                    ("models.light.openai"      . "gpt-5-nano")
+                    ("models.medium.anthropic"  . "claude-sonnet-4-5-20250929")
+                    ("models.medium.openai"     . "gpt-5-mini")
+                    ("models.heavy.anthropic"   . "claude-opus-4-6")
+                    ("models.heavy.openai"      . "gpt-5.2")
                     ;; Agent defaults
                     ("agent.max-steps"          . 50)
                     ("agent.name"               . "Sibyl")

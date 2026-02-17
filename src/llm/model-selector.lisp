@@ -62,14 +62,14 @@
                   :cost-factor 0.2
                   :speed-factor 3.0
                   :capability-score 6
-                  :models (list
+                   :models (list
                            (make-instance 'model-config
                                           :provider :anthropic
-                                          :model-name "claude-3-5-haiku-20241022"
+                                          :model-name "claude-haiku-4-5-20251015"
                                           :max-tokens 4096)
                            (make-instance 'model-config
                                           :provider :openai
-                                          :model-name "gpt-4.1-mini"
+                                          :model-name "gpt-5-nano"
                                           :max-tokens 4096)))
    
    (make-instance 'model-tier
@@ -78,14 +78,14 @@
                   :cost-factor 1.0
                   :speed-factor 1.0
                   :capability-score 8
-                  :models (list
+                   :models (list
                            (make-instance 'model-config
                                           :provider :anthropic
-                                          :model-name "claude-sonnet-4-20250514"
+                                          :model-name "claude-sonnet-4-5-20250929"
                                           :max-tokens 8192)
                            (make-instance 'model-config
                                           :provider :openai
-                                          :model-name "gpt-4.1"
+                                          :model-name "gpt-5-mini"
                                           :max-tokens 8192)))
    
    (make-instance 'model-tier
@@ -94,14 +94,14 @@
                   :cost-factor 3.0
                   :speed-factor 0.5
                   :capability-score 10
-                  :models (list
+                                     :models (list
                            (make-instance 'model-config
                                           :provider :anthropic
-                                          :model-name "claude-opus-4-20250514"
+                                          :model-name "claude-opus-4-6"
                                           :max-tokens 16384)
                            (make-instance 'model-config
                                           :provider :openai
-                                          :model-name "gpt-5.3-codex"
+                                          :model-name "gpt-5.2"
                                           :max-tokens 16384
                                           :temperature 0.1)))))
 
@@ -381,23 +381,23 @@
                   :speed-factor 4.0
                   :capability-score 7
                   :models (list
-                           ;; Claude 3.5 Haiku (latest Haiku)
+                           ;; Claude Haiku 4.5 (latest Haiku)
                            (make-instance 'enhanced-model-config
                                           :provider :anthropic
-                                          :model-name "claude-3-5-haiku-20241022"
-                                          :release-date "2024-10-22"
-                                          :version "3.5"
+                                          :model-name "claude-haiku-4-5-20251015"
+                                          :release-date "2025-10-15"
+                                          :version "4.5"
                                           :max-tokens 8192
                                           :context-window 200000
                                           :capabilities '(:fast-reasoning :code-generation))
-                           ;; GPT-4.1 Mini
+                           ;; GPT-5 Nano
                            (make-instance 'enhanced-model-config
                                           :provider :openai
-                                          :model-name "gpt-4.1-mini"
-                                          :release-date "2025-04-14"
-                                          :version "4.1-mini"
+                                          :model-name "gpt-5-nano"
+                                          :release-date "2025-12-01"
+                                          :version "5-nano"
                                           :max-tokens 8192
-                                          :context-window 1000000
+                                          :context-window 200000
                                           :capabilities '(:fast-inference :code-generation))))
    
    ;; Medium tier - Balanced performance
@@ -408,21 +408,21 @@
                   :speed-factor 1.5
                   :capability-score 9
                   :models (list
-                           ;; Claude Sonnet 4 (latest Sonnet)
+                           ;; Claude Sonnet 4.5 (latest Sonnet)
                            (make-instance 'enhanced-model-config
                                           :provider :anthropic
-                                          :model-name "claude-sonnet-4-20250514"
-                                          :release-date "2025-05-14"
-                                          :version "4.0"
+                                          :model-name "claude-sonnet-4-5-20250929"
+                                          :release-date "2025-09-29"
+                                          :version "4.5"
                                           :max-tokens 16384
                                           :context-window 200000
                                           :capabilities '(:advanced-reasoning :code-generation :analysis))
-                           ;; GPT-5.2 (latest general purpose)
+                           ;; GPT-5 Mini (latest balanced)
                            (make-instance 'enhanced-model-config
                                           :provider :openai
-                                          :model-name "gpt-5.2"
+                                          :model-name "gpt-5-mini"
                                           :release-date "2025-12-01"
-                                          :version "5.2"
+                                          :version "5-mini"
                                           :max-tokens 16384
                                           :context-window 200000
                                           :capabilities '(:advanced-reasoning :multimodal))))
@@ -435,26 +435,26 @@
                   :speed-factor 0.8
                   :capability-score 10
                   :models (list
-                           ;; Claude Opus 4 (latest Opus)
+                           ;; Claude Opus 4.6 (latest Opus)
                            (make-instance 'enhanced-model-config
                                           :provider :anthropic
-                                          :model-name "claude-opus-4-20250514"
-                                          :release-date "2025-05-14"
-                                          :version "4.0"
+                                          :model-name "claude-opus-4-6"
+                                          :release-date "2026-02-05"
+                                          :version "4.6"
                                           :max-tokens 32768
                                           :context-window 200000
                                           :temperature 0.1
                                           :capabilities '(:deep-reasoning :code-generation :analysis :architecture))
-                           ;; GPT-5.3 Codex (latest coding model)
+                           ;; GPT-5.2 (latest high-capability)
                            (make-instance 'enhanced-model-config
                                           :provider :openai
-                                          :model-name "gpt-5.3-codex"
-                                          :release-date "2026-02-05"
-                                          :version "5.3-codex"
+                                          :model-name "gpt-5.2"
+                                          :release-date "2025-12-01"
+                                          :version "5.2"
                                           :max-tokens 32768
                                           :context-window 200000
                                           :temperature 0.05
-                                          :capabilities '(:agentic-coding :advanced-reasoning :high-precision))))))
+                                          :capabilities '(:advanced-reasoning :multimodal :high-precision))))))
 
 ;; Model selection with latest model preference
 (defmethod select-latest-model-for-task ((selector model-selector) task-description &key force-tier prefer-provider)
