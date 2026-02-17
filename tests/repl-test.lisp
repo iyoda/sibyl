@@ -207,3 +207,296 @@
     (is (string= "approve" action))
     (is (= 5 id))
     (is (null modification))))
+
+;;; ============================================================
+;;; Dynamic command dispatch tests
+;;; ============================================================
+
+(test command-dispatch-help
+  "Test that :help command dispatches correctly."
+  (let ((output (with-output-to-string (*standard-output*)
+                  (sibyl.repl::handle-repl-command :help nil))))
+    (is (search "Sibyl REPL commands" output :test #'string-equal))))
+
+(test command-dispatch-tools
+  "Test that :list-tools command dispatches correctly."
+  (let ((agent (sibyl.agent:make-agent :client nil :name "Test")))
+    (let ((output (with-output-to-string (*standard-output*)
+                    (sibyl.repl::handle-repl-command :list-tools agent))))
+      (is (search "Registered tools" output :test #'string-equal)))))
+
+(test command-dispatch-reset
+  "Test that :reset command dispatches correctly."
+  (let ((agent (sibyl.agent:make-agent :client nil :name "Test")))
+    (let ((output (with-output-to-string (*standard-output*)
+                    (sibyl.repl::handle-repl-command :reset agent))))
+      (is (search "Conversation reset" output :test #'string-equal)))))
+
+(test command-dispatch-history
+  "Test that :history command dispatches correctly."
+  (let ((agent (sibyl.agent:make-agent :client nil :name "Test")))
+    (let ((output (with-output-to-string (*standard-output*)
+                    (sibyl.repl::handle-repl-command :history agent))))
+      (is (search "Conversation history" output :test #'string-equal)))))
+
+(test command-dispatch-quit
+  "Test that :quit command dispatches correctly and returns :quit."
+  ;; Test return value
+  (let ((output (with-output-to-string (*standard-output*)
+                  (let ((result (sibyl.repl::handle-repl-command :quit nil)))
+                    (is (eq :quit result))))))
+    ;; Verify output contains goodbye message
+    (is (search "Goodbye" output :test #'string-equal))))
+
+(test command-dispatch-unknown
+  "Test that unknown commands are handled gracefully."
+  (let ((output (with-output-to-string (*standard-output*)
+                  (sibyl.repl::handle-repl-command :nonexistent nil))))
+    (is (search "Unknown command" output :test #'string-equal))))
+
+(test dynamic-command-registration
+  "Test that dynamically registered commands can be dispatched."
+  (let ((original-commands sibyl.repl::*command-handlers*)
+        (test-executed nil))
+    (unwind-protect
+         (progn
+           ;; Register a test command
+           (push (cons :test-dynamic
+                       (lambda (agent input)
+                         (declare (ignore agent input))
+                         (setf test-executed t)
+                         "TEST-EXECUTED"))
+                 sibyl.repl::*command-handlers*)
+           
+           ;; Dispatch the test command
+           (sibyl.repl::handle-repl-command :test-dynamic nil)
+           
+           ;; Verify it was executed
+           (is (eq t test-executed)))
+      
+      ;; Cleanup: restore original commands
+      (setf sibyl.repl::*command-handlers* original-commands))))
+
+;;; ============================================================
+;;; register-command tool tests
+;;; ============================================================
+
+(def-suite register-command-tests
+  :description "Tests for the register-command tool."
+  :in sibyl-tests)
+
+(in-suite register-command-tests)
+
+(test register-command-adds-to-handlers
+  "Test that register-command adds a new command to *command-handlers*."
+  (let ((original-commands sibyl.repl::*command-handlers*))
+    (unwind-protect
+         (progn
+           ;; Register a new command via the tool
+           (sibyl.tools:execute-tool
+            "register-command"
+            (list (cons "name" "test-rc-cmd")
+                  (cons "description" "A test command")
+                  (cons "handler-body" "(lambda (agent input) (declare (ignore agent input)) \"test-rc-result\")")))
+           ;; Verify it appears in *command-handlers*
+           (let ((entry (assoc :test-rc-cmd sibyl.repl::*command-handlers*)))
+             (is (not (null entry)))
+             (is (eq :test-rc-cmd (car entry)))
+             (is (functionp (cdr entry)))))
+      ;; Cleanup
+      (setf sibyl.repl::*command-handlers* original-commands))))
+
+(test register-command-handler-is-callable
+  "Test that the registered handler can be called via funcall."
+  (let ((original-commands sibyl.repl::*command-handlers*))
+    (unwind-protect
+         (progn
+           ;; Register a command that returns a known value
+           (sibyl.tools:execute-tool
+            "register-command"
+            (list (cons "name" "test-rc-callable")
+                  (cons "description" "A callable test command")
+                  (cons "handler-body" "(lambda (agent input) (declare (ignore agent input)) \"callable-result\")")))
+           ;; Find the handler and call it
+           (let* ((entry (assoc :test-rc-callable sibyl.repl::*command-handlers*))
+                  (handler (cdr entry))
+                  (result (funcall handler nil nil)))
+             (is (not (null entry)))
+             (is (string= "callable-result" result))))
+      ;; Cleanup
+      (setf sibyl.repl::*command-handlers* original-commands))))
+
+(test register-command-invalid-handler-body
+  "Test that an invalid handler-body signals a tool-execution-error."
+  (signals sibyl.conditions:tool-execution-error
+    (sibyl.tools:execute-tool
+     "register-command"
+     (list (cons "name" "test-rc-invalid")
+           (cons "description" "Invalid handler")
+           (cons "handler-body" "(not-a-lambda x y z")))))
+
+(test register-command-non-lambda-handler-body
+  "Test that a non-lambda handler-body signals a tool-execution-error."
+  (signals sibyl.conditions:tool-execution-error
+    (sibyl.tools:execute-tool
+     "register-command"
+     (list (cons "name" "test-rc-nonlambda")
+           (cons "description" "Non-lambda handler")
+           (cons "handler-body" "(+ 1 2)")))))
+
+(test register-command-empty-name-error
+  "Test that an empty name signals a tool-execution-error."
+  (signals sibyl.conditions:tool-execution-error
+    (sibyl.tools:execute-tool
+     "register-command"
+     (list (cons "name" "")
+           (cons "description" "Some description")
+           (cons "handler-body" "(lambda (agent input) (declare (ignore agent input)) nil)")))))
+
+(test register-command-duplicate-overwrites
+  "Test that registering a duplicate command name overwrites the existing handler."
+  (let ((original-commands sibyl.repl::*command-handlers*))
+    (unwind-protect
+         (progn
+           ;; Register first version
+           (sibyl.tools:execute-tool
+            "register-command"
+            (list (cons "name" "test-rc-dup")
+                  (cons "description" "First version")
+                  (cons "handler-body" "(lambda (agent input) (declare (ignore agent input)) \"first\")")))
+           ;; Register second version (overwrite)
+           (sibyl.tools:execute-tool
+            "register-command"
+            (list (cons "name" "test-rc-dup")
+                  (cons "description" "Second version")
+                  (cons "handler-body" "(lambda (agent input) (declare (ignore agent input)) \"second\")")))
+           ;; The most recently registered handler should be first in the alist
+           (let* ((entry (assoc :test-rc-dup sibyl.repl::*command-handlers*))
+                  (handler (cdr entry))
+                  (result (funcall handler nil nil)))
+             (is (not (null entry)))
+             (is (string= "second" result))))
+       ;; Cleanup
+       (setf sibyl.repl::*command-handlers* original-commands))))
+
+;;; ============================================================
+;;; /evolve command tests
+;;; ============================================================
+
+(def-suite evolve-tests
+  :description "Tests for /evolve command."
+  :in sibyl-tests)
+
+(in-suite evolve-tests)
+
+(defun %evolve-test-suggestions-json (suggestions)
+  (let ((payload (make-hash-table :test 'equal)))
+    (setf (gethash "suggestions" payload)
+          (if suggestions
+              (coerce suggestions 'vector)
+              #()))
+    (with-output-to-string (stream)
+      (yason:encode payload stream))))
+
+(defun %evolve-test-run-results-json (total passed failed)
+  (let ((payload (make-hash-table :test 'equal)))
+    (setf (gethash "total" payload) total)
+    (setf (gethash "passed" payload) passed)
+    (setf (gethash "failed" payload) failed)
+    (setf (gethash "failures" payload) #())
+    (with-output-to-string (stream)
+      (yason:encode payload stream))))
+
+(test evolve-command-registered
+  "Test that /evolve command is registered in *command-handlers*."
+  (let ((entry (assoc :evolve sibyl.repl::*command-handlers*)))
+    (is (not (null entry)))
+    (is (functionp (cdr entry)))))
+
+(test evolve-stops-when-max-cycles-zero
+  "Loop stops immediately when max-cycles=0."
+  (let ((original-execute (symbol-function 'sibyl.tools:execute-tool))
+        (execute-called nil))
+    (unwind-protect
+         (progn
+           (setf (symbol-function 'sibyl.tools:execute-tool)
+                 (lambda (&rest args)
+                   (declare (ignore args))
+                   (setf execute-called t)
+                   (error "execute-tool should not be called")))
+           (with-output-to-string (*standard-output*)
+             (sibyl.repl::handle-evolve-command nil "/evolve 0"))
+           (is (null execute-called)))
+      (setf (symbol-function 'sibyl.tools:execute-tool) original-execute))))
+
+(test evolve-stops-when-no-suggestions
+  "Loop stops when suggest-improvements returns no suggestions."
+  (let ((original-execute (symbol-function 'sibyl.tools:execute-tool))
+        (original-agent-run (symbol-function 'sibyl.agent:agent-run))
+        (run-tests-called nil)
+        (agent-called nil))
+    (unwind-protect
+         (progn
+           (setf (symbol-function 'sibyl.tools:execute-tool)
+                 (lambda (name args)
+                   (declare (ignore args))
+                   (cond
+                     ((string= name "suggest-improvements")
+                      (%evolve-test-suggestions-json nil))
+                     ((string= name "run-tests")
+                      (setf run-tests-called t)
+                      (%evolve-test-run-results-json 10 10 0))
+                     (t
+                      (error "Unexpected tool call: ~a" name)))))
+           (setf (symbol-function 'sibyl.agent:agent-run)
+                 (lambda (&rest args)
+                   (declare (ignore args))
+                   (setf agent-called t)
+                   "ok"))
+           (let ((output (with-output-to-string (*standard-output*)
+                           (sibyl.repl::handle-evolve-command nil "/evolve 1"))))
+             (is (search "No new suggestions. Stopping." output :test #'string-equal))
+             (is (null run-tests-called))
+             (is (null agent-called))))
+      (setf (symbol-function 'sibyl.tools:execute-tool) original-execute)
+      (setf (symbol-function 'sibyl.agent:agent-run) original-agent-run))))
+
+(test evolve-stops-on-test-failure
+  "Loop stops when run-tests reports failures."
+  (let ((original-execute (symbol-function 'sibyl.tools:execute-tool))
+        (original-agent-run (symbol-function 'sibyl.agent:agent-run))
+        (run-tests-called nil)
+        (agent-called nil))
+    (unwind-protect
+         (progn
+           (setf (symbol-function 'sibyl.tools:execute-tool)
+                 (lambda (name args)
+                   (declare (ignore args))
+                   (cond
+                     ((string= name "suggest-improvements")
+                      (let ((suggestion (make-hash-table :test 'equal)))
+                        (setf (gethash "description" suggestion) "Add regression test")
+                        (setf (gethash "rationale" suggestion) "Ensure safety")
+                        (setf (gethash "priority" suggestion) "high")
+                        (setf (gethash "category" suggestion) "tests")
+                        (setf (gethash "file" suggestion) "src/repl.lisp")
+                        (setf (gethash "line" suggestion) 1)
+                        (%evolve-test-suggestions-json (list suggestion))))
+                     ((string= name "run-tests")
+                      (setf run-tests-called t)
+                      (%evolve-test-run-results-json 10 9 1))
+                     (t
+                      (error "Unexpected tool call: ~a" name)))))
+           (setf (symbol-function 'sibyl.agent:agent-run)
+                 (lambda (&rest args)
+                   (declare (ignore args))
+                   (setf agent-called t)
+                   "ok"))
+           (let ((output (with-output-to-string (*standard-output*)
+                           (sibyl.repl::handle-evolve-command nil "/evolve 1"))))
+             (is (search "Test regression detected. Stopping." output
+                         :test #'string-equal))
+             (is (eq t run-tests-called))
+             (is (eq t agent-called))))
+      (setf (symbol-function 'sibyl.tools:execute-tool) original-execute)
+      (setf (symbol-function 'sibyl.agent:agent-run) original-agent-run))))
