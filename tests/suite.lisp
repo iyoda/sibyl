@@ -18,8 +18,8 @@
   (is (string= "sibyl" (string-downcase "SIBYL"))))
 
 (defun run-sibyl-tests ()
-  "Run the full test suite with self-assess nested execution prevention.
-Binds *self-assess-running* to T so that any self-assess calls during
-the test run skip re-executing the full suite and use cached results instead."
-  (let ((sibyl.tools:*self-assess-running* t))
-    (fiveam:run! 'sibyl-tests)))
+  "Run the full test suite with self-assess nested execution prevention
+and codebase-map caching for faster repeated scans."
+  (sibyl.tools:with-codebase-map-cache ()
+    (let ((sibyl.tools:*self-assess-running* t))
+      (fiveam:run! 'sibyl-tests))))

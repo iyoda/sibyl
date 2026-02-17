@@ -439,6 +439,11 @@
         (return-from codebase-map
           (format nil "Error: detail-level must be \"summary\" or \"full\". Got: ~a"
                   detail-input)))
+      ;; Check cache first (active during test runs via with-codebase-map-cache)
+      (when *codebase-map-cache*
+        (let ((cached (gethash detail-level *codebase-map-cache*)))
+          (when cached
+            (return-from codebase-map cached))))
       (let* ((files (%codebase-map-find-lisp-files src-dir))
              (groups (%codebase-map-group-by-directory files))
              (modules (mapcar (lambda (group)
@@ -455,6 +460,9 @@
              (result (make-hash-table :test 'equal)))
         (setf (gethash "detail_level" result) detail-level)
         (setf (gethash "modules" result) modules)
+        ;; Store in cache if active
+        (when *codebase-map-cache*
+          (setf (gethash detail-level *codebase-map-cache*) result))
         result))))
 
 ;;; ============================================================
@@ -1751,6 +1759,19 @@
 
 (defvar *self-assess-last-test-results* nil
   "Cache of the most recent run-tests result (parsed).")
+
+(defvar *codebase-map-cache* nil
+  "Dynamically-scoped hash table for codebase-map results during test runs.
+   NIL means no caching (production default).
+   Bound by with-codebase-map-cache macro; key is detail-level string.")
+
+(defmacro with-codebase-map-cache (() &body body)
+  "Execute BODY with an active codebase-map cache.
+   Within BODY, codebase-map results are cached by detail-level to avoid
+   redundant file system scans. Cache is scoped to this macro's dynamic extent.
+   Only use during testing — do NOT use in production code."
+  `(let ((*codebase-map-cache* (make-hash-table :test 'equal)))
+     ,@body))
 
 (defparameter *self-assess-cyclomatic-branches*
   '("if" "when" "unless" "cond" "case" "typecase" "ecase" "ccase"

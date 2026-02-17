@@ -876,7 +876,9 @@
 (test write-test-generates-and-registers-test
   "write-test generates a test and registers it in-memory."
   (let* ((test-name "write-test-auto-generated-001")
-         (test-symbol (intern (string-upcase test-name) :sibyl.tests)))
+         (test-symbol (intern (string-upcase test-name) :sibyl.tests))
+         (test-file (asdf:system-relative-pathname :sibyl "tests/sexp-tools-test.lisp"))
+         (original-content (uiop:read-file-string test-file)))
     (unwind-protect
          (progn
            ;; Generate test using write-test tool
@@ -896,7 +898,10 @@
                (is (not (null test-result))))))
       ;; Cleanup
       (when (fiveam:get-test test-symbol)
-        (fiveam:rem-test test-symbol)))))
+        (fiveam:rem-test test-symbol))
+      ;; Restore file content to prevent test artifacts from persisting
+      (with-open-file (stream test-file :direction :output :if-exists :supersede)
+        (write-string original-content stream)))))
 
 (test write-test-appends-to-file
   "write-test appends the generated test to the specified file."
@@ -929,7 +934,9 @@
 (test write-test-rejects-duplicate-name
   "write-test rejects duplicate test names."
   (let* ((test-name "write-test-duplicate-check")
-         (test-symbol (intern (string-upcase test-name) :sibyl.tests)))
+         (test-symbol (intern (string-upcase test-name) :sibyl.tests))
+         (test-file (asdf:system-relative-pathname :sibyl "tests/sexp-tools-test.lisp"))
+         (original-content (uiop:read-file-string test-file)))
     (unwind-protect
          (progn
             ;; Create first test
@@ -946,7 +953,10 @@
                  ("body" . "(is (eq t t))")))))
       ;; Cleanup
       (when (fiveam:get-test test-symbol)
-        (fiveam:rem-test test-symbol)))))
+        (fiveam:rem-test test-symbol))
+      ;; Restore file content to prevent test artifacts from persisting
+      (with-open-file (stream test-file :direction :output :if-exists :supersede)
+        (write-string original-content stream)))))
 
 (test write-test-validates-required-parameters
   "write-test validates that required parameters are present."
@@ -965,7 +975,9 @@
 (test write-test-uses-default-suite
   "write-test defaults to sibyl-tests suite."
   (let* ((test-name "write-test-default-suite-check")
-         (test-symbol (intern (string-upcase test-name) :sibyl.tests)))
+         (test-symbol (intern (string-upcase test-name) :sibyl.tests))
+         (test-file (asdf:system-relative-pathname :sibyl "tests/sexp-tools-test.lisp"))
+         (original-content (uiop:read-file-string test-file)))
     (unwind-protect
          (progn
            (sibyl.tools:execute-tool
@@ -981,12 +993,17 @@
              (is (not (null test-obj)))))
       ;; Cleanup
       (when (fiveam:get-test test-symbol)
-        (fiveam:rem-test test-symbol)))))
+        (fiveam:rem-test test-symbol))
+      ;; Restore file content to prevent test artifacts from persisting
+      (with-open-file (stream test-file :direction :output :if-exists :supersede)
+        (write-string original-content stream)))))
 
 (test write-test-generated-test-runs-successfully
   "write-test generated test can be run via run-tests tool."
   (let* ((test-name "write-test-runnable-check")
-         (test-symbol (intern (string-upcase test-name) :sibyl.tests)))
+         (test-symbol (intern (string-upcase test-name) :sibyl.tests))
+         (test-file (asdf:system-relative-pathname :sibyl "tests/sexp-tools-test.lisp"))
+         (original-content (uiop:read-file-string test-file)))
     (unwind-protect
          (progn
            ;; Generate test
@@ -1006,7 +1023,10 @@
              (is (= failed 0))))
       ;; Cleanup
       (when (fiveam:get-test test-symbol)
-        (fiveam:rem-test test-symbol)))))
+        (fiveam:rem-test test-symbol))
+      ;; Restore file content to prevent test artifacts from persisting
+      (with-open-file (stream test-file :direction :output :if-exists :supersede)
+        (write-string original-content stream)))))
 
 
 (def-suite creation-integration-tests

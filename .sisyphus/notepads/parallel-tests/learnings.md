@@ -88,3 +88,16 @@ asdf-protection-tests, eval-form-tests, who-calls-tests
 ### Conclusion: UNSAFE
 ### Reason: RUN mutates shared globals without per-run binding (e.g., *!*/*!!*/*!!!* psetf and *test-dribble-indent* mutation). Parallel vs sequential counts matched (0), but source shows shared mutable state.
 ### Task 7 implication: Do not run fiveam:run concurrently; use serialization or wrapper isolation.
+
+## [2026-02-17] Task 4: codebase-map Cache + write-test-tests Fix
+
+### with-codebase-map-cache:
+- defvar *codebase-map-cache* nil (in lisp-tools.lisp)
+- macro with-codebase-map-cache: let-binds *codebase-map-cache* to fresh hash-table
+- active codebase-map tool (line 430): checks cache by detail-level before scanning
+- suite.lisp run-sibyl-tests: wrapped with with-codebase-map-cache
+
+### write-test-tests file cleanup fix:
+- Added file content save/restore to 4 tests: generates-and-registers, rejects-duplicate, uses-default-suite, generated-test-runs-successfully
+- Tests now leave sexp-tools-test.lisp unchanged after running
+- Pattern: (original-content (uiop:read-file-string test-file)) + restore in cleanup

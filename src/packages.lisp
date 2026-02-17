@@ -133,8 +133,11 @@
        #:evolution-report-improvement-result
        #:evolution-report-cycle-summary
        #:evolution-report-final-summary
-       ;; Self-assess guard (exported for test runner binding)
-       #:*self-assess-running*))
+        ;; Self-assess guard (exported for test runner binding)
+        #:*self-assess-running*
+        ;; Codebase-map cache (exported for test runner use)
+        #:*codebase-map-cache*
+        #:with-codebase-map-cache))
 
 (defpackage #:sibyl.agent
   (:use #:cl #:sibyl.conditions #:sibyl.config #:sibyl.util
