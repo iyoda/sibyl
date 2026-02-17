@@ -3425,32 +3425,38 @@
    - \"modified-files\"         : list of strings, files modified during evolution
    NIL when no evolution cycle is active.")
 
+(defvar *evolution-state-lock* (bt:make-recursive-lock "evolution-state-lock")
+  "Recursive lock protecting *evolution-state*.
+   Lock order: tool-registry (1st) < evolution-state (2nd) < modified-files (3rd) < command-handlers (4th)")
+
 (defun evolution-state-init ()
   "Initialize *evolution-state* with a fresh hash-table.
    Resets all fields to their default values."
-  (let ((state (make-hash-table :test 'equal)))
-    (setf (gethash "cycle-number" state) 0)
-    (setf (gethash "attempted-improvements" state) nil)
-    (setf (gethash "results" state) nil)
-    (setf (gethash "baseline-test-count" state) 0)
-    (setf (gethash "baseline-tool-count" state) 0)
-    (setf (gethash "modified-files" state) nil)
-    (setf *evolution-state* state)
-    state))
+  (bt:with-recursive-lock-held (*evolution-state-lock*)
+    (let ((state (make-hash-table :test 'equal)))
+      (setf (gethash "cycle-number" state) 0)
+      (setf (gethash "attempted-improvements" state) nil)
+      (setf (gethash "results" state) nil)
+      (setf (gethash "baseline-test-count" state) 0)
+      (setf (gethash "baseline-tool-count" state) 0)
+      (setf (gethash "modified-files" state) nil)
+      (setf *evolution-state* state)
+      state)))
 
 (defun evolution-state-record-attempt (description result)
   "Record an improvement attempt in *evolution-state*.
    DESCRIPTION is a string describing the improvement.
    RESULT is a string describing the outcome (e.g. \"success\", \"failed\").
    Initializes state if not already initialized."
-  (unless *evolution-state*
-    (evolution-state-init))
-  (let ((state *evolution-state*))
-    ;; Add to attempted-improvements list
-    (push description (gethash "attempted-improvements" state))
-    ;; Add to results as (description . result) pair
-    (push (cons description result) (gethash "results" state))
-    state))
+  (bt:with-recursive-lock-held (*evolution-state-lock*)
+    (unless *evolution-state*
+      (evolution-state-init))
+    (let ((state *evolution-state*))
+      ;; Add to attempted-improvements list
+      (push description (gethash "attempted-improvements" state))
+      ;; Add to results as (description . result) pair
+      (push (cons description result) (gethash "results" state))
+      state)))
 
 (defun %evolution-state-to-plist (state)
   "Convert evolution state hash-table to a plist suitable for JSON encoding."
@@ -3474,17 +3480,18 @@
   "Save *evolution-state* to a JSON file.
    PATH defaults to .sibyl/evolution-log.json relative to the system root.
    Creates parent directories if needed."
-  (let* ((save-path (or path
-                        (asdf:system-relative-pathname
-                         :sibyl ".sibyl/evolution-log.json")))
-         (plist (%evolution-state-to-plist *evolution-state*)))
-    (ensure-directories-exist save-path)
-    (with-open-file (stream save-path
-                            :direction :output
-                            :if-exists :supersede
-                            :if-does-not-exist :create)
-      (yason:encode-plist plist stream))
-    save-path))
+  (bt:with-recursive-lock-held (*evolution-state-lock*)
+    (let* ((save-path (or path
+                          (asdf:system-relative-pathname
+                           :sibyl ".sibyl/evolution-log.json")))
+           (plist (%evolution-state-to-plist *evolution-state*)))
+      (ensure-directories-exist save-path)
+      (with-open-file (stream save-path
+                              :direction :output
+                              :if-exists :supersede
+                              :if-does-not-exist :create)
+        (yason:encode-plist plist stream))
+      save-path)))
 
 (defun %evolution-state-from-hash (ht)
   "Convert a parsed JSON hash-table back to evolution state format."
@@ -3517,19 +3524,20 @@
   "Load *evolution-state* from a JSON file.
    PATH defaults to .sibyl/evolution-log.json relative to the system root.
    Returns NIL gracefully if the file does not exist."
-  (let* ((load-path (or path
-                        (asdf:system-relative-pathname
-                         :sibyl ".sibyl/evolution-log.json"))))
-    (when (probe-file load-path)
-      (handler-case
-          (let* ((json-string (uiop:read-file-string load-path))
-                 (parsed (yason:parse json-string :object-as :hash-table))
-                 (state (%evolution-state-from-hash parsed)))
-            (setf *evolution-state* state)
-            state)
-        (error (e)
-          (warn "evolution-state-load: failed to parse ~a: ~a" load-path e)
-          nil)))))
+  (bt:with-recursive-lock-held (*evolution-state-lock*)
+    (let* ((load-path (or path
+                          (asdf:system-relative-pathname
+                           :sibyl ".sibyl/evolution-log.json"))))
+      (when (probe-file load-path)
+        (handler-case
+            (let* ((json-string (uiop:read-file-string load-path))
+                   (parsed (yason:parse json-string :object-as :hash-table))
+                   (state (%evolution-state-from-hash parsed)))
+              (setf *evolution-state* state)
+              state)
+          (error (e)
+            (warn "evolution-state-load: failed to parse ~a: ~a" load-path e)
+            nil))))))
 
 (defun %evolution-status-format-state (state)
   "Format evolution state as a human-readable string."

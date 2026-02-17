@@ -15,47 +15,55 @@
   "Hash table of file paths that should not be reloaded by ASDF.
    Keys are absolute pathnames as strings.")
 
+(defvar *modified-files-lock* (bt:make-recursive-lock "modified-files-lock")
+  "Recursive lock protecting *modified-files*.
+   Lock order: tool-registry (1st) < evolution-state (2nd) < modified-files (3rd) < command-handlers (4th)")
+
 (defun protect-file (path)
   "Mark PATH as modified, preventing ASDF reload.
    
    PATH can be a pathname or string. The file must exist to be protected
    (we use TRUENAME to get the canonical path)."
-  (let ((truename (handler-case (truename path)
-                    (file-error ()
-                      ;; If file doesn't exist yet, use the path as-is
-                      ;; This handles the case where we're protecting a file
-                      ;; before it's created
-                      (if (pathnamep path)
-                          path
-                          (pathname path))))))
-    (setf (gethash (namestring truename) *modified-files*) t)
-    truename))
+  (bt:with-recursive-lock-held (*modified-files-lock*)
+    (let ((truename (handler-case (truename path)
+                      (file-error ()
+                        ;; If file doesn't exist yet, use the path as-is
+                        ;; This handles the case where we're protecting a file
+                        ;; before it's created
+                        (if (pathnamep path)
+                            path
+                            (pathname path))))))
+      (setf (gethash (namestring truename) *modified-files*) t)
+      truename)))
 
 (defun unprotect-file (path)
   "Remove PATH from protection, allowing ASDF reload.
    
    PATH can be a pathname or string."
-  (let ((truename (handler-case (truename path)
-                    (file-error ()
-                      (if (pathnamep path)
-                          path
-                          (pathname path))))))
-    (remhash (namestring truename) *modified-files*)))
+  (bt:with-recursive-lock-held (*modified-files-lock*)
+    (let ((truename (handler-case (truename path)
+                      (file-error ()
+                        (if (pathnamep path)
+                            path
+                            (pathname path))))))
+      (remhash (namestring truename) *modified-files*))))
 
 (defun file-protected-p (path)
   "Check if PATH is protected from ASDF reload.
    
    PATH can be a pathname or string. Returns T if protected, NIL otherwise."
-  (let ((truename (handler-case (truename path)
-                    (file-error ()
-                      (if (pathnamep path)
-                          path
-                          (pathname path))))))
-    (gethash (namestring truename) *modified-files*)))
+  (bt:with-recursive-lock-held (*modified-files-lock*)
+    (let ((truename (handler-case (truename path)
+                      (file-error ()
+                        (if (pathnamep path)
+                            path
+                            (pathname path))))))
+      (gethash (namestring truename) *modified-files*))))
 
 (defun clear-all-protections ()
   "Remove all file protections."
-  (clrhash *modified-files*))
+  (bt:with-recursive-lock-held (*modified-files-lock*)
+    (clrhash *modified-files*)))
 
 (defmethod asdf:perform :around ((op asdf:compile-op) (c asdf:cl-source-file))
   "Skip compilation of protected files.

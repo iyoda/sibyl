@@ -5,6 +5,7 @@
   (:export
    ;; Protection state
    #:*modified-files*
+   #:*modified-files-lock*
    ;; Protection API
    #:protect-file
    #:unprotect-file
@@ -102,12 +103,13 @@
     #:tool-parameters
     #:tool-handler
     #:deftool
-    ;; Registry
-    #:*tool-registry*
-    #:register-tool
-    #:find-tool
-    #:list-tools
-    #:tools-as-schema
+     ;; Registry
+     #:*tool-registry*
+     #:*tool-registry-lock*
+     #:register-tool
+     #:find-tool
+     #:list-tools
+     #:tools-as-schema
     ;; Execution
     #:execute-tool
     #:execute-tool-call
@@ -119,6 +121,7 @@
      #:package-symbols
       ;; Evolution state management
       #:*evolution-state*
+      #:*evolution-state-lock*
       #:evolution-state-init
       #:evolution-state-record-attempt
       #:evolution-state-save

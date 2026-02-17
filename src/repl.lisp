@@ -35,16 +35,21 @@
 (defvar *next-suggestion-id* 1
   "Counter for generating unique suggestion IDs.")
 
+(defvar *command-handlers-lock* (bt:make-recursive-lock "command-handlers-lock")
+  "Recursive lock protecting *command-handlers* and *pending-suggestions*.
+   Lock order: tool-registry (1st) < evolution-state (2nd) < modified-files (3rd) < command-handlers (4th)")
+
 (defun store-suggestion (description rationale priority)
   "Store a new improvement suggestion. Returns the created suggestion."
-  (let ((suggestion (list :id *next-suggestion-id*
-                          :description description
-                          :rationale rationale
-                          :priority priority
-                          :status "pending")))
-    (push suggestion *pending-suggestions*)
-    (incf *next-suggestion-id*)
-    suggestion))
+  (bt:with-recursive-lock-held (*command-handlers-lock*)
+    (let ((suggestion (list :id *next-suggestion-id*
+                            :description description
+                            :rationale rationale
+                            :priority priority
+                            :status "pending")))
+      (push suggestion *pending-suggestions*)
+      (incf *next-suggestion-id*)
+      suggestion)))
 
 (defun store-suggestions (suggestions-list)
   "Store multiple suggestions from a list of plists.
@@ -56,19 +61,83 @@
 
 (defun get-suggestion-by-id (id)
   "Retrieve a suggestion by its ID. Returns NIL if not found."
-  (find id *pending-suggestions* :key (lambda (s) (getf s :id))))
+  (bt:with-recursive-lock-held (*command-handlers-lock*)
+    (find id *pending-suggestions* :key (lambda (s) (getf s :id)))))
 
 (defun update-suggestion-status (id new-status)
   "Update the status of a suggestion."
-  (let ((suggestion (get-suggestion-by-id id)))
-    (when suggestion
-      (setf (getf suggestion :status) new-status)
-      t)))
+  (bt:with-recursive-lock-held (*command-handlers-lock*)
+    (let ((suggestion (get-suggestion-by-id id)))
+      (when suggestion
+        (setf (getf suggestion :status) new-status)
+        t))))
 
 (defun clear-suggestions ()
   "Clear all pending suggestions."
-  (setf *pending-suggestions* nil)
-  (setf *next-suggestion-id* 1))
+  (bt:with-recursive-lock-held (*command-handlers-lock*)
+    (setf *pending-suggestions* nil)
+    (setf *next-suggestion-id* 1)))
+
+(defun format-colored-text (text color &optional (stream *standard-output*))
+  "Format text with ANSI color codes. COLOR can be :red, :green, :blue, :yellow, :cyan, :magenta, :white, :black"
+  (let ((color-code (case color
+                      (:black 30)
+                      (:red 31)
+                      (:green 32)
+                      (:yellow 33)
+                      (:blue 34)
+                      (:magenta 35)
+                      (:cyan 36)
+                      (:white 37)
+                      (t 37)))) ; default to white
+    (format stream "~C[~Am~A~C[0m" #\Escape color-code text #\Escape)))
+
+(defun format-enhanced-prompt (name &optional (command-count 0))
+  "Format an enhanced prompt with colors and information"
+  (with-output-to-string (s)
+    (format-colored-text "┌─[" :cyan s)
+    (format-colored-text name :green s)
+    (when (> command-count 0)
+      (format s " ")
+      (format-colored-text (format nil "#~A" command-count) :yellow s))
+    (format-colored-text "]" :cyan s)
+    (format s "~%")
+    (format-colored-text "└─> " :cyan s)))
+
+(defun complete-command (partial)
+  "Complete a partial command string. Returns list of matching commands."
+  (let ((commands (mapcar #'car *repl-commands*)))
+    (remove-if-not (lambda (cmd) 
+                     (and (>= (length cmd) (length partial))
+                          (string= partial cmd :end2 (length partial))))
+                   commands)))
+
+(defun handle-colors-command (agent input)
+  "Handler for :colors command to toggle color output."
+  (declare (ignore agent))
+  (let* ((args (string-trim '(#\  #\Tab) 
+                           (if (search "/colors" input :test #'string-equal)
+                               (subseq input (length "/colors"))
+                               input)))
+         (action (string-downcase args)))
+    (cond
+      ((or (string= action "on") (string= action "enable") (string= action "true"))
+       (setf *use-colors* t)
+       (format-colored-text "Colors enabled!" :green)
+       (format t "~%"))
+      ((or (string= action "off") (string= action "disable") (string= action "false"))
+       (setf *use-colors* nil)
+       (format t "Colors disabled.~%"))
+      ((string= action "")
+       (if *use-colors*
+           (progn
+             (format-colored-text "Colors are currently " :white)
+             (format-colored-text "enabled" :green)
+             (format t ".~%"))
+           (format t "Colors are currently disabled.~%")))
+      (t
+       (format t "Usage: /colors [on|off]~%"))))
+  nil)
 
 (defun repl-command-p (input)
   "Check if INPUT is a REPL command. Returns the command keyword or NIL.
@@ -110,18 +179,46 @@
   nil)
 
 (defun handle-help-command (agent input)
-  "Handler for :help command."
+  "Handler for :help command with enhanced formatting."
   (declare (ignore agent input))
-  (format t "~%Sibyl REPL commands:~%")
-  (format t "  /help     — Show this help~%")
-  (format t "  /tools    — List registered tools~%")
-  (format t "  /reset    — Reset conversation~%")
-  (format t "  /history  — Show conversation history~%")
-  (format t "  /improve  — Request self-improvement (TDD cycle)~%")
-  (format t "  /review   — Review improvement suggestions~%")
-  (format t "  /evolve   — Autonomous continuous improvement loop~%")
-  (format t "  /quit     — Exit REPL~%")
-  (format t "~%Type anything else to chat with the agent.~%")
+  (if *use-colors*
+      (progn
+        (format t "~%")
+        (format-colored-text "Sibyl REPL Commands:" :cyan)
+        (format t "~%~%")
+        (format-colored-text "  /help" :green)
+        (format t "     — Show this help~%")
+        (format-colored-text "  /tools" :green)
+        (format t "    — List registered tools~%")
+        (format-colored-text "  /reset" :green)
+        (format t "    — Reset conversation~%")
+        (format-colored-text "  /history" :green)
+        (format t "  — Show conversation history~%")
+        (format-colored-text "  /improve" :green)
+        (format t "  — Request self-improvement (TDD cycle)~%")
+        (format-colored-text "  /review" :green)
+        (format t "   — Review improvement suggestions~%")
+        (format-colored-text "  /evolve" :green)
+        (format t "   — Autonomous continuous improvement loop~%")
+        (format-colored-text "  /colors" :green)
+        (format t "   — Toggle color output (on/off)~%")
+        (format-colored-text "  /quit" :green)
+        (format t "     — Exit REPL~%~%")
+        (format-colored-text "Type anything else to chat with the agent." :yellow)
+        (format t "~%"))
+      ;; Fallback to original help if colors disabled
+      (progn
+        (format t "~%Sibyl REPL commands:~%")
+        (format t "  /help     — Show this help~%")
+        (format t "  /tools    — List registered tools~%")
+        (format t "  /reset    — Reset conversation~%")
+        (format t "  /history  — Show conversation history~%")
+        (format t "  /improve  — Request self-improvement (TDD cycle)~%")
+        (format t "  /review   — Review improvement suggestions~%")
+        (format t "  /evolve   — Autonomous continuous improvement loop~%")
+        (format t "  /colors   — Toggle color output (on/off)~%")
+        (format t "  /quit     — Exit REPL~%")
+        (format t "~%Type anything else to chat with the agent.~%")))
   nil)
 
 (defun handle-history-command (agent input)
@@ -563,19 +660,46 @@
 ;;; ============================================================
 
 (defun print-banner ()
-  "Print the Sibyl welcome banner."
-  (format t "~%~
+  "Print the enhanced Sibyl welcome banner with colors."
+  (if *use-colors*
+      (progn
+        (format t "~%")
+        (format-colored-text "╔═══════════════════════════════════════╗" :cyan)
+        (format t "~%")
+        (format-colored-text "║          " :cyan)
+        (format-colored-text "S I B Y L" :green)
+        (format-colored-text "  v0.1.0           ║" :cyan)
+        (format t "~%")
+        (format-colored-text "║     " :cyan)
+        (format-colored-text "Lisp-based Coding Agent" :yellow)
+        (format-colored-text "          ║" :cyan)
+        (format t "~%")
+        (format-colored-text "╚═══════════════════════════════════════╝" :cyan)
+        (format t "~%~%")
+        (format-colored-text "Type " :white)
+        (format-colored-text "/help" :green)
+        (format-colored-text " for commands, or start chatting." :white)
+        (format t "~%~%"))
+      ;; Fallback to original banner if colors disabled
+      (format t "~%~
 ╔═══════════════════════════════════════╗~%~
 ║          S I B Y L  v0.1.0           ║~%~
 ║     Lisp-based Coding Agent          ║~%~
 ╚═══════════════════════════════════════╝~%~
-~%Type /help for commands, or start chatting.~%~%"))
+~%Type /help for commands, or start chatting.~%~%")))
 
 (defun read-user-input ()
-  "Read a line of input from the user. Returns NIL on EOF."
-  (format t "~&sibyl> ")
-  (force-output)
-  (read-line *standard-input* nil nil))
+  "Read a line of input from the user with enhanced prompt. Returns NIL on EOF."
+  (let ((prompt (if *use-colors*
+                    (format-enhanced-prompt "sibyl" *command-count*)
+                    "sibyl> ")))
+    (format t "~A" prompt)
+    (force-output)
+    (let ((input (read-line *standard-input* nil nil)))
+      (when input
+        (incf *command-count*)
+        (push input *command-history*))
+      input)))
 
 (defun start-repl (&key client
                      (system-prompt sibyl.agent::*default-system-prompt*)

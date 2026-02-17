@@ -25,24 +25,32 @@
 (defvar *tool-registry* (make-hash-table :test 'equal)
   "Global registry mapping tool names to tool structs.")
 
+(defvar *tool-registry-lock* (bt:make-recursive-lock "tool-registry-lock")
+  "Recursive lock protecting *tool-registry*. Acquire before accessing registry.
+   Lock order: tool-registry (1st) < evolution-state (2nd) < modified-files (3rd) < command-handlers (4th)")
+
 (defun register-tool (tool)
   "Register a TOOL in the global registry. Overwrites if exists."
-  (setf (gethash (tool-name tool) *tool-registry*) tool))
+  (bt:with-recursive-lock-held (*tool-registry-lock*)
+    (setf (gethash (tool-name tool) *tool-registry*) tool)))
 
 (defun find-tool (name)
   "Find a tool by NAME. Returns the tool struct or NIL."
-  (gethash name *tool-registry*))
+  (bt:with-recursive-lock-held (*tool-registry-lock*)
+    (gethash name *tool-registry*)))
 
 (defun list-tools ()
   "Return a list of all registered tool structs."
-  (let ((tools nil))
-    (maphash (lambda (k v) (declare (ignore k)) (push v tools))
-             *tool-registry*)
-    (sort tools #'string< :key #'tool-name)))
+  (bt:with-recursive-lock-held (*tool-registry-lock*)
+    (let ((tools nil))
+      (maphash (lambda (k v) (declare (ignore k)) (push v tools))
+               *tool-registry*)
+      (sort tools #'string< :key #'tool-name))))
 
 (defun unregister-tool (name)
   "Remove a tool from the registry."
-  (remhash name *tool-registry*))
+  (bt:with-recursive-lock-held (*tool-registry-lock*)
+    (remhash name *tool-registry*)))
 
 ;;; ============================================================
 ;;; DEFTOOL macro — Lisp-idiomatic tool definition
