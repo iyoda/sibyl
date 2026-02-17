@@ -7,11 +7,15 @@
 ;;; Tool call representation
 ;;; ============================================================
 
-(defstruct (tool-call (:constructor make-tool-call))
-  "Represents a tool/function call requested by the LLM."
-  (id        "" :type string)
-  (name      "" :type string)
-  (arguments nil :type list))   ; plist of (:key value ...)
+(defclass tool-call ()
+  ((id        :initarg :id        :accessor tool-call-id        :initform "")
+   (name      :initarg :name      :accessor tool-call-name      :initform "")
+   (arguments :initarg :arguments :accessor tool-call-arguments :initform nil))
+  (:documentation "Represents a tool/function call requested by the LLM."))
+
+(defun make-tool-call (&key (id "") (name "") (arguments nil))
+  "Create a new tool-call instance."
+  (make-instance 'tool-call :id id :name name :arguments arguments))
 
 ;;; ============================================================
 ;;; Message

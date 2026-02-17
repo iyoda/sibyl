@@ -97,3 +97,124 @@
 - `(asdf:test-system :sibyl)` runs suite `:sibyl-tests`
 - Current test count: ~1094 checks (from parallel-tests completion)
 - `rich-repl-test.lisp` exists but NOT registered in sibyl.asd
+
+## [2026-02-17] cl-readline Optional Integration
+
+### Critical: Compile-Time Package Resolution
+- Directly using `cl-readline:foo` in source causes COMPILE-FILE-ERROR when cl-readline is not loaded
+- Even inside `(when (readline-available-p) ...)` — the package-qualified symbol is resolved at **read time**
+- Fix: use `(funcall (find-symbol "READLINE" :cl-readline) :prompt prompt)` — purely runtime dispatch
+- `find-symbol` on a non-existent package returns NIL; since we guard with `(readline-available-p)` first, this is safe
+
+### Pattern Used
+```lisp
+;; Check
+(defun readline-available-p ()
+  (not (null (find-package :cl-readline))))
+
+;; Call (only inside (when (readline-available-p) ...) guards)
+(funcall (find-symbol "READLINE" :cl-readline) :prompt prompt)
+(funcall (find-symbol "ADD-HISTORY" :cl-readline) input)
+(funcall (find-symbol "READ-HISTORY" :cl-readline) "~/.sibyl_history")
+(funcall (find-symbol "WRITE-HISTORY" :cl-readline) "~/.sibyl_history")
+```
+
+### sibyl/readline Subsystem
+- Defined in `sibyl.asd` as a SEPARATE defsystem — never add cl-readline to main `:depends-on`
+- `:components ()` is valid (empty component list) — just pulls in both systems as dependencies
+- Loading `sibyl/readline` makes `readline-available-p` return T; main `:sibyl` stays independent
+
+### History File
+- Path: `"~/.sibyl_history"` (string — SBCL expands `~` in probe-file and write-history)
+- Load on REPL start: inside `start-repl` after `(print-banner)`
+- Save on REPL exit: both EOF path and `:quit` command path
+
+### Verification Command
+```bash
+sbcl --eval '(ql:quickload :sibyl :silent t)' \
+     --eval '(assert (not (sibyl.repl::readline-available-p)))' \
+     --eval '(with-input-from-string (*standard-input* "hello") (assert (string= "hello" (sibyl.repl::read-user-input))))' \
+     --eval '(format t "READLINE-FALLBACK-OK~%")' --quit
+```
+→ Outputs `READLINE-FALLBACK-OK` ✓
+
+## [2026-02-17] Task 6 — Tool Call Hook Factory Functions
+
+### tool-call accessor: `tool-call-name` (CONFIRMED)
+- Accessor: `sibyl.llm:tool-call-name` (exported, single colon)
+- `tool-call-id`: id accessor
+- `tool-call-arguments`: arguments accessor
+- All three exported from `sibyl.llm` package (see packages.lisp:74-78)
+
+### CRITICAL: tool-call changed from defstruct to defclass
+- Original: `(defstruct (tool-call (:constructor make-tool-call)) ...)`
+- Changed to `defclass` in `src/llm/message.lisp` to support `make-instance` with initargs
+- Reason: SBCL `defstruct` does NOT register slot initargs for `make-instance` —
+  calling `(make-instance 'tool-call :name ...)` fails with "Invalid initialization arguments"
+- Fix: `(defclass tool-call () ((id :initarg :id ...) (name :initarg :name ...) ...))`
+- `make-tool-call` function preserved: `(defun make-tool-call (&key id name arguments) ...)`
+- All existing callers unaffected (providers.lisp, tests still pass 1094/1094)
+- After FASL change: clean cache with `find ~/.cache/common-lisp -name "*.fasl" -path "*/sibyl/*" -delete`
+
+### Hook factory functions added to src/repl.lisp
+- Section: "Hook functions" added before "Main REPL loop" (around line 693)
+- `make-tool-call-hook (&optional spinner)` — returns closure for `:on-tool-call`
+- `make-before-step-hook (&optional spinner)` — no-op stub for `:before-step`
+- `make-after-step-hook (&optional spinner)` — no-op stub for `:after-step`
+- Display format: `🔧 <tool-name> を実行中...` in cyan (or plain when `*use-colors*` nil)
+- Uses `sibyl.llm:tool-call-name` (single colon — symbol is exported)
+- Spinner update: `(sibyl.repl.spinner:update-spinner-message spinner (format nil "🔧 ~a" tool-name))`
+
+### sibyl.repl package does NOT use sibyl.llm
+- `sibyl.repl` uses `#:sibyl.agent #:sibyl.config` only
+- Must use fully qualified `sibyl.llm:tool-call-name` (NOT just `tool-call-name`)
+
+## [2026-02-17] Task 4 — Ctrl+C Cancellation Variables & llm-cancelled Condition
+
+### What Was Done
+- Added `llm-cancelled` condition to `src/conditions.lisp` as a direct subtype of `llm-error`
+  - No extra slots; report: `"LLM call cancelled: <message>"`
+- `#:llm-cancelled` already in `sibyl.conditions` exports in HEAD; committed in conditions.lisp
+- `*cancel-requested*` (nil) and `*last-interrupt-time*` (0) defvars already in HEAD repl.lisp
+- `install-interrupt-handler` with `#+sbcl` guard already in HEAD repl.lisp
+
+### Handler Pattern (#+sbcl) — returns a thunk-wrapper, not a direct installer
+```lisp
+#+sbcl
+(defun install-interrupt-handler (exit-fn)
+  (lambda (body-thunk)
+    (handler-bind ((sb-sys:interactive-interrupt
+                    (lambda (c) (declare (ignore c))
+                      (let ((now (get-internal-real-time))
+                            (window (* 2 internal-time-units-per-second)))
+                        (if (< (- now *last-interrupt-time*) window)
+                            (funcall exit-fn)
+                            (progn (setf *cancel-requested* t *last-interrupt-time* now)
+                                   (format *standard-output* "~%[^C: ...]~%")
+                                   (force-output *standard-output*))))
+                      (invoke-restart 'continue))))
+      (funcall body-thunk))))
+```
+
+### Key SBCL Facts
+- `sb-sys:interactive-interrupt` is the Ctrl+C condition (NOT a subtype of `error`)
+- `handler-bind` safer than `sb-sys:enable-interrupt` — avoids lock corruption
+- Must `(invoke-restart 'continue)` to avoid stack unwinding
+- Function returns a wrapper thunk; Task 7 wraps the REPL loop with it
+
+### State Discovery
+- Previous session had already committed repl.lisp/packages.lisp changes to HEAD
+- Only `conditions.lisp` needed a new commit for `llm-cancelled`
+- ASDF stale cache caused false "CL-READLINE package does not exist" on first run
+  - Fix: `rm -rf ~/.cache/common-lisp/sbcl-*/path/to/sibyl/`
+
+### Verification
+```
+sbcl --eval '(ql:quickload :sibyl :silent t)' \
+     --eval '(assert (not sibyl.repl::*cancel-requested*))' \
+     --eval '(assert (= 0 sibyl.repl::*last-interrupt-time*))' \
+     --eval '(assert (typep (make-condition (quote sibyl.conditions:llm-cancelled) :message "test") (quote sibyl.conditions:llm-error)))' \
+     --eval '(format t "CTRLC-OK~%")' --quit
+→ CTRLC-OK ✓
+(asdf:test-system :sibyl) → 1094 checks, 100% pass
+```
