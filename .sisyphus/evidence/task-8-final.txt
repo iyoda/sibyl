@@ -1,0 +1,49 @@
+Task 8: Final Measurement
+Date: 2026-02-17
+
+BASELINE (Task 1, before optimization):
+- Time: ~120s
+- Checks: ~1040 (before cleanup) / 1094 (after cleanup + new tests added)
+
+SEQUENTIAL RAW (fiveam:run! 'sibyl-tests, no optimizations):
+- Time: 113.76s
+- Checks: 1094
+- Pass: 1094 (100%)
+- Fail: 0
+
+SEQUENTIAL OPTIMIZED (run-sibyl-tests, with cache + self-assess guard):
+- Time: 8.79s
+- Checks: 1094
+- Pass: 1094 (100%)
+- Fail: 0
+
+PARALLEL (run-tests-parallel):
+- Time: 12.92s
+- Checks: 1094 (matches sequential exactly)
+- Pass: 1094 (100%)
+- Fail: 0
+
+SPEEDUP:
+- run-sibyl-tests vs baseline: ~13.6x faster (120s -> 8.79s)
+- run-tests-parallel vs baseline: ~9.3x faster (120s -> 12.92s)
+- run-sibyl-tests vs raw sequential: ~12.9x faster (113.76s -> 8.79s)
+
+DEFINITION OF DONE:
+- [x] run-sibyl-tests < 15s: 8.79s ✓
+- [x] run-tests-parallel < 15s: 12.92s ✓
+- [x] 0 failures (both runners)
+- [x] Check counts match: 1094 = 1094 ✓
+- [x] /test-parallel REPL command registered ✓
+- [x] All global state has recursive locks ✓
+- [x] with-codebase-map-cache macro implemented ✓
+- [x] *self-assess-running* guard prevents nested test re-execution ✓
+
+NOTES:
+- The parallel runner uses fiveam:run 'sibyl-tests as the authoritative result set
+  because FiveAM is not thread-safe (all calls serialized via *fiveam-run-lock*).
+  The "parallel" phase runs SAFE suites in threads but they are serialized by the lock.
+  The real speedup comes from with-codebase-map-cache + *self-assess-running* guard.
+- Missing suites fixed: run-tests-tests, add-definition-tests, add-export-tests,
+  create-module-tests, parallel-runner-tests added to *unsafe-suites*.
+- Cross-package suites (agent-tests, evolution-state-tests etc.) resolved via
+  parallel-runner-test.lisp which appends them to *safe-suites* at load time.
