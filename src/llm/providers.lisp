@@ -372,37 +372,130 @@ Returns a reconstructed assistant message."
                        tool-calls))))
     (assistant-message content :tool-calls (nreverse tool-calls))))
 
-(defmethod complete ((client openai-client) messages &key)
-  "Send messages to OpenAI GPT API."
-  (let* ((body `(("model" . ,(client-model client))
-                 ("max_tokens" . ,(client-max-tokens client))
-                 ("temperature" . ,(client-temperature client))
-                 ("messages" . ,(messages-to-openai-format messages))))
-         (response (http-post-json
-                    (format nil "~a/chat/completions"
-                            (client-base-url client))
-                    (openai-headers client)
-                    (alist-to-hash body))))
-    (parse-openai-response response)))
-
-(defmethod complete-with-tools ((client openai-client) messages tools &key)
-  "Send messages with tools to OpenAI GPT API."
+(defun complete-openai-streaming (client messages tools)
+  "Stream OpenAI responses, invoking *streaming-text-callback* per text delta.
+Returns a reconstructed assistant message."
   (let* ((openai-tools
-           (mapcar (lambda (ts)
-                     `(("type" . "function")
-                       ("function"
-                        . (("name" . ,(getf ts :name))
-                           ("description" . ,(getf ts :description))
-                           ("parameters" . ,(getf ts :parameters))))))
-                   tools))
+           (when tools
+             (mapcar (lambda (ts)
+                       `(("type" . "function")
+                         ("function"
+                          . (("name" . ,(getf ts :name))
+                             ("description" . ,(getf ts :description))
+                             ("parameters" . ,(getf ts :parameters))))))
+                     tools)))
          (body `(("model" . ,(client-model client))
                  ("max_tokens" . ,(client-max-tokens client))
                  ("temperature" . ,(client-temperature client))
                  ("messages" . ,(messages-to-openai-format messages))
-                 ("tools" . ,openai-tools)))
-         (response (http-post-json
-                    (format nil "~a/chat/completions"
-                            (client-base-url client))
-                    (openai-headers client)
-                    (alist-to-hash body))))
-    (parse-openai-response response)))
+                 ("stream" . t)))
+         (final-body (if openai-tools
+                         (append body `(("tools" . ,openai-tools)))
+                         body))
+         (text-parts nil)
+         (tool-calls nil)
+         (current-tool-id nil)
+         (current-tool-name nil)
+         (current-tool-input-parts nil))
+    (labels ((finalize-tool-call ()
+               (when current-tool-name
+                 (let* ((json-str (if current-tool-input-parts
+                                      (format nil "~{~a~}" (nreverse current-tool-input-parts))
+                                      "{}"))
+                        (args (handler-case
+                                  (let ((parsed-args (yason:parse json-str :object-as :hash-table)))
+                                    (if (hash-table-p parsed-args)
+                                        (hash-to-alist parsed-args)
+                                        parsed-args))
+                                (error () nil))))
+                   (push (make-tool-call
+                          :id current-tool-id
+                          :name current-tool-name
+                          :arguments args)
+                         tool-calls)
+                   (setf current-tool-id nil
+                         current-tool-name nil
+                         current-tool-input-parts nil)))))
+      (http-post-stream
+       (format nil "~a/chat/completions" (client-base-url client))
+       (openai-headers client)
+       (alist-to-hash final-body)
+       (lambda (event-type data-str)
+         (declare (ignore event-type))
+         (handler-case
+             (let* ((data (yason:parse data-str :object-as :hash-table))
+                    (choices (gethash "choices" data))
+                    (choice (cond
+                              ((vectorp choices)
+                               (when (> (length choices) 0)
+                                 (aref choices 0)))
+                              ((listp choices)
+                               (first choices))))
+                    (delta (when choice (gethash "delta" choice))))
+               (when delta
+                 (let ((content (gethash "content" delta)))
+                   (when (and content (not (equal content :null)))
+                     (push content text-parts)
+                     (funcall *streaming-text-callback* content)))
+                 (let ((tool-calls-delta (gethash "tool_calls" delta)))
+                   (when tool-calls-delta
+                     (let* ((tc (cond
+                                  ((vectorp tool-calls-delta)
+                                   (when (> (length tool-calls-delta) 0)
+                                     (aref tool-calls-delta 0)))
+                                  ((listp tool-calls-delta)
+                                   (first tool-calls-delta))))
+                            (func (when tc (gethash "function" tc)))
+                            (tc-id (when tc (gethash "id" tc)))
+                            (tc-name (when func (gethash "name" func)))
+                            (tc-args (when func (gethash "arguments" func))))
+                       (when tc-id (setf current-tool-id tc-id))
+                       (when tc-name (setf current-tool-name tc-name))
+                       (when (and tc-args (not (equal tc-args :null)))
+                         (push tc-args current-tool-input-parts)))))))
+           (error () nil)))
+       (lambda ()
+         (finalize-tool-call)))
+      (assistant-message
+       (when text-parts
+         (string-join "" (nreverse text-parts)))
+       :tool-calls (nreverse tool-calls)))))
+
+(defmethod complete ((client openai-client) messages &key)
+  "Send messages to OpenAI GPT API."
+  (if *streaming-text-callback*
+      (complete-openai-streaming client messages nil)
+      (let* ((body `(("model" . ,(client-model client))
+                     ("max_tokens" . ,(client-max-tokens client))
+                     ("temperature" . ,(client-temperature client))
+                     ("messages" . ,(messages-to-openai-format messages))))
+             (response (http-post-json
+                        (format nil "~a/chat/completions"
+                                (client-base-url client))
+                        (openai-headers client)
+                        (alist-to-hash body))))
+        (parse-openai-response response))))
+
+(defmethod complete-with-tools ((client openai-client) messages tools &key)
+  "Send messages with tools to OpenAI GPT API."
+  (if *streaming-text-callback*
+      (complete-openai-streaming client messages tools)
+      (let* ((openai-tools
+               (mapcar (lambda (ts)
+                         `(("type" . "function")
+                           ("function"
+                            . (("name" . ,(getf ts :name))
+                               ("description" . ,(getf ts :description))
+                               ("parameters" . ,(getf ts :parameters))))))
+                       tools))
+             (body `(("model" . ,(client-model client))
+                     ("max_tokens" . ,(client-max-tokens client))
+                     ("temperature" . ,(client-temperature client))
+                     ("messages" . ,(messages-to-openai-format messages))
+                     ("tools" . ,openai-tools)))
+             (response (http-post-json
+                        (format nil "~a/chat/completions"
+                                (client-base-url client))
+                        (openai-headers client)
+                        (alist-to-hash body))))
+        (parse-openai-response response))))
