@@ -97,5 +97,54 @@
              (is (not (search ".git/config" result-with-exclude)))
              (is (search "src/main.lisp" result-with-exclude))))
       ;; Cleanup
-      (when (uiop:directory-exists-p test-dir)
-        (uiop:delete-directory-tree test-dir :validate t)))))
+       (when (uiop:directory-exists-p test-dir)
+         (uiop:delete-directory-tree test-dir :validate t)))))
+
+(test execute-tool-call-tool-not-found
+  "execute-tool-call returns an error string for missing tools."
+  (let ((sibyl.tools:*tool-registry* (make-hash-table :test 'equal)))
+    (let* ((tool-call (sibyl.llm:make-tool-call
+                       :id "tc-missing"
+                       :name "nonexistent"
+                       :arguments nil))
+           (result (sibyl.tools:execute-tool-call tool-call)))
+      (is (stringp result))
+      (is (search "Tool not found" result)))))
+
+(test execute-tool-call-validation-error
+  "execute-tool-call returns an error string for validation failures."
+  (let ((sibyl.tools:*tool-registry* (make-hash-table :test 'equal)))
+    (sibyl.tools:deftool "test-required"
+        (:description "Require a parameter"
+         :parameters ((:name "value" :type "string" :required t
+                       :description "Required value")))
+      (declare (ignore args))
+      "ok")
+    (let* ((tool-call (sibyl.llm:make-tool-call
+                       :id "tc-missing-param"
+                       :name "test-required"
+                       :arguments nil))
+           (result (sibyl.tools:execute-tool-call tool-call)))
+      (is (stringp result))
+      (is (search "Tool parameter validation failed" result)))))
+
+(test execute-tool-call-execution-error
+  "execute-tool-call returns an error string for execution failures."
+  (let ((sibyl.tools:*tool-registry* (make-hash-table :test 'equal)))
+    (sibyl.tools:deftool "test-crash"
+        (:description "Always errors"
+         :parameters nil)
+      (error "boom"))
+    (let* ((tool-call (sibyl.llm:make-tool-call
+                       :id "tc-crash"
+                       :name "test-crash"
+                       :arguments nil))
+           (result (sibyl.tools:execute-tool-call tool-call)))
+      (is (stringp result))
+      (is (search "Tool execution failed" result)))))
+
+(test execute-tool-call-invalid-struct
+  "execute-tool-call returns an error string for invalid tool-call structs."
+  (let ((result (sibyl.tools:execute-tool-call nil)))
+    (is (stringp result))
+    (is (search "Tool execution failed" result))))

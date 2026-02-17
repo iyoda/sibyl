@@ -178,5 +178,30 @@
 (defun execute-tool-call (tool-call-struct)
   "Execute a tool-call struct (from LLM response).
    Returns a string result."
-  (execute-tool (sibyl.llm:tool-call-name tool-call-struct)
-                (sibyl.llm:tool-call-arguments tool-call-struct)))
+  (handler-case
+      (progn
+        (unless (typep tool-call-struct 'sibyl.llm:tool-call)
+          (error 'tool-execution-error
+                 :tool-name "unknown"
+                 :message "Invalid tool-call struct"))
+        (let ((tool-name (sibyl.llm:tool-call-name tool-call-struct))
+              (tool-args (sibyl.llm:tool-call-arguments tool-call-struct)))
+          (unless (and (stringp tool-name) (> (length tool-name) 0))
+            (error 'tool-execution-error
+                   :tool-name (if (and (stringp tool-name) (> (length tool-name) 0))
+                                  tool-name
+                                  "unknown")
+                   :message "Tool call missing name"))
+          (execute-tool tool-name tool-args)))
+    (tool-error (e)
+      (format nil "Error: ~a" e))
+    (error (e)
+      (let* ((name (ignore-errors (sibyl.llm:tool-call-name tool-call-struct)))
+             (tool-name (if (and name (stringp name) (> (length name) 0))
+                            name
+                            "unknown"))
+             (wrapped (make-condition 'tool-execution-error
+                                      :tool-name tool-name
+                                      :message (format nil "~a" e)
+                                      :inner-error e)))
+        (format nil "Error: ~a" wrapped)))))

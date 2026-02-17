@@ -18,7 +18,15 @@
     (if found-p val default)))
 
 (defun (setf config-value) (value key)
-  "Set a configuration value."
+  "Sets the configuration value for KEY to VALUE in *config*.
+
+Parameters:
+  VALUE - The value to store (any Lisp object)
+  KEY - The configuration key (string or symbol; typically a dotted string like \"llm.api-key\")
+
+Returns VALUE.
+
+Side effects: Modifies the global *config* hash table."
   (setf (gethash key *config*) value))
 
 ;;; ============================================================

@@ -878,3 +878,83 @@
       ;; Cleanup
       (when (fiveam:get-test test-symbol)
         (fiveam:rem-test test-symbol)))))
+
+(test write-test-auto-generated-001
+  "Auto-generated test"
+  (is (equal 1 1)))
+
+(test write-test-duplicate-check
+  "Auto-generated test"
+  (is (eq t t)))
+
+(test write-test-default-suite-check
+  "Auto-generated test"
+  (is (equal 3 3)))
+
+(test write-test-runnable-check
+  "Auto-generated test"
+  (is (equal 4 4)))
+
+(test write-test-auto-generated-001
+  "Auto-generated test"
+  (is (equal 1 1)))
+
+(test write-test-duplicate-check
+  "Auto-generated test"
+  (is (eq t t)))
+
+(test write-test-default-suite-check
+  "Auto-generated test"
+  (is (equal 3 3)))
+
+(test write-test-runnable-check
+  "Auto-generated test"
+  (is (equal 4 4)))
+
+(test write-test-auto-generated-001
+  "Auto-generated test"
+  (is (equal 1 1)))
+
+(test write-test-duplicate-check
+  "Auto-generated test"
+  (is (eq t t)))
+
+(test write-test-default-suite-check
+  "Auto-generated test"
+  (is (equal 3 3)))
+
+(test write-test-runnable-check
+  "Auto-generated test"
+  (is (equal 4 4)))
+
+(test write-test-auto-generated-001
+  "Auto-generated test"
+  (is (equal 1 1)))
+
+(test write-test-duplicate-check
+  "Auto-generated test"
+  (is (eq t t)))
+
+(test write-test-default-suite-check
+  "Auto-generated test"
+  (is (equal 3 3)))
+
+(test write-test-runnable-check
+  "Auto-generated test"
+  (is (equal 4 4)))
+
+(test write-test-auto-generated-001
+  "Auto-generated test"
+  (is (equal 1 1)))
+
+(test write-test-duplicate-check
+  "Auto-generated test"
+  (is (eq t t)))
+
+(test write-test-default-suite-check
+  "Auto-generated test"
+  (is (equal 3 3)))
+
+(test write-test-runnable-check
+  "Auto-generated test"
+  (is (equal 4 4)))

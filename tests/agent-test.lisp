@@ -4,10 +4,12 @@
   (:use #:cl #:fiveam)
   (:import-from #:sibyl.agent
                 #:*default-system-prompt*
+                #:agent-hooks
                 #:make-agent
-                #:agent-system-prompt)
+                #:agent-system-prompt
+                #:run-hook)
   (:export #:agent-tests
-           #:tdd-orchestration-tests))
+            #:tdd-orchestration-tests))
 
 (in-package #:sibyl.agent.tests)
 
@@ -17,6 +19,10 @@
 
 (def-suite tdd-orchestration-tests
   :description "TDD workflow system prompt tests"
+  :in sibyl.tests:sibyl-tests)
+
+(def-suite run-hook-tests
+  :description "Tests for run-hook function."
   :in sibyl.tests:sibyl-tests)
 
 (in-suite agent-tests)
@@ -117,3 +123,70 @@
          (agent (make-agent :client mock-client :system-prompt custom-prompt)))
     (is (string= custom-prompt (agent-system-prompt agent))
         "Agent should use custom system prompt when provided")))
+
+;;; ============================================================
+;;; run-hook Tests
+;;; ============================================================
+
+(in-suite run-hook-tests)
+
+(test run-hook-executes-registered-hook
+  "run-hook executes a registered hook with arguments."
+  (let* ((agent (make-agent :client nil))
+         (called nil)
+         (received-args nil))
+    (setf (agent-hooks agent)
+          (list (cons :before-step
+                      (lambda (&rest args)
+                        (setf called t
+                              received-args args)
+                        :ok))))
+    (is (eq :ok (run-hook agent :before-step 1 "context"))
+        "run-hook should return hook result")
+    (is (not (null called)) "Hook should be called")
+    (is (equal '(1 "context") received-args)
+        "Hook should receive provided args")))
+
+(test run-hook-ignores-missing-hook
+  "run-hook returns nil when hook is not registered."
+  (let ((agent (make-agent :client nil)))
+    (setf (agent-hooks agent)
+          (list (cons :after-step (lambda (&rest args)
+                                    (declare (ignore args))
+                                    :after))))
+    (is (null (run-hook agent :on-tool-call :tool-call))
+        "Missing hook should return NIL without errors")))
+
+(test run-hook-handles-hook-errors
+  "run-hook should warn and continue if hook signals an error."
+  (let* ((agent (make-agent :client nil))
+         (warned nil))
+    (setf (agent-hooks agent)
+          (list (cons :on-error
+                      (lambda (&rest args)
+                        (declare (ignore args))
+                        (error "boom")))))
+    (handler-bind ((warning (lambda (condition)
+                              (declare (ignore condition))
+                              (setf warned t)
+                              (muffle-warning condition))))
+      (is (null (run-hook agent :on-error :tool-error))
+          "Errors should not propagate from hooks"))
+    (is (not (null warned)) "Hook errors should emit a warning")))
+
+(test run-hook-selects-hook-by-name
+  "run-hook should execute the hook matching the requested name."
+  (let* ((agent (make-agent :client nil))
+         (selected nil))
+    (setf (agent-hooks agent)
+          (list (cons :before-step (lambda (&rest args)
+                                     (declare (ignore args))
+                                     :before))
+                (cons :after-step (lambda (&rest args)
+                                    (declare (ignore args))
+                                    (setf selected :after)
+                                    :after))))
+    (is (eq :after (run-hook agent :after-step "response"))
+        "run-hook should call the hook matching the name")
+    (is (eq :after selected)
+        "Correct hook should be selected")))
