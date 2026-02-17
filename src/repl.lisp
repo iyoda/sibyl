@@ -49,6 +49,14 @@
 (defvar *command-history* nil
   "List of command strings entered in the current REPL session, in reverse chronological order.")
 
+(defvar *cancel-requested* nil
+  "When non-NIL, the current LLM call should be cancelled.
+   Set to T by the Ctrl+C handler (single press); reset to NIL before each agent-run call.")
+
+(defvar *last-interrupt-time* 0
+  "Internal real time (from GET-INTERNAL-REAL-TIME) of the most recent Ctrl+C press.
+   Used to detect double-press within 2 seconds for REPL exit.")
+
 (defun store-suggestion (description rationale priority)
   "Store a new improvement suggestion. Returns the created suggestion."
   (bt:with-recursive-lock-held (*command-handlers-lock*)
@@ -683,6 +691,42 @@
       nil)))
 
 ;;; ============================================================
+;;; Hook functions
+;;; ============================================================
+
+(defun make-tool-call-hook (&optional spinner)
+  "Return a closure suitable for the :on-tool-call agent hook.
+   The closure accepts a TOOL-CALL struct and displays the tool name in cyan.
+   If SPINNER is provided, also updates the spinner message.
+
+   Usage:
+     (cons :on-tool-call (make-tool-call-hook spinner))"
+  (lambda (tc)
+    (let ((tool-name (sibyl.llm:tool-call-name tc)))
+      (if *use-colors*
+          (progn
+            (format-colored-text (format nil "🔧 ~a を実行中..." tool-name) :cyan)
+            (format t "~%"))
+          (format t "🔧 ~a を実行中...~%" tool-name))
+      (when spinner
+        (sibyl.repl.spinner:update-spinner-message
+         spinner (format nil "🔧 ~a" tool-name))))))
+
+(defun make-before-step-hook (&optional spinner)
+  "Return a closure suitable for the :before-step agent hook.
+   Currently a no-op stub; Task 7 will wire the spinner into this."
+  (declare (ignore spinner))
+  (lambda (&rest args)
+    (declare (ignore args))))
+
+(defun make-after-step-hook (&optional spinner)
+  "Return a closure suitable for the :after-step agent hook.
+   Currently a no-op stub; Task 7 will wire the spinner into this."
+  (declare (ignore spinner))
+  (lambda (&rest args)
+    (declare (ignore args))))
+
+;;; ============================================================
 ;;; Main REPL loop
 ;;; ============================================================
 
@@ -715,18 +759,64 @@
 ╚═══════════════════════════════════════╝~%~
 ~%Type /help for commands, or start chatting.~%~%")))
 
+(defun readline-available-p ()
+  "Returns T if cl-readline is loaded and available, NIL otherwise."
+  (not (null (find-package :cl-readline))))
+
 (defun read-user-input ()
-  "Read a line of input from the user with enhanced prompt. Returns NIL on EOF."
-  (let ((prompt (if *use-colors*
-                    (format-enhanced-prompt "sibyl" *command-count*)
-                    "sibyl> ")))
-    (format t "~A" prompt)
-    (force-output)
-    (let ((input (read-line *standard-input* nil nil)))
-      (when input
-        (incf *command-count*)
-        (push input *command-history*))
-      input)))
+  "Read a line of input using cl-readline if available, read-line otherwise.
+   Returns NIL on EOF."
+  (let* ((prompt (if *use-colors*
+                     (format-enhanced-prompt "sibyl" *command-count*)
+                     "sibyl> "))
+         (input (if (readline-available-p)
+                    ;; cl-readline handles prompt display and history navigation.
+                    ;; Use find-symbol to avoid compile-time package dependency.
+                    (handler-case
+                        (funcall (find-symbol "READLINE" :cl-readline) :prompt prompt)
+                      (error () (read-line *standard-input* nil nil)))
+                    ;; Fallback: manual prompt + read-line
+                    (progn
+                      (format t "~A" prompt)
+                      (force-output)
+                      (read-line *standard-input* nil nil)))))
+    (when input
+      (when (readline-available-p)
+        (funcall (find-symbol "ADD-HISTORY" :cl-readline) input))
+      (incf *command-count*)
+      (push input *command-history*))
+    input))
+
+#+sbcl
+(defun install-interrupt-handler (exit-fn)
+  "Install SBCL-specific Ctrl+C handler using handler-bind around the REPL loop.
+   EXIT-FN is called when a double Ctrl+C press is detected within 2 seconds.
+   Returns a thunk that, when called, wraps BODY with the interrupt handler.
+
+   Single Ctrl+C: sets *CANCEL-REQUESTED* to T (for cooperative cancellation).
+   Double Ctrl+C within 2 seconds: calls EXIT-FN to leave the REPL.
+
+   NOTE: This function is defined for SBCL only (#+sbcl guard).
+   On non-SBCL implementations the REPL loop omits interrupt handling gracefully."
+  (lambda (body-thunk)
+    (handler-bind
+        ((sb-sys:interactive-interrupt
+          (lambda (c)
+            (declare (ignore c))
+            (let ((now (get-internal-real-time))
+                  (window (* 2 internal-time-units-per-second)))
+              (if (< (- now *last-interrupt-time*) window)
+                  ;; Double press — exit REPL
+                  (funcall exit-fn)
+                  ;; Single press — request cancellation
+                  (progn
+                    (setf *cancel-requested* t
+                          *last-interrupt-time* now)
+                    (format *standard-output*
+                            "~%[^C: LLM call cancelled. Press Ctrl+C again to exit.]~%")
+                    (force-output *standard-output*))))
+            (invoke-restart 'continue))))
+      (funcall body-thunk))))
 
 (defun start-repl (&key client
                      (system-prompt sibyl.agent::*default-system-prompt*)
@@ -744,14 +834,19 @@
                 :name name
                 :system-prompt system-prompt)))
     (print-banner)
+    ;; Load readline history if cl-readline is available
+    (when (and (readline-available-p) (probe-file "~/.sibyl_history"))
+      (funcall (find-symbol "READ-HISTORY" :cl-readline) "~/.sibyl_history"))
     (block repl-loop
       (tagbody
        next-iteration
          (let ((input (read-user-input)))
            ;; EOF
-           (unless input
-             (format t "~%Goodbye.~%")
-             (return-from repl-loop))
+            (unless input
+              (format t "~%Goodbye.~%")
+              (when (readline-available-p)
+                (funcall (find-symbol "WRITE-HISTORY" :cl-readline) "~/.sibyl_history"))
+              (return-from repl-loop))
            ;; Empty input
            (when (string= (string-trim '(#\Space #\Tab) input) "")
              (go next-iteration))
@@ -759,6 +854,8 @@
             (let ((cmd (repl-command-p input)))
               (when cmd
                 (when (eq (handle-repl-command cmd agent input) :quit)
+                  (when (readline-available-p)
+                    (funcall (find-symbol "WRITE-HISTORY" :cl-readline) "~/.sibyl_history"))
                   (return-from repl-loop))
                 (go next-iteration)))
            ;; Agent interaction

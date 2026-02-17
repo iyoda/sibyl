@@ -23,6 +23,7 @@
    #:llm-api-error
    #:llm-rate-limit-error
    #:llm-invalid-response
+   #:llm-cancelled
    #:llm-error-status-code
    #:llm-error-body
    ;; Tool conditions
@@ -175,7 +176,8 @@
   (:export
    #:start-repl
    #:repl-command-p
-   #:handle-repl-command))
+   #:handle-repl-command
+   #:readline-available-p))
 
 (defpackage #:sibyl
   (:use #:cl)

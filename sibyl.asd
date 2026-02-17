@@ -45,6 +45,15 @@
      (:file "repl"))))
   :in-order-to ((test-op (test-op #:sibyl/tests))))
 
+;;; Optional subsystem: loads cl-readline alongside Sibyl.
+;;; Loading this system enables input history (↑↓ arrows) in the REPL.
+;;; The main :sibyl system works without this — readline-available-p
+;;; will return NIL and read-user-input falls back to read-line.
+(asdf:defsystem #:sibyl/readline
+  :description "Optional cl-readline integration for Sibyl REPL history"
+  :depends-on (#:sibyl #:cl-readline)
+  :components ())
+
 (asdf:defsystem #:sibyl/tests
   :depends-on (#:sibyl #:fiveam)
   :serial t
