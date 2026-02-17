@@ -58,8 +58,32 @@
    #:timestamp-now
    #:truncate-string))
 
+(defpackage #:sibyl.logging
+  (:use #:cl #:sibyl.util)
+  (:export
+   ;; Configuration
+   #:*log-levels*
+   #:*log-level*
+   #:*log-stream*
+   #:*log-format*
+   #:*enable-colors*
+   ;; Core functions
+   #:log-level-priority
+   #:should-log-p
+   #:log-message
+   ;; Convenience functions
+   #:log-trace
+   #:log-debug
+   #:log-info
+   #:log-warn
+   #:log-error
+   #:log-fatal
+   ;; Utilities
+   #:with-logging-context
+   #:log-execution-time))
+
 (defpackage #:sibyl.llm
-  (:use #:cl #:sibyl.conditions #:sibyl.config #:sibyl.util)
+  (:use #:cl #:sibyl.conditions #:sibyl.config #:sibyl.util #:sibyl.logging)
   (:export
    ;; Message protocol
    #:message
@@ -129,7 +153,7 @@
    #:make-openai-client))
 
 (defpackage #:sibyl.tools
-   (:use #:cl #:sibyl.conditions #:sibyl.util)
+   (:use #:cl #:sibyl.conditions #:sibyl.util #:sibyl.logging)
    (:export
     ;; Tool protocol
     #:tool
@@ -176,7 +200,7 @@
 
 (defpackage #:sibyl.agent
   (:use #:cl #:sibyl.conditions #:sibyl.config #:sibyl.util
-        #:sibyl.llm #:sibyl.tools)
+        #:sibyl.llm #:sibyl.tools #:sibyl.logging)
   (:export
    ;; Memory
    #:memory
@@ -236,7 +260,7 @@
    #:update-spinner-message))
 
 (defpackage #:sibyl.repl
-  (:use #:cl #:sibyl.agent #:sibyl.config)
+  (:use #:cl #:sibyl.agent #:sibyl.config #:sibyl.logging)
   (:export
    #:start-repl
    #:repl-command-p

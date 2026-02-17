@@ -28,7 +28,8 @@
       :components
       ((:file "message")
        (:file "client")
-       (:file "providers")))
+       (:file "providers")
+ (:file "model-selector")))
       (:module "tools"
        :components
        ((:file "protocol")
@@ -37,6 +38,7 @@
      (:module "agent"
       :components
       ((:file "memory")
+ (:file "multi-agent")
        (:file "core")))
      (:module "repl-module"
       :pathname "repl"

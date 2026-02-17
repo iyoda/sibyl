@@ -1678,3 +1678,47 @@
   (is (> (sibyl.llm:complexity-score complex-analysis) 7.0))
   (is (string= (sibyl.llm:recommended-tier simple-analysis) "light"))
   (is (string= (sibyl.llm:recommended-tier complex-analysis) "heavy"))))
+
+(test logging-system-basic
+  "Auto-generated test"
+  (let ((sibyl.logging:*log-level* :debug)
+        (output (make-string-output-stream)))
+    (let ((sibyl.logging:*log-stream* output))
+      (sibyl.logging:log-debug "test" "Debug message")
+      (sibyl.logging:log-info "test" "Info message")
+      (sibyl.logging:log-warn "test" "Warning message")
+      (sibyl.logging:log-error "test" "Error message"))
+    (let ((result (get-output-stream-string output)))
+      (is (search "DEBUG" result))
+      (is (search "INFO" result))
+      (is (search "WARN" result))
+      (is (search "ERROR" result))
+      (is (search "test" result)))))
+
+(test logging-level-filtering
+  "Auto-generated test"
+  (let ((output (make-string-output-stream)))
+    (let ((sibyl.logging:*log-level* :warn)
+          (sibyl.logging:*log-stream* output))
+      (sibyl.logging:log-debug "test" "Should not appear")
+      (sibyl.logging:log-info "test" "Should not appear")
+      (sibyl.logging:log-warn "test" "Should appear")
+      (sibyl.logging:log-error "test" "Should appear"))
+    (let ((result (get-output-stream-string output)))
+      (is (not (search "DEBUG" result)))
+      (is (not (search "INFO" result)))
+      (is (search "WARN" result))
+      (is (search "ERROR" result)))))
+
+(test logging-json-format
+  "Auto-generated test"
+  (let ((output (make-string-output-stream)))
+    (let ((sibyl.logging:*log-level* :info)
+          (sibyl.logging:*log-stream* output)
+          (sibyl.logging:*log-format* :json))
+      (sibyl.logging:log-info "test-component" "Test message"))
+    (let ((result (get-output-stream-string output)))
+      (is (search "\"level\":\"INFO\"" result))
+      (is (search "\"component\":\"test-component\"" result))
+      (is (search "\"message\":\"Test message\"" result))
+      (is (search "\"timestamp\":" result)))))

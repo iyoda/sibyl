@@ -109,3 +109,191 @@
               path
               (with-open-file (s path) (file-length s))
               (or stat "unknown")))))
+
+;;; ============================================================
+;;; Multi-agent coordination
+;;; ============================================================
+
+(defvar *current-coordinator* nil
+  "Current active agent coordinator")
+
+(defvar *global-model-selector* nil
+  "Global model selector instance")
+
+(defun ensure-global-model-selector ()
+  "Ensure global model selector is initialized"
+  (unless *global-model-selector*
+    (setf *global-model-selector* (sibyl.llm:make-model-selector)))
+  *global-model-selector*)
+
+(deftool "create-agent-team"
+    (:description "Create a team of specialized agents for collaborative work"
+     :parameters ((:name "roles" :type "string" :required t 
+                   :description "Comma-separated list of agent roles (coder,tester,architect,coordinator)")
+                  (:name "strategy" :type "string" :required nil
+                   :description "Coordination strategy: sequential, parallel, or hierarchical")))
+  (let* ((role-names (mapcar (lambda (s) (string-trim '(#\Space #\Tab) s))
+                             (cl-ppcre:split "," (getf args :roles))))
+         (strategy-keyword (if (getf args :strategy)
+                              (intern (string-upcase (getf args :strategy)) :keyword)
+                              :sequential))
+         (coordinator (sibyl.agent:make-agent-coordinator :strategy strategy-keyword))
+         ;; Use Anthropic client with current config
+         (client (sibyl.llm:make-anthropic-client 
+                  :api-key (sibyl.config:config-value "llm.anthropic.api-key"))))
+    
+    ;; Create agents for each role
+    (dolist (role-name role-names)
+      (let ((role (find role-name sibyl.agent:*default-roles* 
+                        :key #'sibyl.agent:role-name :test #'string-equal)))
+        (when role
+          (let ((agent (sibyl.agent:make-specialized-agent role client)))
+            (sibyl.agent:add-agent coordinator agent)))))
+    
+    ;; Set as current coordinator
+    (setf *current-coordinator* coordinator)
+    
+    (format nil "Created agent team with ~a agents using ~a strategy:~%~{- ~a~%~}"
+            (length (sibyl.agent:list-agents coordinator))
+            strategy-keyword
+            (mapcar (lambda (agent) 
+                      (format nil "~a (~a)" 
+                              (sibyl.agent:agent-name agent)
+                              (sibyl.agent:role-name (sibyl.agent:agent-role agent))))
+                    (sibyl.agent:list-agents coordinator)))))
+
+(deftool "create-adaptive-agent-team"
+    (:description "Create a team of adaptive agents that select models based on task complexity"
+     :parameters ((:name "roles" :type "string" :required t 
+                   :description "Comma-separated list of agent roles (coder,tester,architect,coordinator)")
+                  (:name "strategy" :type "string" :required nil
+                   :description "Coordination strategy: sequential, parallel, or hierarchical")
+                  (:name "auto-select" :type "string" :required nil
+                   :description "Enable automatic model selection (true/false, default: true)")))
+  (let* ((role-names (mapcar (lambda (s) (string-trim '(#\Space #\Tab) s))
+                             (cl-ppcre:split "," (getf args :roles))))
+         (strategy-keyword (if (getf args :strategy)
+                              (intern (string-upcase (getf args :strategy)) :keyword)
+                              :sequential))
+         (auto-select (not (string-equal (getf args :auto-select) "false")))
+         (coordinator (sibyl.agent:make-agent-coordinator :strategy strategy-keyword))
+         (model-selector (sibyl.llm:make-model-selector :auto-select auto-select)))
+    
+    ;; Create adaptive agents for each role
+    (dolist (role-name role-names)
+      (let ((role (find role-name sibyl.agent:*default-roles* 
+                        :key #'sibyl.agent:role-name :test #'string-equal)))
+        (when role
+          (let ((agent (make-specialized-agent-adaptive role :model-selector model-selector)))
+            (sibyl.agent:add-agent coordinator agent)))))
+    
+    ;; Set as current coordinator
+    (setf *current-coordinator* coordinator)
+    (setf *global-model-selector* model-selector)
+    
+    (format nil "Created adaptive agent team with ~a agents using ~a strategy:~%~{- ~a~%~}~%Model selection: ~a"
+            (length (sibyl.agent:list-agents coordinator))
+            strategy-keyword
+            (mapcar (lambda (agent) 
+                      (format nil "~a (~a)" 
+                              (sibyl.agent:agent-name agent)
+                              (sibyl.agent:role-name (sibyl.agent:agent-role agent))))
+                    (sibyl.agent:list-agents coordinator))
+            (if auto-select "Automatic" "Manual"))))
+
+(deftool "delegate-task"
+    (:description "Delegate a task to a specific agent in the team"
+     :parameters ((:name "task-description" :type "string" :required t
+                   :description "Description of the task to delegate")
+                  (:name "agent-role" :type "string" :required nil
+                   :description "Preferred agent role for this task")
+                  (:name "dependencies" :type "string" :required nil
+                   :description "Comma-separated list of task IDs this task depends on")))
+  (let ((coordinator *current-coordinator*))
+    (if coordinator
+        (let* ((deps (when (getf args :dependencies)
+                       (mapcar (lambda (s) (string-trim '(#\Space #\Tab) s))
+                               (cl-ppcre:split "," (getf args :dependencies)))))
+               (task (sibyl.agent:create-task coordinator (getf args :task-description)
+                                              :dependencies deps)))
+          (if (getf args :agent-role)
+              (let ((suitable-agent 
+                     (find-if (lambda (agent)
+                                (string-equal (getf args :agent-role)
+                                              (sibyl.agent:role-name 
+                                               (sibyl.agent:agent-role agent))))
+                              (sibyl.agent:list-agents coordinator))))
+                (if suitable-agent
+                    (progn
+                      (sibyl.agent:assign-task coordinator task 
+                                               (sibyl.agent:agent-id suitable-agent))
+                      (format nil "Task '~a' assigned to ~a (ID: ~a)" 
+                              (getf args :task-description)
+                              (sibyl.agent:agent-name suitable-agent)
+                              (sibyl.agent:task-id task)))
+                    (format nil "No agent found with role '~a'" (getf args :agent-role))))
+              (format nil "Task '~a' created (ID: ~a), awaiting assignment" 
+                      (getf args :task-description) (sibyl.agent:task-id task))))
+        "No active agent coordinator. Create a team first with create-agent-team.")))
+
+(deftool "list-agent-status"
+    (:description "Show status of all agents in the current team"
+     :parameters ())
+  (let ((coordinator *current-coordinator*))
+    (if coordinator
+        (let ((agents (sibyl.agent:list-agents coordinator)))
+          (if agents
+              (format nil "Agent Team Status:~%~{~a~%~}"
+                      (mapcar (lambda (agent)
+                                (format nil "- ~a (~a): ~a" 
+                                        (sibyl.agent:agent-name agent)
+                                        (sibyl.agent:role-name (sibyl.agent:agent-role agent))
+                                        (sibyl.agent:agent-status agent)))
+                              agents))
+              "No agents in the current team."))
+        "No active agent coordinator. Create a team first with create-agent-team.")))
+
+(deftool "execute-team-task"
+    (:description "Execute a collaborative task using the agent team"
+     :parameters ((:name "task-description" :type "string" :required t
+                   :description "High-level description of the collaborative task")))
+  (let ((coordinator *current-coordinator*))
+    (if coordinator
+        (progn
+          ;; Create and execute tasks based on coordination strategy
+          (sibyl.agent:execute-tasks coordinator)
+          (format nil "Team task execution completed: ~a" (getf args :task-description)))
+        "No active agent coordinator. Create a team first with create-agent-team.")))
+
+(deftool "send-agent-message"
+    (:description "Send a message between agents in the team"
+     :parameters ((:name "from-agent" :type "string" :required t
+                   :description "ID or role of the sending agent")
+                  (:name "to-agent" :type "string" :required t
+                   :description "ID or role of the receiving agent")
+                  (:name "message" :type "string" :required t
+                   :description "Message content")
+                  (:name "message-type" :type "string" :required nil
+                   :description "Message type: request, response, notification, broadcast")))
+  (let ((coordinator *current-coordinator*))
+    (if coordinator
+        (let* ((msg-type (if (getf args :message-type)
+                            (intern (string-upcase (getf args :message-type)) :keyword)
+                            :notification))
+               (from-id (or (getf args :from-agent) "system"))
+               (to-id (or (getf args :to-agent) "broadcast")))
+          (sibyl.agent:send-message coordinator from-id to-id (getf args :message) msg-type)
+          (format nil "Message sent from ~a to ~a: ~a" from-id to-id (getf args :message)))
+        "No active agent coordinator. Create a team first with create-agent-team.")))
+
+;;; ============================================================
+;;; Adaptive model selection
+;;; ============================================================
+
+(deftool "analyze-task-complexity"
+    (:description "Analyze the complexity of a task description"
+     :parameters ((:name "task-description" :type "string" :required t
+                   :description "Description of the task to analyze")))
+  (let* ((analyzer (sibyl.llm:make-task-analyzer))
+         (analysis (sibyl.llm:analyze-task-complexity analyzer (getf args :task-description))))
+    (format nil "Task Complexity Analysis:~%~a" (sibyl.llm:complexity-reasoning analysis))))
