@@ -103,8 +103,10 @@
   (format nil "agent-~a" (get-universal-time)))
 
 (defun generate-task-id ()
-  "Generate a unique task ID"
-  (format nil "task-~a" (get-universal-time)))
+  "Generate a unique task ID using timestamp + random suffix."
+  (format nil "task-~a-~a"
+          (get-universal-time)
+          (random 1000000000)))
 
 ;; Agent management functions
 (defmethod add-agent ((coordinator agent-coordinator) (agent specialized-agent))
@@ -183,11 +185,13 @@
     messages))
 
 ;; Coordination strategies
-(defmethod execute-tasks ((coordinator agent-coordinator))
-  "Execute tasks based on coordination strategy"
+(defmethod execute-tasks ((coordinator agent-coordinator) &key (task-fn nil))
+  "Execute tasks based on coordination strategy.
+   :task-fn — optional (lambda (task) result) for custom task execution.
+              Passed through to execute-tasks-parallel."
   (case (coordinator-strategy coordinator)
-    (:sequential (execute-tasks-sequential coordinator))
-    (:parallel (execute-tasks-parallel coordinator))
+    (:sequential   (execute-tasks-sequential coordinator))
+    (:parallel     (execute-tasks-parallel coordinator :task-fn task-fn))
     (:hierarchical (execute-tasks-hierarchical coordinator))))
 
 (defmethod execute-tasks-sequential ((coordinator agent-coordinator))
@@ -201,6 +205,90 @@
           ;; Execute task (simplified - in real implementation would be async)
           (let ((result (execute-agent-task suitable-agent task)))
             (complete-task coordinator task result)))))))
+
+;;; ============================================================
+;;; 並列タスク実行エンジン
+;;; ============================================================
+
+(defun %tasks-ready-p (task completed-ids)
+  "Return T if all dependencies of TASK are in COMPLETED-IDS."
+  (every (lambda (dep-id)
+           (member dep-id completed-ids :test #'string=))
+         (task-dependencies task)))
+
+(defmethod execute-tasks-parallel ((coordinator agent-coordinator)
+                                   &key (task-fn nil))
+  "Execute tasks in parallel, respecting dependency ordering.
+
+Algorithm:
+  1. Collect tasks whose dependencies are all satisfied (ready tasks)
+  2. Launch each ready task in its own thread
+  3. Wait for all threads to complete
+  4. Repeat until no pending tasks remain
+
+:task-fn — (lambda (task) result) custom executor.
+           Defaults to returning a 'executed:<description>' string.
+
+Thread safety: a single mutex protects task status updates and
+the completed-ids accumulator."
+  (let ((result-lock (bt:make-lock "parallel-result-lock"))
+        (completed-ids (list)))
+
+    (loop
+      ;; Collect tasks that are pending AND have all deps satisfied
+      (let ((ready-tasks
+              (remove-if-not
+               (lambda (task)
+                 (and (eq :pending (task-status task))
+                      (%tasks-ready-p task completed-ids)))
+               (coordinator-task-queue coordinator))))
+
+        ;; No runnable tasks → done
+        (when (null ready-tasks)
+          (return))
+
+        ;; Mark all ready tasks as in-progress before spawning threads
+        ;; (prevents the next loop iteration from picking them up again)
+        (dolist (task ready-tasks)
+          (bt:with-lock-held (result-lock)
+            (setf (task-status task) :in-progress)))
+
+        ;; Spawn one thread per ready task
+        (let ((threads
+                (mapcar
+                 (lambda (task)
+                   (bt:make-thread
+                    (lambda ()
+                      (handler-case
+                          (let ((result
+                                  (if task-fn
+                                      (funcall task-fn task)
+                                      (format nil "executed:~a"
+                                              (task-description task)))))
+                            (bt:with-lock-held (result-lock)
+                              (setf (task-status task) :completed)
+                              (setf (task-result task) result)
+                              (setf (task-completed-at task) (get-universal-time))
+                              (push (task-id task) completed-ids)))
+                        (error (e)
+                          (bt:with-lock-held (result-lock)
+                            (setf (task-status task) :failed)
+                            (setf (task-result task)
+                                  (format nil "ERROR: ~a" e))))))
+                    :name (format nil "sibyl-task-~a" (task-id task))))
+                 ready-tasks)))
+
+          ;; Wait for all threads in this wave to finish
+          (dolist (thread threads)
+            (bt:join-thread thread)))))
+
+    ;; Return completed tasks
+    (remove-if-not (lambda (task) (eq :completed (task-status task)))
+                   (coordinator-task-queue coordinator))))
+
+(defmethod execute-tasks-hierarchical ((coordinator agent-coordinator))
+  "Hierarchical execution strategy (currently delegates to sequential)."
+  (execute-tasks-sequential coordinator))
 
 (defmethod find-suitable-agent ((coordinator agent-coordinator) (task agent-task))
   "Find the most suitable agent for a task based on capabilities"

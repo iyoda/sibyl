@@ -73,6 +73,7 @@
         (:file "repl-test")
         (:file "rich-repl-test")
          (:file "evolution-state-test")
-        (:file "parallel-runner-test"))))
+        (:file "parallel-runner-test")
+ (:file "parallel-agent-test"))))
    :perform (test-op (o c)
               (uiop:symbol-call '#:sibyl.tests '#:run-sibyl-tests)))

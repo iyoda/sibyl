@@ -249,6 +249,26 @@
    #:task-description
    #:task-status
    #:task-result
+   #:coordinator-task-queue
+   #:coordinator-agents
+   #:coordinator-strategy
+   #:coordinator-communication-log
+   #:task-assigned-agent
+   #:task-dependencies
+   #:task-created-at
+   #:task-completed-at
+   #:execute-tasks-parallel
+   #:execute-tasks-sequential
+   #:execute-tasks-hierarchical
+   #:find-suitable-agent
+   #:execute-agent-task
+   #:send-message
+   #:msg-from
+   #:msg-to
+   #:msg-content
+   #:msg-type
+   #:generate-task-id
+   #:generate-agent-id
    #:agent-reset))
 
 (defpackage #:sibyl.repl.spinner
