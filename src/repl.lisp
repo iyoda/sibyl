@@ -15,6 +15,7 @@
     ("/help"          . :help)
     ("/history"       . :history)
     ("/mcp"           . :mcp)
+    ("/plan"          . :plan)
     ("/improve"       . :improve)
     ("/review"        . :review)
     ("/evolve"        . :evolve)
@@ -222,6 +223,8 @@
         (format t "       — Show conversation history~%")
         (format-colored-text "  /mcp" :green)
         (format t "           — Show MCP server status and tools~%")
+        (format-colored-text "  /plan" :green)
+        (format t "          — Manage development plans~%")
         (format-colored-text "  /improve" :green)
         (format t "       — Request self-improvement (TDD cycle)~%")
         (format-colored-text "  /review" :green)
@@ -243,6 +246,7 @@
         (format t "  /reset           — Reset conversation~%")
         (format t "  /history         — Show conversation history~%")
         (format t "  /mcp             — Show MCP server status and tools~%")
+        (format t "  /plan            — Manage development plans~%")
         (format t "  /improve         — Request self-improvement (TDD cycle)~%")
         (format t "  /review          — Review improvement suggestions~%")
         (format t "  /evolve          — Autonomous continuous improvement loop~%")
@@ -324,6 +328,78 @@
   (handle-evolve-command agent input)
   nil)
 
+(defun handle-plan-command (agent input)
+  "Handler for /plan command. Manages development plans.
+
+   Usage:
+   - /plan                       — List all plans
+   - /plan <plan-id>             — Show plan details
+   - /plan new <title>           — Create a new plan
+   - /plan delete <plan-id>      — Delete a plan
+   - /plan status <plan-id> <s>  — Update plan status"
+  (declare (ignore agent))
+  (let* ((trimmed (string-trim '(#\Space #\Tab) (or input "")))
+         (args-str (if (search "/plan" trimmed :test #'string-equal)
+                       (string-trim '(#\Space #\Tab)
+                                    (subseq trimmed (length "/plan")))
+                       trimmed)))
+    (cond
+      ;; No arguments: list all plans
+      ((string= args-str "")
+       (let ((result (sibyl.tools:execute-tool "list-plans" nil)))
+         (format t "~%~a~%" result)))
+
+      ;; /plan new <title>
+      ((and (>= (length args-str) 4)
+            (string-equal (subseq args-str 0 3) "new"))
+       (let ((title (string-trim '(#\Space #\Tab) (subseq args-str 3))))
+         (if (string= title "")
+             (format t "~%Usage: /plan new <title>~%")
+             (let ((plan-id (sibyl.tools:execute-tool
+                             "save-plan"
+                             (list (cons "title" title)))))
+               (format t "~%Plan created: ~a~%" plan-id)))))
+
+      ;; /plan delete <plan-id>
+      ((and (>= (length args-str) 7)
+            (string-equal (subseq args-str 0 6) "delete"))
+       (let ((plan-id (string-trim '(#\Space #\Tab) (subseq args-str 6))))
+         (if (string= plan-id "")
+             (format t "~%Usage: /plan delete <plan-id>~%")
+             (let ((result (sibyl.tools:execute-tool
+                            "delete-plan"
+                            (list (cons "plan-id" plan-id)))))
+               (format t "~%~a~%" result)))))
+
+      ;; /plan status <plan-id> <status>
+      ((and (>= (length args-str) 7)
+            (string-equal (subseq args-str 0 6) "status"))
+       (let* ((rest (string-trim '(#\Space #\Tab) (subseq args-str 6)))
+              (parts (cl-ppcre:split "\\s+" rest :limit 2))
+              (plan-id (first parts))
+              (new-status (second parts)))
+         (if (or (null plan-id) (null new-status))
+             (format t "~%Usage: /plan status <plan-id> <draft|in-progress|completed|abandoned>~%")
+             (handler-case
+                 (let ((result (sibyl.tools:execute-tool
+                                "update-plan-status"
+                                (list (cons "plan-id" plan-id)
+                                      (cons "status" new-status)))))
+                   (format t "~%~a~%" result))
+               (error (e)
+                 (format t "~%Error: ~a~%" e))))))
+
+      ;; /plan <plan-id> — show details
+      (t
+       (handler-case
+           (let ((result (sibyl.tools:execute-tool
+                          "load-plan"
+                          (list (cons "plan-id" args-str)))))
+             (format t "~%~a~%" result))
+         (error (e)
+           (format t "~%Error: ~a~%" e))))))
+  nil)
+
 (defun handle-test-parallel-command (agent input)
   "Handler for /test-parallel command. Runs test suite using parallel runner.
    Uses uiop:symbol-call for late binding since sibyl.tests is only available
@@ -346,6 +422,7 @@
         (cons :help    #'handle-help-command)
         (cons :history #'handle-history-command)
         (cons :mcp     #'handle-mcp-command)
+        (cons :plan    #'handle-plan-command)
         (cons :improve #'handle-improve-command-wrapper)
         (cons :review  #'handle-review-command-wrapper)
         (cons :evolve  #'handle-evolve-command-wrapper)
