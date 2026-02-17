@@ -94,6 +94,17 @@
     ;; Atoms
     (t value)))
 
+(defun read-response-body (body)
+  "Ensure BODY is a string. Reads from stream if necessary, returns string or NIL."
+  (handler-case
+      (etypecase body
+        (string body)
+        (stream (let ((content (alexandria:read-stream-content-into-string body)))
+                  (close body)
+                  content))
+        (null nil))
+    (error () nil)))
+
 (defun http-post-json (url headers body)
   "POST JSON BODY to URL with HEADERS. Returns parsed JSON as hash-table."
   (log-debug "llm" "HTTP POST JSON to ~a" url)
@@ -107,8 +118,8 @@
                       :content json-body)
           (dex:http-request-failed (e)
             (let ((code (dex:response-status e))
-                  (body (dex:response-body e)))
-              (log-error "llm" "HTTP error ~a for ~a" code url)
+                  (body (read-response-body (dex:response-body e))))
+              (log-error "llm" "HTTP error ~a for ~a: ~@[~a~]" code url body)
               (if (= code 429)
                   (error 'llm-rate-limit-error
                          :message "Rate limited"
@@ -178,8 +189,8 @@
             (close stream)))
       (dex:http-request-failed (e)
         (let ((code (dex:response-status e))
-              (body (dex:response-body e)))
-          (log-error "llm" "HTTP error ~a for ~a" code url)
+              (body (read-response-body (dex:response-body e))))
+          (log-error "llm" "HTTP error ~a for ~a: ~@[~a~]" code url body)
           (if (= code 429)
               (error 'llm-rate-limit-error
                      :message "Rate limited"
