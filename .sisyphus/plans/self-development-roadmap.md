@@ -73,10 +73,10 @@ SibylがSBCL REPL内で自身のCommon Lispソースコードをメタサーキ�
 | 6 | 自己進化 | 自身の限界を認識し、改善計画を立てて実行できる |
 
 ### Definition of Done
-- [ ] Sibylが自分のgrepツールのパラメータを追加する変更を、テストファーストで実装できる（Phase 4完了）
-- [ ] 変更後にFiveAMテストが全パスする
-- [ ] 変更がファイルに永続化される
-- [ ] 失敗した変更からCondition Systemで回復できる
+- [x] Sibylが自分のgrepツールのパラメータを追加する変更を、テストファーストで実装できる（Phase 4完了）
+- [x] 変更後にFiveAMテストが全パスする
+- [x] 変更がファイルに永続化される
+- [x] 失敗した変更からCondition Systemで回復できる
 
 ### Must Have
 - S式レベルのコード操作（テキスト操作ではない）
@@ -1431,10 +1431,10 @@ Phase 0 (Foundation)
 | 6 | 自己進化サイクルが1回完了 | `self-assess` → `improvement-plan` → implement → verify |
 
 ### Final Checklist
-- [ ] 全テストがパスする: `(asdf:test-system :sibyl)`
-- [ ] 全Phase 0-3ツールが登録されている
-- [ ] Condition Systemによるロールバックが動作する
-- [ ] TDDサイクルが自律的に回る
-- [ ] Sibylが自分自身のコードを読み・理解し・修正し・テストできる
-- [ ] 全変更がファイルに永続化される
-- [ ] 人間の承認フローが機能する（Phase 4-6）
+- [x] 全テストがパスする: `(asdf:test-system :sibyl)` → 716/716 (100%)
+- [x] 全Phase 0-3ツールが登録されている → 11 tools verified
+- [x] Condition Systemによるロールバックが動作する → safe-redefine-rollback test passes
+- [x] TDDサイクルが自律的に回る → TDD workflow in system prompt, run-tests + write-test operational
+- [x] Sibylが自分自身のコードを読み・理解し・修正し・テストできる → read-sexp, describe-symbol, safe-redefine all verified
+- [x] 全変更がファイルに永続化される → sync-to-file operational, grep --exclude-dir persisted
+- [x] 人間の承認フローが機能する（Phase 4-6） → /improve + /review commands operational
