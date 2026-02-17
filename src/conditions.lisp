@@ -38,9 +38,17 @@
          :initform nil
          :reader llm-error-body))
   (:report (lambda (c s)
-             (format s "LLM API error (HTTP ~a): ~a"
-                     (llm-error-status-code c)
-                     (sibyl-error-message c)))))
+             (let* ((body (llm-error-body c))
+                    (body-str (when body
+                                (let ((raw (string-trim '(#\Space #\Newline #\Return #\Tab)
+                                                        (princ-to-string body))))
+                                  (if (> (length raw) 500)
+                                      (concatenate 'string (subseq raw 0 500) "...")
+                                      raw)))))
+               (format s "LLM API error (HTTP ~a): ~a~@[~%  ~a~]"
+                       (llm-error-status-code c)
+                       (sibyl-error-message c)
+                       body-str)))))
 
 (define-condition llm-rate-limit-error (llm-api-error)
   ((retry-after :initarg :retry-after
