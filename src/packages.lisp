@@ -162,6 +162,14 @@
    #:agent-run
    #:agent-reset))
 
+(defpackage #:sibyl.repl.spinner
+  (:use #:cl)
+  (:export
+   #:start-spinner
+   #:stop-spinner
+   #:spinner-active-p
+   #:update-spinner-message))
+
 (defpackage #:sibyl.repl
   (:use #:cl #:sibyl.agent #:sibyl.config)
   (:export

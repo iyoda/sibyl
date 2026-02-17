@@ -38,6 +38,10 @@
       :components
       ((:file "memory")
        (:file "core")))
+     (:module "repl-module"
+      :pathname "repl"
+      :components
+      ((:file "spinner")))
      (:file "repl"))))
   :in-order-to ((test-op (test-op #:sibyl/tests))))
 
