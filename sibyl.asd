@@ -51,6 +51,7 @@
       (:file "tools-test")
       (:file "sexp-tools-test")
       (:file "message-test")
+      (:file "client-test")
       (:file "agent-test")
       (:file "asdf-protection-test")
       (:file "repl-test"))))

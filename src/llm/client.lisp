@@ -47,6 +47,13 @@
 ;;; HTTP helpers (shared across providers)
 ;;; ============================================================
 
+(defun %to-json-key (key)
+  "Normalize JSON object keys to strings when possible."
+  (cond
+    ((stringp key) key)
+    ((symbolp key) (string-downcase (symbol-name key)))
+    (t key)))
+
 (defun to-json-value (value)
   "Recursively convert nested alists to hash tables for yason encoding.
    - Alist (list of (string . val) conses) → hash-table (JSON object)
@@ -54,17 +61,21 @@
    - Atoms → passed through"
   (cond
     ((hash-table-p value)
-     (let ((ht (make-hash-table :test 'equal)))
-       (maphash (lambda (k v)
-                  (setf (gethash k ht) (to-json-value v)))
+      (let ((ht (make-hash-table :test 'equal)))
+        (maphash (lambda (k v)
+                  (setf (gethash (%to-json-key k) ht) (to-json-value v)))
                 value)
-       ht))
+        ht))
     ;; Alist: non-empty list where every element is a cons with a string key
     ((and (consp value)
-          (every (lambda (x) (and (consp x) (stringp (car x)))) value))
-     (let ((ht (make-hash-table :test 'equal)))
-       (dolist (pair value ht)
-         (setf (gethash (car pair) ht) (to-json-value (cdr pair))))))
+          (every (lambda (x)
+                   (and (consp x)
+                        (or (stringp (car x)) (symbolp (car x)))))
+                 value))
+      (let ((ht (make-hash-table :test 'equal)))
+        (dolist (pair value ht)
+          (setf (gethash (%to-json-key (car pair)) ht)
+                (to-json-value (cdr pair))))))
     ;; Regular list → JSON array
     ((listp value)
      (mapcar #'to-json-value value))

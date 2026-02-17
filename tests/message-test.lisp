@@ -47,3 +47,11 @@
     (is (eq :tool (sibyl.llm:message-role msg)))
     (is (string= "call_123" (sibyl.llm:message-tool-call-id msg)))
     (is (string= "file content here" (sibyl.llm:message-content msg)))))
+
+(test make-message-timestamp
+  "make-message assigns an ISO-8601 timestamp."
+  (let ((msg (sibyl.llm:make-message :role :user :content "hi")))
+    (is (stringp (sibyl.llm:message-timestamp msg)))
+    (is (search "T" (sibyl.llm:message-timestamp msg)))
+    (is (char= #\Z (char (sibyl.llm:message-timestamp msg)
+                         (1- (length (sibyl.llm:message-timestamp msg))))))))
