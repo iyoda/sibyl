@@ -1,10 +1,21 @@
 {
   "active_plan": "/Users/iyoda/Projects/atikoro/sibyl/.sisyphus/plans/self-development-roadmap.md",
   "started_at": "2026-02-16T11:05:15.494Z",
+  "completed_at": "2026-02-17T01:46:42.857Z",
+  "status": "complete",
   "session_ids": [
     "ses_39a024153ffe1CKbbE5KRkXLtL",
-    "ses_399a18fb8ffeLkM7UaShmhRUKw"
+    "ses_399a18fb8ffeLkM7UaShmhRUKw",
+    "ses_396b8c16dffedAAgZScKlpTWi8"
   ],
   "plan_name": "self-development-roadmap",
-  "agent": "atlas"
+  "agent": "atlas",
+  "final_stats": {
+    "total_tasks": 34,
+    "completed_tasks": 34,
+    "completion_rate": "100%",
+    "test_suite": "716/716 pass (100%)",
+    "sessions": 3,
+    "duration_hours": 14.7
+  }
 }
