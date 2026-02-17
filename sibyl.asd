@@ -53,8 +53,9 @@
       (:file "message-test")
       (:file "client-test")
       (:file "agent-test")
-      (:file "asdf-protection-test")
-      (:file "repl-test"))))
+       (:file "asdf-protection-test")
+       (:file "repl-test")
+       (:file "evolution-state-test"))))
   :perform (test-op (o c)
              (uiop:symbol-call :fiveam :run!
                (uiop:find-symbol* '#:sibyl-tests '#:sibyl.tests))))
