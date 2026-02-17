@@ -28,20 +28,39 @@ and codebase-map caching for faster repeated scans."
 ;;; Suite classification for parallel execution
 ;;; ============================================================
 
+;;; Helper to resolve a suite symbol at runtime.
+;;; FiveAM uses the full package-qualified symbol for suite lookup,
+;;; so cross-package suites must be resolved from their defining package.
+;;; Lock order: tool-registry (1) -> evolution-state (2) -> modified-files (3) -> command-handlers (4)
+(defun %resolve-suite (name package)
+  "Return the suite symbol for NAME in PACKAGE (a package designator), or NIL if not found."
+  (let ((pkg (find-package package)))
+    (when pkg (find-symbol (symbol-name name) pkg))))
+
 (defparameter *safe-suites*
+  ;; Suites defined in sibyl.tests package (same package as this file)
   '(read-sexp-tests
     describe-symbol-tests
     macroexpand-form-tests
     package-symbols-tests
     codebase-map-tests
     sync-to-file-tests
-    evolve-tests
-    agent-tests
-    tdd-orchestration-tests
-    run-hook-tests
-    evolution-state-tests
-    evolution-report-tests)
-  "Test suites safe for parallel execution (no shared file I/O, no global state mutation).")
+    evolve-tests)
+  "Test suites in sibyl.tests package safe for parallel execution.
+Cross-package suites are resolved at runtime via %safe-suites-resolved.")
+
+(defun %safe-suites-resolved ()
+  "Return the full list of SAFE suites with cross-package symbols resolved at runtime.
+Called at run-tests-parallel invocation time, after all packages are loaded."
+  (append
+   *safe-suites*
+   (remove nil
+           (list
+            (%resolve-suite 'agent-tests             '#:sibyl.agent.tests)
+            (%resolve-suite 'tdd-orchestration-tests '#:sibyl.agent.tests)
+            (%resolve-suite 'run-hook-tests          '#:sibyl.agent.tests)
+            (%resolve-suite 'evolution-state-tests   '#:sibyl.evolution.tests)
+            (%resolve-suite 'evolution-report-tests  '#:sibyl.evolution.tests)))))
 
 (defparameter *unsafe-suites*
   '(suggest-improvements-tests
@@ -55,7 +74,12 @@ and codebase-map caching for faster repeated scans."
     register-command-tests
     asdf-protection-tests
     eval-form-tests
-    who-calls-tests)
+    who-calls-tests
+    run-tests-tests
+    add-definition-tests
+    add-export-tests
+    create-module-tests
+    parallel-runner-tests)
   "Test suites that must run sequentially (file I/O, global state, or FiveAM side effects).")
 
 ;;; Lock for serializing FiveAM calls (FiveAM is not thread-safe)
@@ -74,17 +98,22 @@ and codebase-map caching for faster repeated scans."
 Execution strategy:
   1. SAFE suites: run in parallel threads (serialized via lock due to FiveAM not being thread-safe)
   2. UNSAFE suites: run sequentially (shared state, file I/O)
+  3. Full sibyl-tests suite: run to capture top-level tests not in any named sub-suite
+     (e.g. sanity-check, tool-registration from tools-test.lisp). The full suite result
+     is used as the authoritative result set when it has >= checks than named sub-suites.
 
 Uses with-codebase-map-cache and *self-assess-running* guard for optimal performance.
 
 Returns a list of all test results (same format as fiveam:run)."
   (sibyl.tools:with-codebase-map-cache ()
     (let* ((sibyl.tools:*self-assess-running* t)
+           ;; Resolve cross-package suite symbols at runtime
+           (safe-suites (%safe-suites-resolved))
            ;; Parallel phase: run SAFE suites in threads
-           (n-safe (length *safe-suites*))
+           (n-safe (length safe-suites))
            (safe-results (make-array n-safe :initial-element nil))
            (threads
-             (loop for suite in *safe-suites*
+             (loop for suite in safe-suites
                    for i from 0
                    collect
                    (let ((suite-capture suite)
@@ -115,11 +144,19 @@ Returns a list of all test results (same format as fiveam:run)."
                                 suite e)
                         nil)))))
 
-        ;; Merge all results
-        (let ((all-results
-                (append (loop for i from 0 below n-safe
-                              nconc (or (aref safe-results i) nil))
-                        unsafe-results)))
+        ;; Full suite phase: run sibyl-tests to capture top-level tests not in named sub-suites.
+        ;; fiveam:run 'sibyl-tests recurses into all sub-suites, so its result count >= named suites.
+        ;; We use the full suite results as the authoritative set.
+        (let* ((full-results (%collect-fiveam-results 'sibyl-tests))
+               (named-count (+ (loop for i from 0 below n-safe
+                                     sum (length (or (aref safe-results i) nil)))
+                               (length unsafe-results)))
+               ;; Use full results (which include everything) as the final answer
+               (final-results (if (>= (length full-results) named-count)
+                                  full-results
+                                  (append (loop for i from 0 below n-safe
+                                                nconc (or (aref safe-results i) nil))
+                                          unsafe-results))))
 
           ;; Print summary (like fiveam:run! does)
           ;; Uses find-symbol+find-class to avoid SBCL package-lock on IT.BESE.FIVEAM
@@ -128,14 +165,14 @@ Returns a list of all test results (same format as fiveam:run)."
                  (failed-class  (find-class (find-symbol "TEST-FAILED"             fiveam-pkg) nil))
                  (skipped-class (find-class (find-symbol "TEST-SKIPPED"            fiveam-pkg) nil))
                  (error-class   (find-class (find-symbol "UNEXPECTED-TEST-FAILURE" fiveam-pkg) nil))
-                 (total (length all-results))
-                 (pass (count-if (lambda (r) (and passed-class  (typep r passed-class)))  all-results))
-                 (fail (count-if (lambda (r) (and failed-class  (typep r failed-class)))  all-results))
-                 (skip (count-if (lambda (r) (and skipped-class (typep r skipped-class))) all-results))
-                 (err  (count-if (lambda (r) (and error-class   (typep r error-class)))   all-results)))
+                 (total (length final-results))
+                 (pass (count-if (lambda (r) (and passed-class  (typep r passed-class)))  final-results))
+                 (fail (count-if (lambda (r) (and failed-class  (typep r failed-class)))  final-results))
+                 (skip (count-if (lambda (r) (and skipped-class (typep r skipped-class))) final-results))
+                 (err  (count-if (lambda (r) (and error-class   (typep r error-class)))   final-results)))
             (format t "~% Did ~a checks.~%" total)
             (format t "    Pass: ~a (~a%)~%" pass (if (> total 0) (round (* 100 (/ pass total))) 0))
             (format t "    Skip: ~a~%" skip)
             (format t "    Fail: ~a~%" (+ fail err)))
 
-          all-results)))))
+          final-results)))))
