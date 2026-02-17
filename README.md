@@ -37,6 +37,16 @@ Link the project as a Quicklisp local project:
 ln -s /path/to/sibyl ~/quicklisp/local-projects/sibyl
 ```
 
+## Quick Start
+
+```bash
+# Anthropic
+sbcl --eval '(ql:quickload :sibyl :silent t)' --eval '(sibyl:with-config () (sibyl:start-repl :client (sibyl:make-anthropic-client)))'
+
+# OpenAI
+sbcl --eval '(ql:quickload :sibyl :silent t)' --eval '(sibyl:with-config () (sibyl:start-repl :client (sibyl:make-openai-client)))'
+```
+
 ## Usage
 
 ```lisp
