@@ -1548,6 +1548,645 @@
         result))))
 
 ;;; ============================================================
+;;; Self-analysis: self-assess
+;;; ============================================================
+
+(defvar *self-assess-running* nil
+  "Guard against recursive test runs inside self-assess.")
+
+(defvar *self-assess-last-test-results* nil
+  "Cache of the most recent run-tests result (parsed).")
+
+(defparameter *self-assess-cyclomatic-branches*
+  '("if" "when" "unless" "cond" "case" "typecase" "ecase" "ccase"
+    "handler-case" "restart-case" "and" "or")
+  "Symbols counted as cyclomatic decision points.")
+
+(defparameter *self-assess-tool-categories*
+  '(("file_ops" "read-file" "write-file" "list-directory" "grep" "file-info" "shell")
+    ("lisp_introspection" "read-sexp" "describe-symbol" "macroexpand-form"
+                           "package-symbols" "who-calls" "codebase-map")
+    ("testing" "run-tests" "write-test")
+    ("self_modification" "safe-redefine" "sync-to-file")
+    ("analysis" "suggest-improvements" "self-assess")
+    ("evaluation" "eval-form"))
+  "Category map for registered tool names.")
+
+(defun %self-assess-ensure-list (value)
+  (cond
+    ((vectorp value) (coerce value 'list))
+    ((null value) nil)
+    (t value)))
+
+(defun %self-assess-parse-json (json)
+  (yason:parse json :object-as :hash-table))
+
+(defun %self-assess-collect-files-from-map (map)
+  (let* ((modules (%self-assess-ensure-list (gethash "modules" map)))
+         (paths nil))
+    (dolist (module modules (nreverse paths))
+      (dolist (file (%self-assess-ensure-list (gethash "files" module)))
+        (let ((path (gethash "path" file)))
+          (when path
+            (push path paths)))))))
+
+(defun %self-assess-count-lines (content)
+  (cond
+    ((null content) 0)
+    ((string= content "") 0)
+    (t (1+ (count #\Newline content)))))
+
+(defun %self-assess-total-lines (paths)
+  (let ((total 0))
+    (dolist (path paths total)
+      (handler-case
+          (let* ((resolved (%suggest-improvements-resolve-path path))
+                 (content (uiop:read-file-string resolved)))
+            (incf total (%self-assess-count-lines content)))
+        (error () nil)))))
+
+(defun %self-assess-definition-function-p (definition)
+  (let ((type (getf definition :type)))
+    (member type '("defun" "defmethod") :test #'string=)))
+
+(defun %self-assess-collect-function-names (definitions)
+  (let ((names nil)
+        (seen (make-hash-table :test 'equal)))
+    (dolist (definition definitions (nreverse names))
+      (let ((name (getf definition :name)))
+        (when (and name
+                   (%self-assess-definition-function-p definition)
+                   (%suggest-improvements-public-name-p name))
+          (let ((key (string-downcase name)))
+            (unless (gethash key seen)
+              (setf (gethash key seen) t)
+              (push name names))))))))
+
+(defun %self-assess-parse-form (form-string)
+  (let ((*read-eval* nil))
+    (handler-case
+        (multiple-value-bind (form read-position)
+            (read-from-string form-string)
+          (declare (ignore read-position))
+          form)
+      (error () nil))))
+
+(defun %self-assess-cyclomatic-count (form)
+  (let ((count 0))
+    (labels ((walk (node)
+               (when (consp node)
+                 (let ((head (car node)))
+                   (when (and (symbolp head)
+                              (member (string-downcase (symbol-name head))
+                                      *self-assess-cyclomatic-branches*
+                                      :test #'string=))
+                     (incf count)))
+                 (walk (car node))
+                 (walk (cdr node)))))
+      (walk form))
+    (1+ count)))
+
+(defun %self-assess-total-cyclomatic (definitions)
+  (let ((total 0)
+        (count 0))
+    (dolist (definition definitions (values total count))
+      (when (%self-assess-definition-function-p definition)
+        (let* ((form-string (getf definition :form))
+               (form (and form-string (%self-assess-parse-form form-string))))
+          (when form
+            (incf count)
+            (incf total (%self-assess-cyclomatic-count form))))))))
+
+(defun %self-assess-test-files ()
+  (let* ((tests-dir (asdf:system-relative-pathname :sibyl "tests/"))
+         (files (and (probe-file tests-dir)
+                     (%codebase-map-find-lisp-files tests-dir))))
+    (%self-assess-ensure-list files)))
+
+(defun %self-assess-count-tests-in-content (content)
+  (let ((count 0)
+        (*read-eval* nil)
+        (*package* (or (find-package "SIBYL.TESTS") *package*)))
+    (handler-case
+        (with-input-from-string (stream content)
+          (loop for form = (read stream nil :eof)
+                until (eq form :eof)
+                do (when (and (consp form)
+                              (symbolp (car form))
+                              (string= (string-downcase (symbol-name (car form)))
+                                       "test"))
+                     (incf count))))
+      (error () nil))
+    count))
+
+(defun %self-assess-count-tests (files)
+  (let ((total 0))
+    (dolist (file files total)
+      (handler-case
+          (let ((content (uiop:read-file-string file)))
+            (incf total (%self-assess-count-tests-in-content content)))
+        (error () nil)))))
+
+(defun %self-assess-untested-functions (function-names tests-content)
+  (let ((untested nil))
+    (dolist (name function-names (nreverse untested))
+      (let ((lower (string-downcase name)))
+        (unless (search lower tests-content)
+          (push name untested))))))
+
+(defun %self-assess-coverage-estimate (total-functions untested-count)
+  (if (and (integerp total-functions) (> total-functions 0))
+      (/ (float (- total-functions untested-count))
+         total-functions)
+      0.0))
+
+(defun %self-assess-tool-category (tool-name)
+  (let ((lower (string-downcase tool-name)))
+    (dolist (entry *self-assess-tool-categories* "other")
+      (let ((category (first entry))
+            (names (rest entry)))
+        (when (find lower names :test #'string=)
+          (return category))))))
+
+(defun %self-assess-categories-counts (tools)
+  (let ((counts (make-hash-table :test 'equal)))
+    (dolist (tool tools counts)
+      (let* ((name (tool-name tool))
+             (category (%self-assess-tool-category name))
+             (current (gethash category counts 0)))
+        (setf (gethash category counts) (1+ current))))))
+
+(defun %self-assess-tool-entries (tools)
+  (mapcar (lambda (tool)
+            (let ((entry (make-hash-table :test 'equal)))
+              (setf (gethash "name" entry) (tool-name tool))
+              (setf (gethash "description" entry) (tool-description tool))
+              (setf (gethash "category" entry)
+                    (%self-assess-tool-category (tool-name tool)))
+              entry))
+          tools))
+
+(defun %self-assess-tool-name-set (tools)
+  (let ((set (make-hash-table :test 'equal)))
+    (dolist (tool tools set)
+      (setf (gethash (string-downcase (tool-name tool)) set) t))))
+
+(defun %self-assess-capabilities (tool-set execute-tool-description)
+  (let ((caps nil))
+    (when (and (gethash "read-file" tool-set)
+               (gethash "write-file" tool-set))
+      (push "Can read and write files" caps))
+    (when (or (gethash "list-directory" tool-set)
+              (gethash "grep" tool-set))
+      (push "Can search and list files/directories" caps))
+    (when (gethash "eval-form" tool-set)
+      (push "Can evaluate Lisp forms safely" caps))
+    (when (and (gethash "read-sexp" tool-set)
+               (gethash "describe-symbol" tool-set)
+               (gethash "codebase-map" tool-set))
+      (push "Can introspect Lisp symbols and codebase structure" caps))
+    (when (and (gethash "run-tests" tool-set)
+               (gethash "write-test" tool-set))
+      (push "Can generate and run tests programmatically" caps))
+    (when (and (gethash "safe-redefine" tool-set)
+               (gethash "sync-to-file" tool-set))
+      (push "Can modify functions safely and sync to disk" caps))
+    (when (gethash "suggest-improvements" tool-set)
+      (push "Can analyze codebase and propose improvements" caps))
+    (when (and execute-tool-description
+               (search "status: found" (string-downcase execute-tool-description)))
+      (push "Can execute registered tools with error handling" caps))
+    (nreverse caps)))
+
+(defun %self-assess-toolset-limitations (tool-set)
+  (let ((limitations nil))
+    (unless (gethash "safe-redefine" tool-set)
+      (push "Cannot safely redefine functions in-memory" limitations))
+    (unless (gethash "sync-to-file" tool-set)
+      (push "Cannot persist self-modifications to disk" limitations))
+    (unless (gethash "run-tests" tool-set)
+      (push "Cannot execute tests programmatically" limitations))
+    (push "Cannot modify external dependencies or Quicklisp libraries" limitations)
+    (push "Cannot modify system prompt or LLM client" limitations)
+    (nreverse limitations)))
+
+(defun %self-assess-known-limitations ()
+  (list
+   "Cannot modify system prompt or LLM client"
+   "Requires human approval for self-modifications"
+   "No persistent task execution logging yet"
+   "Self-modification limited to Sibyl packages"
+   "ASDF reload protection required for in-memory modifications"
+   "Cannot bypass approval flow or safety guardrails"
+   "Requires SBCL (sb-introspect) for full introspection"
+   "Tooling is Lisp-only; no multi-language parsing"
+   "External dependency changes require manual updates"))
+
+(defun %self-assess-describe-symbol (symbol-string)
+  (handler-case
+      (execute-tool "describe-symbol" (list (cons "symbol" symbol-string)))
+    (error () nil)))
+
+(defun %self-assess-run-tests ()
+  (when (find-tool "run-tests")
+    (let ((*self-assess-running* t))
+      (handler-case
+          (let* ((result (execute-tool "run-tests" nil))
+                 (parsed (%self-assess-parse-json result)))
+            (setf *self-assess-last-test-results* parsed)
+            (values parsed nil))
+        (error (e)
+          (values nil (format nil "~a" e)))))))
+
+(deftool "self-assess"
+    (:description "Evaluate Sibyl's current capabilities and limitations."
+     :parameters ())
+  (block self-assess
+    (let* ((map-json (execute-tool "codebase-map"
+                                   '(("detail-level" . "summary"))))
+           (map (%self-assess-parse-json map-json))
+           (modules (%self-assess-ensure-list (gethash "modules" map)))
+           (module-count (length modules))
+           (src-files (%self-assess-collect-files-from-map map))
+           (total-lines (%self-assess-total-lines src-files))
+           (definitions (%suggest-improvements-collect-definitions src-files))
+           (function-names (%self-assess-collect-function-names definitions))
+           (total-functions (length function-names))
+           (cyclomatic-total 0)
+           (cyclomatic-count 0)
+           (package-symbols-json (execute-tool "package-symbols"
+                                               '(("package" . "SIBYL.TOOLS"))))
+           (package-symbols-parsed (%self-assess-parse-json package-symbols-json))
+           (package-symbols (%self-assess-ensure-list package-symbols-parsed))
+           (package-symbols-count (length package-symbols))
+           (tools (list-tools))
+           (tool-set (%self-assess-tool-name-set tools))
+           (tool-entries (%self-assess-tool-entries tools))
+           (categories (%self-assess-categories-counts tools))
+           (execute-tool-description
+             (%self-assess-describe-symbol "sibyl.tools:execute-tool"))
+           (capabilities (%self-assess-capabilities tool-set execute-tool-description))
+           (toolset-limitations (%self-assess-toolset-limitations tool-set))
+           (tests-files (%self-assess-test-files))
+           (test-files-count (length tests-files))
+           (tests-content (%suggest-improvements-read-tests-content))
+           (untested-functions (%self-assess-untested-functions function-names tests-content))
+           (untested-count (length untested-functions))
+           (coverage-estimate (%self-assess-coverage-estimate total-functions untested-count))
+           (test-count (%self-assess-count-tests tests-files))
+           (test-results nil)
+           (test-results-error nil))
+      (multiple-value-setq (cyclomatic-total cyclomatic-count)
+        (%self-assess-total-cyclomatic definitions))
+      (cond
+        ((not *self-assess-running*)
+         (multiple-value-setq (test-results test-results-error)
+           (%self-assess-run-tests)))
+        (t
+         (setf test-results *self-assess-last-test-results*)))
+      (let* ((tests-total (or (and test-results (gethash "total" test-results))
+                              test-count))
+             (tests-passed (and test-results (gethash "passed" test-results)))
+             (tests-failed (and test-results (gethash "failed" test-results)))
+             (pass-rate (if (and tests-total (integerp tests-total) (> tests-total 0)
+                                 (integerp tests-passed))
+                            (/ (float tests-passed) tests-total)
+                            nil))
+             (codebase (make-hash-table :test 'equal))
+             (complexity (make-hash-table :test 'equal))
+             (toolset (make-hash-table :test 'equal))
+             (test-coverage (make-hash-table :test 'equal))
+             (result (make-hash-table :test 'equal)))
+        (setf (gethash "total" complexity) cyclomatic-total)
+        (setf (gethash "average" complexity)
+              (if (> cyclomatic-count 0)
+                  (/ (float cyclomatic-total) cyclomatic-count)
+                  0.0))
+        (setf (gethash "function_count" complexity) cyclomatic-count)
+        (setf (gethash "total_lines" codebase) total-lines)
+        (setf (gethash "total_functions" codebase) total-functions)
+        (setf (gethash "total_modules" codebase) module-count)
+        (setf (gethash "test_files" codebase) test-files-count)
+        (setf (gethash "cyclomatic_complexity" codebase) complexity)
+        (setf (gethash "total_tools" toolset) (hash-table-count *tool-registry*))
+        (setf (gethash "package_symbols" toolset) package-symbols-count)
+        (setf (gethash "categories" toolset) categories)
+        (setf (gethash "capabilities" toolset) capabilities)
+        (setf (gethash "limitations" toolset) toolset-limitations)
+        (setf (gethash "tools" toolset) tool-entries)
+        (setf (gethash "total_tests" test-coverage) tests-total)
+        (setf (gethash "passed" test-coverage) tests-passed)
+        (setf (gethash "failed" test-coverage) tests-failed)
+        (setf (gethash "pass_rate" test-coverage) pass-rate)
+        (setf (gethash "untested_functions" test-coverage) untested-count)
+        (setf (gethash "coverage_estimate" test-coverage) coverage-estimate)
+        (setf (gethash "untested" test-coverage) untested-functions)
+        (when test-results-error
+          (setf (gethash "test_run_error" test-coverage) test-results-error))
+        (setf (gethash "toolset" result) toolset)
+        (setf (gethash "codebase" result) codebase)
+        (setf (gethash "test_coverage" result) test-coverage)
+        (setf (gethash "limitations" result) (%self-assess-known-limitations))
+        result))))
+
+;;; ============================================================
+;;; Self-analysis: improvement-plan
+;;; ============================================================
+
+(defun %improvement-plan-ensure-list (value)
+  (cond
+    ((vectorp value) (coerce value 'list))
+    ((null value) nil)
+    (t value)))
+
+(defun %improvement-plan-parse-json (json)
+  (yason:parse json :object-as :hash-table))
+
+(defun %improvement-plan-string-contains-p (text keywords)
+  (when text
+    (let ((lower (string-downcase text)))
+      (some (lambda (keyword)
+              (search keyword lower))
+            keywords))))
+
+(defun %improvement-plan-limitations-match-p (limitations keywords)
+  (let ((items (%improvement-plan-ensure-list limitations)))
+    (some (lambda (entry)
+            (%improvement-plan-string-contains-p entry keywords))
+          items)))
+
+(defun %improvement-plan-toolset-has-keyword-p (tools keywords)
+  (let ((entries (%improvement-plan-ensure-list tools)))
+    (some (lambda (tool)
+            (let ((name (gethash "name" tool))
+                  (desc (gethash "description" tool)))
+              (or (%improvement-plan-string-contains-p name keywords)
+                  (%improvement-plan-string-contains-p desc keywords))))
+          entries)))
+
+(defun %improvement-plan-make-entry (title description category priority
+                                    risk effect timeframe rationale estimated-effort)
+  (let ((entry (make-hash-table :test 'equal)))
+    (setf (gethash "title" entry) title)
+    (setf (gethash "description" entry) description)
+    (setf (gethash "category" entry) category)
+    (setf (gethash "priority" entry) priority)
+    (setf (gethash "risk" entry) risk)
+    (setf (gethash "effect" entry) effect)
+    (setf (gethash "timeframe" entry) timeframe)
+    (setf (gethash "rationale" entry) rationale)
+    (setf (gethash "estimated_effort" entry) estimated-effort)
+    entry))
+
+(defun %improvement-plan-assign-ids (improvements)
+  (loop for improvement in improvements
+        for idx from 1
+        do (setf (gethash "id" improvement) idx))
+  improvements)
+
+(defun %improvement-plan-priority-rank (priority)
+  (cond
+    ((string= priority "high") 0)
+    ((string= priority "medium") 1)
+    (t 2)))
+
+(defun %improvement-plan-sort (improvements)
+  (sort (copy-list improvements)
+        (lambda (a b)
+          (let ((rank-a (%improvement-plan-priority-rank
+                         (gethash "priority" a)))
+                (rank-b (%improvement-plan-priority-rank
+                         (gethash "priority" b))))
+            (if (/= rank-a rank-b)
+                (< rank-a rank-b)
+                (string< (gethash "category" a)
+                         (gethash "category" b)))))))
+
+(defun %improvement-plan-summary (improvements)
+  (let ((summary (make-hash-table :test 'equal)))
+    (setf (gethash "total_improvements" summary) (length improvements))
+    (setf (gethash "high_priority" summary)
+          (count-if (lambda (improvement)
+                      (string= (gethash "priority" improvement) "high"))
+                    improvements))
+    (setf (gethash "medium_priority" summary)
+          (count-if (lambda (improvement)
+                      (string= (gethash "priority" improvement) "medium"))
+                    improvements))
+    (setf (gethash "low_priority" summary)
+          (count-if (lambda (improvement)
+                      (string= (gethash "priority" improvement) "low"))
+                    improvements))
+    (setf (gethash "short_term" summary)
+          (count-if (lambda (improvement)
+                      (string= (gethash "timeframe" improvement) "short"))
+                    improvements))
+    (setf (gethash "medium_term" summary)
+          (count-if (lambda (improvement)
+                      (string= (gethash "timeframe" improvement) "medium"))
+                    improvements))
+    (setf (gethash "long_term" summary)
+          (count-if (lambda (improvement)
+                      (string= (gethash "timeframe" improvement) "long"))
+                    improvements))
+    summary))
+
+(defun %improvement-plan-estimate-test-effort (untested-count)
+  (cond
+    ((>= untested-count 40) "6-10 hours")
+    ((>= untested-count 20) "4-6 hours")
+    ((>= untested-count 10) "3-5 hours")
+    (t "2-4 hours")))
+
+(defun %improvement-plan-definition-table (definitions)
+  (let ((table (make-hash-table :test 'equal)))
+    (dolist (definition definitions table)
+      (let ((name (getf definition :name))
+            (type (getf definition :type)))
+        (when (and name
+                   (member type '("defun" "defmethod") :test #'string=))
+          (push definition (gethash (string-downcase name) table)))))))
+
+(defun %improvement-plan-callers-for-definition (definition)
+  (let* ((name (getf definition :name))
+         (file (getf definition :file))
+         (package (%suggest-improvements-package-for-file file))
+         (qualified (format nil "~a::~a" (string-downcase package) name))
+         (callers (%suggest-improvements-callers-count qualified)))
+    (or callers 0)))
+
+(defun %improvement-plan-collect-untested-callers (untested definitions)
+  (let ((table (%improvement-plan-definition-table definitions))
+        (best (make-hash-table :test 'equal)))
+    (dolist (name untested)
+      (let* ((key (string-downcase name))
+             (defs (gethash key table)))
+        (dolist (definition defs)
+          (let* ((callers (%improvement-plan-callers-for-definition definition))
+                 (current (gethash key best)))
+            (when (or (null current)
+                      (> callers (getf current :callers)))
+              (setf (gethash key best)
+                    (list :name name
+                          :callers callers
+                          :file (getf definition :file))))))))
+    (let ((entries nil))
+      (maphash (lambda (key value)
+                 (declare (ignore key))
+                 (push value entries))
+               best)
+      entries)))
+
+(defun %improvement-plan-sort-untested (entries)
+  (sort (copy-list entries)
+        #'>
+        :key (lambda (entry) (or (getf entry :callers) 0))))
+
+(defun %improvement-plan-format-untested-sample (entries)
+  (let* ((nonzero (remove-if (lambda (entry)
+                               (<= (getf entry :callers) 0))
+                             entries))
+         (sample (subseq (or nonzero entries)
+                         0
+                         (min 3 (length (or nonzero entries))))))
+    (when sample
+      (if nonzero
+          (string-join ", "
+                       (mapcar (lambda (entry)
+                                 (format nil "~a (~a callers)"
+                                         (getf entry :name)
+                                         (getf entry :callers)))
+                               sample))
+          (string-join ", "
+                       (mapcar (lambda (entry)
+                                 (getf entry :name))
+                               sample))))))
+
+(defun %improvement-plan-store-suggestions (improvements)
+  (let* ((repl-package (find-package "SIBYL.REPL"))
+         (store (and repl-package (find-symbol "STORE-SUGGESTIONS" repl-package))))
+    (when (and store (fboundp store))
+      (funcall store
+               (mapcar (lambda (improvement)
+                         (list :id (gethash "id" improvement)
+                               :description (gethash "title" improvement)
+                               :rationale (gethash "rationale" improvement)
+                               :priority (gethash "priority" improvement)))
+                       improvements)))))
+
+(deftool "improvement-plan"
+    (:description "Generate a prioritized improvement plan from self-assessment."
+     :parameters ())
+  (block improvement-plan
+    (let* ((assessment-json (execute-tool "self-assess" nil))
+           (assessment (%improvement-plan-parse-json assessment-json))
+           (toolset (gethash "toolset" assessment))
+           (codebase (gethash "codebase" assessment))
+           (test-coverage (gethash "test_coverage" assessment))
+           (limitations (%improvement-plan-ensure-list
+                         (gethash "limitations" assessment)))
+           (tools (%improvement-plan-ensure-list
+                   (and toolset (gethash "tools" toolset))))
+           (timestamp (timestamp-now))
+           (improvements nil))
+      ;; Test coverage improvements
+      (let* ((untested (%improvement-plan-ensure-list
+                        (and test-coverage (gethash "untested" test-coverage))))
+             (untested-count (length untested)))
+        (when (> untested-count 0)
+          (let* ((map-json (execute-tool "codebase-map"
+                                         '(("detail-level" . "summary"))))
+                 (map (%improvement-plan-parse-json map-json))
+                 (files (%self-assess-collect-files-from-map map))
+                 (definitions (%suggest-improvements-collect-definitions files))
+                 (untested-info (%improvement-plan-collect-untested-callers
+                                 untested definitions))
+                 (sorted (%improvement-plan-sort-untested untested-info))
+                 (high-callers (remove-if (lambda (entry)
+                                            (< (getf entry :callers) 3))
+                                          sorted))
+                 (priority (if high-callers "high"
+                               (if (> untested-count 10) "medium" "low")))
+                 (sample (%improvement-plan-format-untested-sample sorted))
+                 (title (if high-callers
+                            "Add tests for high-traffic untested functions"
+                            "Improve test coverage for untested functions"))
+                 (description (if sample
+                                  (format nil "~a functions lack tests; prioritize ~a."
+                                          untested-count sample)
+                                  (format nil "~a functions lack tests; prioritize critical paths."
+                                          untested-count)))
+                 (rationale (if high-callers
+                                "Functions with 3+ callers need tests to prevent regressions."
+                                "Untested public functions increase regression risk."))
+                 (estimated-effort (%improvement-plan-estimate-test-effort
+                                    untested-count)))
+            (push (%improvement-plan-make-entry
+                   title description "test-coverage" priority
+                   "low" "high" "short" rationale estimated-effort)
+                  improvements))))
+      ;; Infrastructure gaps from limitations
+      (when (%improvement-plan-limitations-match-p
+             limitations '("logging" "log"))
+        (push (%improvement-plan-make-entry
+               "Implement task execution logging"
+               "Add persistent logging for task success/failure tracking."
+               "infrastructure" "medium" "medium" "high" "medium"
+               "Self-assessment notes missing persistent logging for task outcomes."
+               "5-8 hours")
+              improvements))
+      ;; Tooling gaps: debugging/tracing
+      (when (not (%improvement-plan-toolset-has-keyword-p
+                  tools '("debug" "trace" "profil" "diagnos")))
+        (push (%improvement-plan-make-entry
+               "Add debugging and tracing tools"
+               "Provide lightweight tracing or debug inspection for tool runs and agent steps."
+               "tooling" "medium" "medium" "high" "medium"
+               "Current toolset lacks debugging/tracing capabilities for diagnosing failures."
+               "4-6 hours")
+              improvements))
+      ;; Codebase complexity or size driven refactoring
+      (let* ((total-lines (gethash "total_lines" codebase))
+             (total-functions (gethash "total_functions" codebase))
+             (complexity (and codebase (gethash "cyclomatic_complexity" codebase)))
+             (avg-complexity (and complexity (gethash "average" complexity))))
+        (when (or (and total-lines (> total-lines 3000))
+                  (and total-functions (> total-functions 80))
+                  (and avg-complexity (> avg-complexity 3.0)))
+          (push (%improvement-plan-make-entry
+                 "Refactor large modules and hotspots"
+                 (format nil "Codebase has ~a lines and ~a functions with avg complexity ~,2f; refactor hotspots for maintainability."
+                         (or total-lines 0)
+                         (or total-functions 0)
+                         (or avg-complexity 0.0))
+                 "refactoring" "medium" "medium" "medium" "medium"
+                 "Targeted refactors keep complexity low and reduce future change risk."
+                 "6-10 hours")
+                improvements)))
+      ;; Tooling gaps: visualization/graphing
+      (when (not (%improvement-plan-toolset-has-keyword-p
+                  tools '("graph" "visual" "diagram" "chart")))
+        (push (%improvement-plan-make-entry
+               "Add visualization tools for codebase graphs"
+               "Provide graph/diagram views for module and call relationships."
+               "features" "low" "low" "medium" "long"
+               "Visualization accelerates architectural understanding and review workflows."
+               "8-12 hours")
+              improvements))
+      (setf improvements (%improvement-plan-sort improvements))
+      (setf improvements (%improvement-plan-assign-ids improvements))
+      (%improvement-plan-store-suggestions improvements)
+      (let ((result (make-hash-table :test 'equal)))
+        (setf (gethash "plan_id" result)
+              (format nil "plan-~a" timestamp))
+        (setf (gethash "based_on_assessment" result)
+              (format nil "self-assess-~a" timestamp))
+        (setf (gethash "improvements" result) improvements)
+        (setf (gethash "summary" result)
+              (%improvement-plan-summary improvements))
+        result))))
+
+;;; ============================================================
 ;;; Programmatic test execution
 ;;; ============================================================
 

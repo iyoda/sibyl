@@ -1068,3 +1068,122 @@ Suggestions:
 
 ### Next Phase
 Phase 6: Self-Evolving Agent (self-assess, improvement-plan, self-evolution cycle)
+
+## [2026-02-17] Phase 6 Task 6-1: self-assess Tool
+
+### Implemented Tool
+**self-assess**: Generates a structured JSON report of Sibyl's current capabilities and limitations.
+- **Toolset capabilities**: Enumerates registered tools, categorizes them (file ops, introspection, testing, self-modification, analysis, evaluation), and lists capabilities vs. limitations.
+- **Codebase metrics**: Computes total lines, function count, module count, and a cyclomatic complexity estimate using parsed S-expressions.
+- **Test coverage estimation**: Counts tests, estimates coverage based on functions vs. test references, and includes pass rate from `run-tests` when available.
+- **Known limitations**: Guardrails (system prompt/LLM client immutable, approval flow), technical constraints (SBCL-only introspection), missing features (no persistent task logging).
+
+### Key Implementation Notes
+- Uses existing self-understanding tools: `codebase-map`, `package-symbols`, `describe-symbol`, `read-sexp`.
+- Guards against recursive test execution with `*self-assess-running*` and caches last test results.
+- Coverage heuristic scans tests for function name mentions; untested list included for transparency.
+
+### Tests Added
+- `self-assess-tests`: report generation, required sections, and reasonable metric assertions.
+- Full suite passes: `(asdf:test-system :sibyl)` → 551 checks, 100% pass.
+
+## [2026-02-17] Phase 6 Tasks 6-1 & 6-2: Self-Assessment and Strategic Planning
+
+### Tasks Completed
+**Phase 6 Task 6-1**: self-assess tool (already implemented)
+**Phase 6 Task 6-2**: improvement-plan tool (just implemented)
+
+### Task 6-1: self-assess Tool
+**Status**: ✅ Complete (discovered already implemented from previous session)
+
+**Functionality**:
+- Evaluates current toolset capabilities (19 tools categorized)
+- Analyzes codebase metrics (4397 lines, 84 functions, 9 modules, avg complexity 2.69)
+- Estimates test coverage (68 tests, 55 untested functions, 34.5% coverage)
+- Lists known limitations and guardrails
+- Returns structured JSON report
+
+**Test Results**:
+- ✅ self-assess-tests: 19/19 checks pass (100%)
+- 3 test cases: generates-report, has-required-sections, metrics-reasonable
+
+**Key Output**:
+- Identified 55 untested functions including critical ones: agent-run, agent-reset, complete, complete-with-tools
+- Categorized 19 tools: lisp_introspection (6), file_ops (6), testing (2), self_modification (2), analysis (2), evaluation (1)
+- Listed capabilities and limitations clearly
+
+### Task 6-2: improvement-plan Tool
+**Status**: ✅ Complete
+
+**Implementation**:
+- Analyzes self-assess output to identify improvement opportunities
+- Generates prioritized improvement plans with:
+  - Risk assessment (low/medium/high)
+  - Effect estimation (low/medium/high)
+  - Timeframe categorization (short/medium/long term)
+  - Estimated effort in hours
+- Integrates with /review workflow via store-suggestions
+- Returns structured JSON plan
+
+**Test Results**:
+- ✅ improvement-plan-tests: 78/78 checks pass (100%)
+- 3 test cases: generates-plan, has-required-fields, priorities-valid
+
+**Example Improvements Generated**:
+1. **High Priority / Low Risk / Short Term**:
+   - Add tests for high-traffic untested functions (make-message, http-post-json, to-json-value)
+   - Estimated: 6-10 hours
+   - Rationale: Functions with 3+ callers need tests to prevent regressions
+
+2. **Medium Priority / Medium Risk / Medium Term**:
+   - Implement task execution logging
+   - Estimated: 5-8 hours
+   - Rationale: Enables better self-assessment over time
+
+3. **Medium Priority / Low Risk / Medium Term**:
+   - Add docstrings to undocumented functions
+   - Refactor large modules and complexity hotspots
+
+**Key Findings**:
+
+**Self-Assessment Capability**:
+- Sibyl can now evaluate its own capabilities systematically
+- Identifies specific gaps (55 untested functions with names)
+- Provides actionable metrics for improvement tracking
+
+**Strategic Planning**:
+- improvement-plan analyzes self-assess output dynamically (not hardcoded)
+- Prioritization logic considers caller count, complexity, existing coverage
+- Risk/effect matrix helps humans make informed decisions
+- Timeframe categorization enables realistic planning
+
+**Integration Verified**:
+- self-assess → improvement-plan → /review workflow complete
+- Both tools return valid JSON parseable by yason
+- Suggestions format compatible with store-suggestions (plist)
+- Full autonomous self-evolution pipeline ready
+
+**Tool Synergy**:
+- self-assess provides data
+- improvement-plan interprets and prioritizes
+- suggest-improvements focuses on code-level issues
+- improvement-plan focuses on strategic capabilities
+
+### Acceptance Criteria Met
+**Task 6-1**:
+- [x] Self-assessment report generated
+- [x] Specific capabilities and limitations listed
+- [x] Codebase metrics included (though no persistent task logs yet)
+
+**Task 6-2**:
+- [x] Improvement plan generated with priorities
+- [x] Risk and effect assessments included
+- [x] Plan integrates with /review workflow
+
+### Status
+✅ **COMPLETE** - Phase 6 Tasks 6-1 & 6-2 complete.
+
+**Progress**: Tasks 6-1 & 6-2 complete (21/34 total tasks done, 62%)
+
+### Next Task
+- Task 6-3: Self-evolution demonstration (requires self-assess → improvement-plan → /review → implement cycle)
