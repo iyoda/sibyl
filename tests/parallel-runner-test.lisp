@@ -4,6 +4,23 @@
 
 (in-suite sibyl-tests)
 
+;;; ============================================================
+;;; Cross-package suite initialization
+;;;
+;;; suite.lisp is loaded FIRST (before sibyl.agent.tests and
+;;; sibyl.evolution.tests packages exist), so those cross-package
+;;; symbols cannot be included in the *safe-suites* defparameter.
+;;; This file is loaded LAST, so all packages are available here.
+;;; ============================================================
+
+(setf *safe-suites*
+      (append *safe-suites*
+              (list 'sibyl.agent.tests::agent-tests
+                    'sibyl.agent.tests::tdd-orchestration-tests
+                    'sibyl.agent.tests::run-hook-tests
+                    'sibyl.evolution.tests::evolution-state-tests
+                    'sibyl.evolution.tests::evolution-report-tests)))
+
 (def-suite parallel-runner-tests
   :description "Tests for the parallel test runner (run-tests-parallel)."
   :in sibyl-tests)
@@ -28,8 +45,10 @@
 
 (test parallel-safe-suites-defined
   "The *safe-suites* list contains expected suites."
-  (is (member 'sibyl.tests::evolution-state-tests sibyl.tests::*safe-suites*))
-  (is (member 'sibyl.tests::evolution-report-tests sibyl.tests::*safe-suites*))
+  ;; Note: these suites live in cross-package namespaces (sibyl.evolution.tests,
+  ;; sibyl.agent.tests) — check with the correct package-qualified symbols.
+  (is (member 'sibyl.evolution.tests::evolution-state-tests sibyl.tests::*safe-suites*))
+  (is (member 'sibyl.evolution.tests::evolution-report-tests sibyl.tests::*safe-suites*))
   (is (member 'sibyl.tests::read-sexp-tests sibyl.tests::*safe-suites*)))
 
 (test parallel-unsafe-suites-defined
