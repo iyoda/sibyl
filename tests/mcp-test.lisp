@@ -145,10 +145,10 @@
 
 (test mcp-tool-name-prefixed
   "MCP tool names are prefixed with server name."
-  (is (string= "exa:web_search_exa"
-                (sibyl.mcp::%mcp-tool-name "exa" "web_search_exa")))
-  (is (string= "github:search"
-                (sibyl.mcp::%mcp-tool-name "github" "search"))))
+  (is (string= "exa--web_search_exa"
+                 (sibyl.mcp::%mcp-tool-name "exa" "web_search_exa")))
+   (is (string= "github--search"
+                 (sibyl.mcp::%mcp-tool-name "github" "search"))))
 
 ;;; ============================================================
 ;;; MCP tool → Sibyl tool conversion
@@ -175,9 +175,9 @@
          (progn
            (sibyl.mcp::mcp-tool-to-sibyl-tool client "tsrv" mcp-tool)
            ;; Tool should be in registry with prefixed name
-           (let ((tool (sibyl.tools:find-tool "tsrv:my_search")))
-             (is (not (null tool)))
-             (is (string= "tsrv:my_search" (sibyl.tools:tool-name tool)))
+            (let ((tool (sibyl.tools:find-tool "tsrv--my_search")))
+              (is (not (null tool)))
+              (is (string= "tsrv--my_search" (sibyl.tools:tool-name tool)))
              (is (string= "Search something" (sibyl.tools:tool-description tool)))
              ;; Check parameters
              (let ((params (sibyl.tools:tool-parameters tool)))
@@ -185,7 +185,7 @@
                (is (string= "q" (getf (first params) :name)))
                (is (eq t (getf (first params) :required))))))
       ;; Cleanup
-      (sibyl.tools::unregister-tool "tsrv:my_search"))))
+       (sibyl.tools::unregister-tool "tsrv--my_search"))))
 
 ;;; ============================================================
 ;;; Server registry
@@ -212,15 +212,15 @@
 (test mcp-unregister-server-tools
   "unregister-mcp-server-tools removes only tools from the named server."
   (let ((tool-a (sibyl.tools::make-tool
-                 :name "srv1:tool-a"
+                 :name "srv1--tool-a"
                  :description "Tool A"
                  :handler (lambda (args) (declare (ignore args)) "a")))
         (tool-b (sibyl.tools::make-tool
-                 :name "srv1:tool-b"
+                 :name "srv1--tool-b"
                  :description "Tool B"
                  :handler (lambda (args) (declare (ignore args)) "b")))
         (tool-c (sibyl.tools::make-tool
-                 :name "srv2:tool-c"
+                 :name "srv2--tool-c"
                  :description "Tool C from different server"
                  :handler (lambda (args) (declare (ignore args)) "c"))))
     (unwind-protect
@@ -231,14 +231,14 @@
            ;; Remove only srv1 tools
            (let ((removed (sibyl.mcp:unregister-mcp-server-tools "srv1")))
              (is (= 2 removed))
-             (is (null (sibyl.tools:find-tool "srv1:tool-a")))
-             (is (null (sibyl.tools:find-tool "srv1:tool-b")))
+             (is (null (sibyl.tools:find-tool "srv1--tool-a")))
+             (is (null (sibyl.tools:find-tool "srv1--tool-b")))
              ;; srv2 tool should remain
-             (is (not (null (sibyl.tools:find-tool "srv2:tool-c"))))))
+             (is (not (null (sibyl.tools:find-tool "srv2--tool-c"))))))
       ;; Cleanup
-      (sibyl.tools::unregister-tool "srv1:tool-a")
-      (sibyl.tools::unregister-tool "srv1:tool-b")
-      (sibyl.tools::unregister-tool "srv2:tool-c"))))
+      (sibyl.tools::unregister-tool "srv1--tool-a")
+      (sibyl.tools::unregister-tool "srv1--tool-b")
+      (sibyl.tools::unregister-tool "srv2--tool-c"))))
 
 ;;; ============================================================
 ;;; Config parsing

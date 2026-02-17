@@ -31,8 +31,10 @@
 ;;; ============================================================
 
 (defun %mcp-tool-name (server-name tool-name)
-  "Build prefixed tool name: server-name:tool-name."
-  (format nil "~a:~a" server-name tool-name))
+  "Build prefixed tool name: server-name--tool-name.
+Uses double-hyphen as separator since Anthropic API requires names
+to match ^[a-zA-Z0-9_-]{1,128}$."
+  (format nil "~a--~a" server-name tool-name))
 
 (defun %json-schema-to-parameters (input-schema)
   "Convert a JSON Schema object to a list of Sibyl parameter specs.
@@ -113,7 +115,7 @@
 
 (defun unregister-mcp-server-tools (server-name)
   "Remove all tools from a specific MCP server from Sibyl's registry."
-  (let ((prefix (format nil "~a:" server-name))
+  (let ((prefix (format nil "~a--" server-name))
         (removed 0))
     (dolist (tool (sibyl.tools:list-tools))
       (when (and (>= (length (sibyl.tools:tool-name tool)) (length prefix))
