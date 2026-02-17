@@ -1367,3 +1367,103 @@ Sibyl can now:
 - Execute improvements with human approval
 
 **This concludes the Sibyl Self-Development Roadmap.**
+## [2026-02-17T14:17:28Z] suggest-improvements
+
+Scope: all
+
+Suggestions:
+- [high][test-coverage] Function "agent-reset" appears untested. (src/agent/core.lisp:204)
+  - Rationale: Function has 1 internal callers; missing tests increase regression risk.
+- [high][test-coverage] Function "make-memory" appears untested. (src/agent/memory.lisp:25)
+  - Rationale: Function has 1 internal callers; missing tests increase regression risk.
+- [medium][error-handling] Function "evolution-state-save" performs risky operations without error handling. (src/tools/lisp-tools.lisp:3462)
+  - Rationale: I/O and tool calls should handle failures to avoid cascading errors.
+- [medium][missing-docstrings] Function "(SETF CONFIG-VALUE)" lacks a docstring. (src/config.lisp:20)
+  - Rationale: Public functions should document intent for maintainability and self-analysis.
+- [medium][todo] TODO comment: (defun %suggest-improvements-todo-comments (files) (src/tools/lisp-tools.lisp:1503)
+  - Rationale: Outstanding TODOs should be triaged or resolved to reduce uncertainty.
+- [medium][todo] TODO comment: (or (search "todo" lower) (src/tools/lisp-tools.lisp:1517)
+  - Rationale: Outstanding TODOs should be triaged or resolved to reduce uncertainty.
+- [medium][todo] TODO comment: (search "fixme" lower)))) (src/tools/lisp-tools.lisp:1518)
+  - Rationale: Outstanding TODOs should be triaged or resolved to reduce uncertainty.
+
+## [2026-02-17T14:17:42Z] suggest-improvements
+
+Scope: all
+
+Suggestions:
+- [high][test-coverage] Function "agent-reset" appears untested. (src/agent/core.lisp:204)
+  - Rationale: Function has 1 internal callers; missing tests increase regression risk.
+- [high][test-coverage] Function "make-memory" appears untested. (src/agent/memory.lisp:25)
+  - Rationale: Function has 1 internal callers; missing tests increase regression risk.
+- [medium][error-handling] Function "evolution-state-save" performs risky operations without error handling. (src/tools/lisp-tools.lisp:3462)
+  - Rationale: I/O and tool calls should handle failures to avoid cascading errors.
+- [medium][missing-docstrings] Function "(SETF CONFIG-VALUE)" lacks a docstring. (src/config.lisp:20)
+  - Rationale: Public functions should document intent for maintainability and self-analysis.
+- [medium][todo] TODO comment: (defun %suggest-improvements-todo-comments (files) (src/tools/lisp-tools.lisp:1503)
+  - Rationale: Outstanding TODOs should be triaged or resolved to reduce uncertainty.
+- [medium][todo] TODO comment: (or (search "todo" lower) (src/tools/lisp-tools.lisp:1517)
+  - Rationale: Outstanding TODOs should be triaged or resolved to reduce uncertainty.
+- [medium][todo] TODO comment: (search "fixme" lower)))) (src/tools/lisp-tools.lisp:1518)
+  - Rationale: Outstanding TODOs should be triaged or resolved to reduce uncertainty.
+
+## [2026-02-17T14:19:50Z] suggest-improvements
+
+Scope: all
+
+Suggestions:
+- [high][test-coverage] Function "agent-reset" appears untested. (src/agent/core.lisp:204)
+  - Rationale: Function has 1 internal callers; missing tests increase regression risk.
+- [high][test-coverage] Function "make-memory" appears untested. (src/agent/memory.lisp:25)
+  - Rationale: Function has 1 internal callers; missing tests increase regression risk.
+- [medium][error-handling] Function "evolution-state-save" performs risky operations without error handling. (src/tools/lisp-tools.lisp:3462)
+  - Rationale: I/O and tool calls should handle failures to avoid cascading errors.
+- [medium][missing-docstrings] Function "(SETF CONFIG-VALUE)" lacks a docstring. (src/config.lisp:20)
+  - Rationale: Public functions should document intent for maintainability and self-analysis.
+- [medium][todo] TODO comment: (defun %suggest-improvements-todo-comments (files) (src/tools/lisp-tools.lisp:1503)
+  - Rationale: Outstanding TODOs should be triaged or resolved to reduce uncertainty.
+- [medium][todo] TODO comment: (or (search "todo" lower) (src/tools/lisp-tools.lisp:1517)
+  - Rationale: Outstanding TODOs should be triaged or resolved to reduce uncertainty.
+- [medium][todo] TODO comment: (search "fixme" lower)))) (src/tools/lisp-tools.lisp:1518)
+  - Rationale: Outstanding TODOs should be triaged or resolved to reduce uncertainty.
+
+## [2026-02-17T14:21:55Z] suggest-improvements
+
+Scope: all
+
+Suggestions:
+- [high][test-coverage] Function "agent-reset" appears untested. (src/agent/core.lisp:204)
+  - Rationale: Function has 1 internal callers; missing tests increase regression risk.
+- [high][test-coverage] Function "make-memory" appears untested. (src/agent/memory.lisp:25)
+  - Rationale: Function has 1 internal callers; missing tests increase regression risk.
+- [medium][error-handling] Function "evolution-state-save" performs risky operations without error handling. (src/tools/lisp-tools.lisp:3462)
+  - Rationale: I/O and tool calls should handle failures to avoid cascading errors.
+- [medium][missing-docstrings] Function "(SETF CONFIG-VALUE)" lacks a docstring. (src/config.lisp:20)
+  - Rationale: Public functions should document intent for maintainability and self-analysis.
+- [medium][todo] TODO comment: (defun %suggest-improvements-todo-comments (files) (src/tools/lisp-tools.lisp:1503)
+  - Rationale: Outstanding TODOs should be triaged or resolved to reduce uncertainty.
+- [medium][todo] TODO comment: (or (search "todo" lower) (src/tools/lisp-tools.lisp:1517)
+  - Rationale: Outstanding TODOs should be triaged or resolved to reduce uncertainty.
+- [medium][todo] TODO comment: (search "fixme" lower)))) (src/tools/lisp-tools.lisp:1518)
+  - Rationale: Outstanding TODOs should be triaged or resolved to reduce uncertainty.
+
+## [2026-02-17T14:24:01Z] suggest-improvements
+
+Scope: all
+
+Suggestions:
+- [high][test-coverage] Function "agent-reset" appears untested. (src/agent/core.lisp:204)
+  - Rationale: Function has 1 internal callers; missing tests increase regression risk.
+- [high][test-coverage] Function "make-memory" appears untested. (src/agent/memory.lisp:25)
+  - Rationale: Function has 1 internal callers; missing tests increase regression risk.
+- [medium][error-handling] Function "evolution-state-save" performs risky operations without error handling. (src/tools/lisp-tools.lisp:3462)
+  - Rationale: I/O and tool calls should handle failures to avoid cascading errors.
+- [medium][missing-docstrings] Function "(SETF CONFIG-VALUE)" lacks a docstring. (src/config.lisp:20)
+  - Rationale: Public functions should document intent for maintainability and self-analysis.
+- [medium][todo] TODO comment: (defun %suggest-improvements-todo-comments (files) (src/tools/lisp-tools.lisp:1503)
+  - Rationale: Outstanding TODOs should be triaged or resolved to reduce uncertainty.
+- [medium][todo] TODO comment: (or (search "todo" lower) (src/tools/lisp-tools.lisp:1517)
+  - Rationale: Outstanding TODOs should be triaged or resolved to reduce uncertainty.
+- [medium][todo] TODO comment: (search "fixme" lower)))) (src/tools/lisp-tools.lisp:1518)
+  - Rationale: Outstanding TODOs should be triaged or resolved to reduce uncertainty.
+
