@@ -1467,3 +1467,43 @@ Suggestions:
 - [medium][todo] TODO comment: (search "fixme" lower)))) (src/tools/lisp-tools.lisp:1518)
   - Rationale: Outstanding TODOs should be triaged or resolved to reduce uncertainty.
 
+## [2026-02-18T00:02:45Z] suggest-improvements
+
+Scope: all
+
+Suggestions:
+- [high][test-coverage] Function "agent-reset" appears untested. (src/agent/core.lisp:204)
+  - Rationale: Function has 1 internal callers; missing tests increase regression risk.
+- [high][test-coverage] Function "make-memory" appears untested. (src/agent/memory.lisp:25)
+  - Rationale: Function has 2 internal callers; missing tests increase regression risk.
+- [high][test-coverage] Tool "create-agent-team" lacks explicit test coverage. (src/tools/builtin.lisp:129)
+  - Rationale: User-facing tools should have regression tests to avoid behavioral drift.
+- [high][test-coverage] Tool "create-adaptive-agent-team" lacks explicit test coverage. (src/tools/builtin.lisp:165)
+  - Rationale: User-facing tools should have regression tests to avoid behavioral drift.
+- [high][test-coverage] Tool "delegate-task" lacks explicit test coverage. (src/tools/builtin.lisp:204)
+  - Rationale: User-facing tools should have regression tests to avoid behavioral drift.
+- [medium][error-handling] Function "save-plan" performs risky operations without error handling. (src/plan/core.lisp:198)
+  - Rationale: I/O and tool calls should handle failures to avoid cascading errors.
+- [medium][error-handling] Function "evolution-state-save" performs risky operations without error handling. (src/tools/lisp-tools.lisp:3524)
+  - Rationale: I/O and tool calls should handle failures to avoid cascading errors.
+- [medium][missing-docstrings] Function "(SETF CONFIG-VALUE)" lacks a docstring. (src/config.lisp:20)
+  - Rationale: Public functions should document intent for maintainability and self-analysis.
+- [medium][missing-docstrings] Function "print-object" lacks a docstring. (src/mcp/client.lisp:88)
+  - Rationale: Public functions should document intent for maintainability and self-analysis.
+- [medium][todo] TODO comment: (defun %suggest-improvements-todo-comments (files) (src/tools/lisp-tools.lisp:1535)
+  - Rationale: Outstanding TODOs should be triaged or resolved to reduce uncertainty.
+
+## [2026-02-18T00:06:07Z] suggest-improvements
+
+Scope: tools
+
+Suggestions:
+- [high][test-coverage] Tool "create-agent-team" lacks explicit test coverage. (src/tools/builtin.lisp:129)
+  - Rationale: User-facing tools should have regression tests to avoid behavioral drift.
+- [high][test-coverage] Tool "create-adaptive-agent-team" lacks explicit test coverage. (src/tools/builtin.lisp:165)
+  - Rationale: User-facing tools should have regression tests to avoid behavioral drift.
+- [high][test-coverage] Tool "delegate-task" lacks explicit test coverage. (src/tools/builtin.lisp:204)
+  - Rationale: User-facing tools should have regression tests to avoid behavioral drift.
+- [high][test-coverage] Function "parameter-to-json-schema" appears untested. (src/tools/protocol.lisp:94)
+  - Rationale: Function has 1 internal callers; missing tests increase regression risk.
+
