@@ -117,12 +117,38 @@
     (values system (nreverse api-msgs))))
 
 (defun tools-to-anthropic-format (tools)
-  "Convert tool schemas to Anthropic format."
-  (mapcar (lambda (tool-schema)
-            `(("name" . ,(getf tool-schema :name))
-              ("description" . ,(getf tool-schema :description))
-              ("input_schema" . ,(getf tool-schema :parameters))))
-          tools))
+  "Convert tool schemas to Anthropic format.
+When optimization.cache-enabled is set, adds cache_control ephemeral to the
+last tool so the entire tools prefix is cached by the Anthropic API."
+  (let ((formatted-tools
+          (mapcar (lambda (tool-schema)
+                    `(("name" . ,(getf tool-schema :name))
+                      ("description" . ,(getf tool-schema :description))
+                      ("input_schema" . ,(getf tool-schema :parameters))))
+                  tools)))
+    (when (and formatted-tools
+               (config-value "optimization.cache-enabled"))
+      (let* ((last-cons (last formatted-tools))
+             (with-cache (append (car last-cons)
+                                 '(("cache_control" . (("type" . "ephemeral")))))))
+        (setf (car last-cons) with-cache)))
+    formatted-tools))
+
+(defun add-cache-control-to-system (system)
+  "Add cache_control ephemeral to the first block of a system content list.
+The first block is the static system prompt; it is cache-stable and benefits
+most from prompt caching.  The second block (dynamic summary) is intentionally
+left unmarked because it changes after every compaction.
+Returns SYSTEM unchanged when caching is disabled or SYSTEM is not a list."
+  (if (and (listp system)
+           system
+           (config-value "optimization.cache-enabled"))
+      (let* ((first-block (first system))
+             (cached-first (append first-block
+                                   '(("cache_control" . (("type" . "ephemeral"))))))
+             (rest-blocks (rest system)))
+        (cons cached-first rest-blocks))
+      system))
 
 (defun parse-anthropic-response (response)
   "Parse Anthropic API response into a message struct.
@@ -207,7 +233,8 @@ Returns NIL when parsing fails."
 Returns a reconstructed assistant message."
   (multiple-value-bind (system api-messages)
       (messages-to-anthropic-format messages)
-    (let* ((body `(("model" . ,(client-model client))
+    (let* ((system-with-cache (add-cache-control-to-system system))
+           (body `(("model" . ,(client-model client))
                    ("max_tokens" . ,(client-max-tokens client))
                    ("temperature" . ,(client-temperature client))
                    ("messages" . ,api-messages)
@@ -215,8 +242,8 @@ Returns a reconstructed assistant message."
            (body-with-tools (if tools
                                 (append body `(("tools" . ,(tools-to-anthropic-format tools))))
                                 body))
-           (final-body (if system
-                           (append `(("system" . ,system)) body-with-tools)
+           (final-body (if system-with-cache
+                           (append `(("system" . ,system-with-cache)) body-with-tools)
                            body-with-tools))
            (text-parts nil)
            (thinking-parts nil)
@@ -317,12 +344,13 @@ Returns (values message usage-plist)."
       (complete-anthropic-streaming client messages nil)
       (multiple-value-bind (system api-messages)
           (messages-to-anthropic-format messages)
-        (let ((body `(("model" . ,(client-model client))
-                      ("max_tokens" . ,(client-max-tokens client))
-                      ("temperature" . ,(client-temperature client))
-                      ("messages" . ,api-messages))))
-          (when system
-            (push (cons "system" system) body))
+        (let* ((system-with-cache (add-cache-control-to-system system))
+               (body `(("model" . ,(client-model client))
+                       ("max_tokens" . ,(client-max-tokens client))
+                       ("temperature" . ,(client-temperature client))
+                       ("messages" . ,api-messages))))
+          (when system-with-cache
+            (push (cons "system" system-with-cache) body))
           (let ((response (http-post-json
                            (anthropic-messages-url client)
                            (anthropic-headers client)
@@ -340,13 +368,14 @@ Returns (values message usage-plist)."
       (complete-anthropic-streaming client messages tools)
       (multiple-value-bind (system api-messages)
           (messages-to-anthropic-format messages)
-        (let ((body `(("model" . ,(client-model client))
-                      ("max_tokens" . ,(client-max-tokens client))
-                      ("temperature" . ,(client-temperature client))
-                      ("messages" . ,api-messages)
-                      ("tools" . ,(tools-to-anthropic-format tools)))))
-          (when system
-            (push (cons "system" system) body))
+        (let* ((system-with-cache (add-cache-control-to-system system))
+               (body `(("model" . ,(client-model client))
+                       ("max_tokens" . ,(client-max-tokens client))
+                       ("temperature" . ,(client-temperature client))
+                       ("messages" . ,api-messages)
+                       ("tools" . ,(tools-to-anthropic-format tools)))))
+          (when system-with-cache
+            (push (cons "system" system-with-cache) body))
           (let ((response (http-post-json
                            (anthropic-messages-url client)
                            (anthropic-headers client)

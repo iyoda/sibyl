@@ -148,3 +148,47 @@
         (is (string= "Static prompt" (cdr (assoc "text" (first content) :test #'string=))))
         ;; Second block: summary
         (is (search "Previous summary text" (cdr (assoc "text" (second content) :test #'string=))))))))
+
+;; Test 11: tools-to-anthropic-format adds cache_control to last tool
+(test tools-to-anthropic-format-adds-cache-control
+  "The last tool in tools-to-anthropic-format has cache_control ephemeral"
+  (unwind-protect
+      (progn
+        (sibyl::config-set "optimization.cache-enabled" t)
+        (let* ((tools (list (list :name "tool-a" :description "First tool"
+                                  :parameters '(("type" . "object") ("properties" . nil) ("required" . nil)))
+                            (list :name "tool-b" :description "Last tool"
+                                  :parameters '(("type" . "object") ("properties" . nil) ("required" . nil)))))
+               (formatted (sibyl.llm::tools-to-anthropic-format tools)))
+          ;; Last tool should have cache_control
+          (let ((last-tool (car (last formatted))))
+            (is (not (null (assoc "cache_control" last-tool :test #'string=))))
+            (let ((cc (cdr (assoc "cache_control" last-tool :test #'string=))))
+              (is (string= "ephemeral" (cdr (assoc "type" cc :test #'string=))))))))
+    ;; Cleanup
+    (sibyl::config-set "optimization.cache-enabled" nil)))
+
+;; Test 12: first tool does NOT have cache_control
+(test tools-only-last-tool-has-cache-control
+  "Only the last tool has cache_control, not others"
+  (unwind-protect
+      (progn
+        (sibyl::config-set "optimization.cache-enabled" t)
+        (let* ((tools (list (list :name "tool-a" :description "First"
+                                  :parameters '(("type" . "object") ("properties" . nil) ("required" . nil)))
+                            (list :name "tool-b" :description "Second"
+                                  :parameters '(("type" . "object") ("properties" . nil) ("required" . nil)))))
+               (formatted (sibyl.llm::tools-to-anthropic-format tools)))
+          (let ((first-tool (first formatted)))
+            (is (null (assoc "cache_control" first-tool :test #'string=))))))
+    (sibyl::config-set "optimization.cache-enabled" nil)))
+
+;; Test 13: cache disabled → no cache_control anywhere
+(test tools-no-cache-control-when-disabled
+  "No cache_control in tool schemas when optimization.cache-enabled is nil"
+  (sibyl::config-set "optimization.cache-enabled" nil)
+  (let* ((tools (list (list :name "tool-a" :description "First"
+                             :parameters '(("type" . "object") ("properties" . nil) ("required" . nil)))))
+         (formatted (sibyl.llm::tools-to-anthropic-format tools)))
+    (let ((last-tool (car (last formatted))))
+      (is (null (assoc "cache_control" last-tool :test #'string=))))))

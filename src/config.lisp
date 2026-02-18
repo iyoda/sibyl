@@ -29,6 +29,11 @@ Returns VALUE.
 Side effects: Modifies the global *config* hash table."
   (setf (gethash key *config*) value))
 
+(defun config-set (key value)
+  "Set KEY to VALUE in the configuration store.
+Convenience function equivalent to (setf (config-value KEY) VALUE)."
+  (setf (config-value key) value))
+
 ;;; ============================================================
 ;;; Environment variable loading
 ;;; ============================================================
@@ -94,8 +99,10 @@ Side effects: Modifies the global *config* hash table."
                     ("agent.max-steps"          . 50)
                     ("agent.name"               . "Sibyl")
                     ("log.level"                . "info")
-                    ;; MCP server defaults
-                    ("mcp.servers.exa.url"      . "https://mcp.exa.ai/mcp"))))
+                     ;; MCP server defaults
+                     ("mcp.servers.exa.url"      . "https://mcp.exa.ai/mcp")
+                     ;; Optimization defaults
+                     ("optimization.cache-enabled" . t))))
     (dolist (pair defaults)
       (unless (config-value (car pair))
         (setf (config-value (car pair)) (cdr pair))))))

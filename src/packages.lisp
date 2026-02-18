@@ -44,6 +44,7 @@
    #:*default-config-path*
    #:load-config
    #:config-value
+   #:config-set
    #:with-config))
 
 (defpackage #:sibyl.util
@@ -367,7 +368,7 @@
 (defpackage #:sibyl
   (:use #:cl)
   (:import-from #:sibyl.config
-                #:load-config #:config-value #:with-config)
+                #:load-config #:config-value #:config-set #:with-config)
   (:import-from #:sibyl.llm
                 #:make-anthropic-client #:make-openai-client)
   (:import-from #:sibyl.tools
@@ -384,6 +385,7 @@
    ;; Top-level API
    #:load-config
    #:config-value
+   #:config-set
    #:with-config
    #:make-anthropic-client
    #:make-openai-client
