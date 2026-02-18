@@ -1,9 +1,9 @@
 {
-  "active_plan": "/Users/iyoda/Projects/atikoro/sibyl/.sisyphus/plans/rich-repl.md",
-  "started_at": "2026-02-17T10:42:39.587Z",
+  "active_plan": "/Users/iyoda/Projects/atikoro/sibyl/.sisyphus/plans/parallel-tests.md",
+  "started_at": "2026-02-18T02:49:11.736Z",
   "session_ids": [
-    "ses_3954c162bffeQlfSjVgjT9e4lr"
+    "ses_391b42115ffepcYw1aMu8CHN05"
   ],
-  "plan_name": "rich-repl",
+  "plan_name": "parallel-tests",
   "agent": "atlas"
 }

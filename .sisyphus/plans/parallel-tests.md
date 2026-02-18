@@ -68,10 +68,10 @@
 - `sibyl.asd` — 新テストファイル登録
 
 ### Definition of Done
-- [ ] `(time (fiveam:run! 'sibyl.tests:sibyl-tests))` → 15秒以下
-- [ ] `(sibyl.tests:run-tests-parallel)` → 全テスト合格、15秒以下
-- [ ] 全既存テストがパス（1040 checks, 0 failures）
-- [ ] `wc -l tests/sexp-tools-test.lisp` → 3710行以下
+- [x] `(time (fiveam:run! 'sibyl.tests:sibyl-tests))` → 15秒以下（実測: 8.79s）
+- [x] `(sibyl.tests:run-tests-parallel)` → 全テスト合格、15秒以下（実測: 12.92s）
+- [x] 全既存テストがパス（1094 checks, 0 failures）
+- [x] `wc -l tests/sexp-tools-test.lisp` → 3710行以下
 
 ### Must Have
 - テスト結果が順次実行と完全に一致すること

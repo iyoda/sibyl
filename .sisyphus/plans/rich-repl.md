@@ -1034,7 +1034,7 @@ Parallel Speedup: ~35% faster than sequential
 
 ---
 
-- [ ] 10. Add Anthropic streaming provider
+- [x] 10. Add Anthropic streaming provider
 
   **What to do**:
   - Add streaming variants of `complete` and `complete-with-tools` for Anthropic client in `src/llm/providers.lisp`

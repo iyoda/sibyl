@@ -156,3 +156,31 @@
 
 ### Test Results
 - 1534 checks, 0 failures (14 new checks from 4 new category tests)
+
+## [2026-02-18] Task 5: LLM-Based Conversation Compaction — COMPLETED
+
+### What Was Implemented
+- `src/agent/memory.lisp`:
+  - `memory` class: added `compaction-strategy` slot (`:initform :llm`) and `compaction-client` slot (`:initform nil`)
+  - `max-messages` default: 100 → 50
+  - `make-memory`: new signature `(&key (max-messages 50) (compaction-strategy :llm))`
+  - `simple-compaction-summary`: extracted named helper (same logic as old inline format nil)
+  - `memory-compact` rewritten: dispatches on `memory-compaction-strategy`
+    - `:llm` + client present → calls `complete` with a summarization prompt (handles `(values msg usage)` via `multiple-value-bind`)
+    - `:llm` + no client → falls back to `simple-compaction-summary`
+    - `:simple` → always `simple-compaction-summary`
+    - LLM errors → `warn` + fallback to `simple-compaction-summary`
+- `src/agent/core.lisp`:
+  - `make-agent`: `max-memory-messages` default 100 → 50; propagates client to `memory-compaction-client` after construction
+- `src/packages.lisp`: exported `memory-max-messages`, `memory-compaction-strategy`, `memory-compaction-client`
+- `tests/token-tracking-test.lisp`: 3 new tests in `memory-compaction-suite`
+
+### Key Design Decisions
+- Tests use `:compaction-strategy :simple` or `:llm` WITHOUT a client → no real API calls in tests
+- Fallback chain: `:llm` + no-client → `:simple` (graceful degradation)
+- `(values message usage)` from `complete` handled with `(declare (ignore usage))` — usage not tracked for compaction calls (compaction is overhead, not user-turn cost)
+- `simple-compaction-summary` is a plain `defun` (not a method) — called from both branches
+
+### Results
+- 1539 checks, 0 failures (5 new checks from 3 new tests)
+- Sanity: `max-messages: 50, strategy: LLM` ✓
