@@ -51,7 +51,7 @@
 (test make-ollama-client-defaults
   "make-ollama-client returns correct default model, base-url and api-key"
   (let ((c (sibyl:make-ollama-client)))
-    (is (string= "qwen3-coder:30b"       (sibyl.llm::client-model    c)))
+    (is (string= "glm-4.7-flash:q8_0"    (sibyl.llm::client-model    c)))
     (is (string= "http://localhost:11434" (sibyl.llm::client-base-url c)))
     (is (string= ""                       (sibyl.llm::client-api-key  c)))))
 
@@ -518,3 +518,219 @@
       (is (string= "The answer." (sibyl.llm::message-content parsed-msg)))
       (is (string= "inline reasoning"
                     (sibyl.llm::message-thinking parsed-msg))))))
+
+;;; ============================================================
+;;; gpt-oss model profile tests
+;;; ============================================================
+
+(test lookup-model-profile-gpt-oss
+  "lookup-model-profile returns gpt-oss profile for 'gpt-oss:120b'"
+  (let ((profile (sibyl.llm::lookup-model-profile "gpt-oss:120b")))
+    (is (not (null profile)))
+    (is (= 1.0 (getf profile :temperature)))
+    (is (= 131072 (getf profile :num-ctx)))
+    (is (= 8192 (getf profile :num-predict)))
+    (is (eq t (getf profile :large-model)))
+    (is (= 600 (getf profile :load-timeout)))))
+
+(test lookup-model-profile-gpt-oss-variant
+  "lookup-model-profile matches gpt-oss prefix for any variant"
+  (let ((profile (sibyl.llm::lookup-model-profile "gpt-oss:7b-q4")))
+    (is (not (null profile)))
+    (is (eq t (getf profile :large-model)))))
+
+;;; ============================================================
+;;; keep_alive model-size-aware tests
+;;; ============================================================
+
+(test keep-alive-large-model-returns-minus-one
+  "Large models (gpt-oss) default to keep_alive -1 (never unload)"
+  (sibyl.config:with-config ()
+    ;; Clear any config override so profile default is used
+    (remhash "ollama.keep-alive" sibyl.config:*config*)
+    (let ((result (sibyl.llm::%ollama-keep-alive "gpt-oss:120b")))
+      (is (eql -1 result)))))
+
+(test keep-alive-small-model-returns-30m
+  "Small models fall back to 30m default"
+  (sibyl.config:with-config ()
+    (remhash "ollama.keep-alive" sibyl.config:*config*)
+    (let ((result (sibyl.llm::%ollama-keep-alive "llama3:8b")))
+      (is (string= "30m" result)))))
+
+(test keep-alive-config-overrides-profile
+  "Config ollama.keep-alive overrides profile-based default"
+  (sibyl.config:with-config ()
+    (setf (sibyl.config:config-value "ollama.keep-alive") "1h")
+    (let ((result (sibyl.llm::%ollama-keep-alive "gpt-oss:120b")))
+      (is (string= "1h" result)))))
+
+;;; ============================================================
+;;; HTTP timeout calculation tests
+;;; ============================================================
+
+(test ollama-read-timeout-large-model
+  "Large models use :load-timeout from profile for read timeout"
+  (let* ((c (sibyl:make-ollama-client :model "gpt-oss:120b"))
+         (timeout (sibyl.llm::%ollama-read-timeout c)))
+    (is (= 600 timeout))))
+
+(test ollama-read-timeout-small-model
+  "Small models use nil (global default) for read timeout"
+  (let* ((c (sibyl:make-ollama-client :model "llama3:8b"))
+         (timeout (sibyl.llm::%ollama-read-timeout c)))
+    (is (null timeout))))
+
+;;; ============================================================
+;;; load_duration monitoring tests
+;;; ============================================================
+
+(test parse-ollama-response-with-load-duration
+  "parse-ollama-response extracts load_duration into usage plist"
+  (let ((ht  (make-hash-table :test 'equal))
+        (msg (make-hash-table :test 'equal)))
+    (setf (gethash "role"    msg) "assistant")
+    (setf (gethash "content" msg) "Hello")
+    (setf (gethash "message"          ht) msg)
+    (setf (gethash "done"             ht) t)
+    (setf (gethash "prompt_eval_count" ht) 10)
+    (setf (gethash "eval_count"        ht) 5)
+    ;; 500ms load, 2s total, 1.5s eval (in nanoseconds)
+    (setf (gethash "load_duration"     ht) 500000000)
+    (setf (gethash "total_duration"    ht) 2000000000)
+    (setf (gethash "eval_duration"     ht) 1500000000)
+    (multiple-value-bind (parsed-msg usage)
+        (sibyl.llm::parse-ollama-response ht)
+      (declare (ignore parsed-msg))
+      (is (= 500 (getf usage :load-duration-ms)))
+      (is (= 2000 (getf usage :total-duration-ms)))
+      (is (= 1500 (getf usage :eval-duration-ms))))))
+
+(test parse-ollama-response-cold-load-detection
+  "parse-ollama-response logs warning for cold loads (>1s load_duration)"
+  (let ((ht  (make-hash-table :test 'equal))
+        (msg (make-hash-table :test 'equal)))
+    (setf (gethash "role"    msg) "assistant")
+    (setf (gethash "content" msg) "Hello")
+    (setf (gethash "message"          ht) msg)
+    (setf (gethash "done"             ht) t)
+    (setf (gethash "prompt_eval_count" ht) 10)
+    (setf (gethash "eval_count"        ht) 5)
+    ;; 30s cold load (in nanoseconds)
+    (setf (gethash "load_duration"     ht) 30000000000)
+    (setf (gethash "total_duration"    ht) 35000000000)
+    ;; Should not error — just logs
+    (multiple-value-bind (parsed-msg usage)
+        (sibyl.llm::parse-ollama-response ht)
+      (declare (ignore parsed-msg))
+      (is (= 30000 (getf usage :load-duration-ms))))))
+
+;;; ============================================================
+;;; Retry logic tests
+;;; ============================================================
+
+(test call-with-retry-success-on-first-try
+  "call-with-retry returns value on first success"
+  (let ((call-count 0))
+    (is (= 42 (sibyl.llm::call-with-retry
+               (lambda ()
+                 (incf call-count)
+                 42)
+               :max-retries 3
+               :description "test")))
+    (is (= 1 call-count))))
+
+(test call-with-retry-non-retryable-error-propagates
+  "call-with-retry propagates non-retryable errors immediately"
+  (let ((call-count 0))
+    (signals sibyl.conditions:llm-api-error
+      (sibyl.llm::call-with-retry
+       (lambda ()
+         (incf call-count)
+         (error 'sibyl.conditions:llm-api-error
+                :message "Not found"
+                :status-code 404))
+       :max-retries 3
+       :base-delay 0.01
+       :description "test"))
+    ;; Should only be called once (404 is not retryable)
+    (is (= 1 call-count))))
+
+(test call-with-retry-retries-on-transient-error
+  "call-with-retry retries on 500 errors then succeeds"
+  (let ((call-count 0))
+    (is (= 99 (sibyl.llm::call-with-retry
+               (lambda ()
+                 (incf call-count)
+                 (if (<= call-count 2)
+                     (error 'sibyl.conditions:llm-api-error
+                            :message "Server error"
+                            :status-code 500)
+                     99))
+               :max-retries 3
+               :base-delay 0.01
+               :description "test")))
+    (is (= 3 call-count))))
+
+;;; ============================================================
+;;; make-ollama-client gpt-oss defaults test
+;;; ============================================================
+
+(test make-ollama-client-gpt-oss-profile
+  "make-ollama-client uses gpt-oss profile for temperature"
+  (let ((c (sibyl:make-ollama-client :model "gpt-oss:120b")))
+    (is (= 1.0 (sibyl.llm::client-temperature c)))
+    (is (= 8192 (sibyl.llm::client-max-tokens c)))))
+
+;;; ============================================================
+;;; Model selector — Ollama provider integration
+;;; ============================================================
+
+(test create-client-for-model-ollama-provider
+  "create-client-for-model creates an ollama-client for :ollama provider"
+  (let* ((config (make-instance 'sibyl.llm::model-config
+                                :provider :ollama
+                                :model-name "gpt-oss:120b"
+                                :max-tokens 8192
+                                :temperature 1.0))
+         (client (sibyl.llm::create-client-for-model config)))
+    (is (typep client 'sibyl.llm::ollama-client))
+    (is (string= "gpt-oss:120b" (sibyl.llm::client-model client)))
+    (is (= 8192 (sibyl.llm::client-max-tokens client)))))
+
+(test latest-model-tiers-include-ollama
+  "latest-model-tiers heavy tier includes an Ollama gpt-oss model"
+  (let* ((heavy (find "heavy" sibyl.llm::*latest-model-tiers*
+                       :key #'sibyl.llm::tier-name :test #'string=))
+         (models (sibyl.llm::tier-models heavy))
+         (ollama-model (find :ollama models :key #'sibyl.llm::model-provider)))
+    (is (not (null ollama-model)))
+    (is (string= "gpt-oss:120b" (sibyl.llm::model-name ollama-model)))))
+
+;;; ============================================================
+;;; Native think API integration tests
+;;; ============================================================
+
+(test gpt-oss-profile-has-think-api
+  "gpt-oss profile includes :think-api :think for native Ollama think API"
+  (let ((profile (sibyl.llm::lookup-model-profile "gpt-oss:120b")))
+    (is (eq :think (getf profile :think-api)))))
+
+(test build-request-includes-think-for-gpt-oss
+  "build-ollama-request adds top-level think field for gpt-oss"
+  (let* ((c (sibyl:make-ollama-client :model "gpt-oss:120b"))
+         (msgs (list (sibyl.llm::user-message "Hello")))
+         (body (sibyl.llm::build-ollama-request c msgs)))
+    ;; "think" key should be present with value T
+    (let ((think-pair (assoc "think" body :test #'string=)))
+      (is (not (null think-pair)))
+      (is (eq t (cdr think-pair))))))
+
+(test build-request-no-think-for-non-thinking-model
+  "build-ollama-request omits think field for models without :think-api"
+  (let* ((c (sibyl:make-ollama-client :model "glm-4.7-flash:q8_0"))
+         (msgs (list (sibyl.llm::user-message "Hello")))
+         (body (sibyl.llm::build-ollama-request c msgs)))
+    ;; "think" key should NOT be present
+    (let ((think-pair (assoc "think" body :test #'string=)))
+      (is (null think-pair)))))

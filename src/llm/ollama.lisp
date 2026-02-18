@@ -64,6 +64,22 @@
      :system-prompt-hint nil
      :description "Meta Llama 3: general-purpose instruction model")
 
+    ("gpt-oss"
+     :temperature 1.0              ; model default per `ollama show`
+     :top-p 0.9
+     :top-k 40
+     :repeat-penalty 1.05
+     :min-p 0.0
+     :num-ctx 131072               ; 128K context window
+     :num-predict 8192
+     :thinking t                   ; supports thinking (via native API)
+     :think-api :think             ; use Ollama native think API ("think": true in request)
+                                   ; response returns thinking in message.thinking field
+     :large-model t                ; signals special timeout/keep-alive handling
+     :load-timeout 600             ; 10 min timeout for initial model load (116.8B MXFP4)
+     :system-prompt-hint "You are a coding assistant with strong reasoning abilities. Be precise and concise."
+     :description "GPT-OSS 116.8B (MXFP4): large model with native thinking + tool-calling, 128K context")
+
     ;; Default fallback profile (MUST be last)
     ("*default*"
      :temperature 0.0
@@ -177,6 +193,96 @@ Returns a plist of detected capabilities:
                                (search ".Tools" template))
                            t)
          :parameter-size (when details (gethash "parameter_size" details)))))))
+
+;;; ============================================================
+;;; Server state & health API
+;;; ============================================================
+
+(defun ollama-server-reachable-p (client)
+  "Return T if the Ollama server responds to a basic GET /api/tags request.
+Useful as a pre-flight check before inference or pre-warming.
+Uses a short 5-second connect timeout."
+  (handler-case
+      (progn
+        (dex:get (ollama-api-url client "/api/tags")
+                 :connect-timeout 5
+                 :read-timeout 5)
+        t)
+    (error ()
+      nil)))
+
+(defun ollama-running-models (client)
+  "Query Ollama GET /api/ps to list models currently loaded in VRAM.
+Returns a list of alists, each with keys:
+  \"name\"      — model name string
+  \"size\"      — total size in bytes
+  \"size_vram\" — VRAM size in bytes
+  \"expires_at\" — expiration timestamp string
+Returns NIL on failure (non-fatal)."
+  (handler-case
+      (let* ((response-body (dex:get (ollama-api-url client "/api/ps")
+                                     :connect-timeout 5
+                                     :read-timeout 10))
+             (parsed (yason:parse response-body :object-as :hash-table))
+             (raw-models (gethash "models" parsed)))
+        (when raw-models
+          (let ((models (if (vectorp raw-models)
+                            (coerce raw-models 'list)
+                            raw-models)))
+            (mapcar (lambda (m)
+                      (list (cons "name"       (gethash "name" m))
+                            (cons "size"       (gethash "size" m))
+                            (cons "size_vram"  (gethash "size_vram" m))
+                            (cons "expires_at" (gethash "expires_at" m))))
+                    models))))
+    (error (e)
+      (log-debug "llm" "Ollama /api/ps failed (non-fatal): ~a" e)
+      nil)))
+
+(defun ollama-model-loaded-p (client &optional (model-name nil))
+  "Return T if MODEL-NAME (or client's model) is currently loaded in VRAM.
+Uses /api/ps to check running models without triggering a model load."
+  (let* ((target (or model-name (client-model client)))
+         (models (ollama-running-models client)))
+    (when models
+      (some (lambda (m)
+              (let ((name (cdr (assoc "name" m :test #'string=))))
+                (and name (string= name target))))
+            models))))
+
+(defun ollama-model-exists-p (client &optional (model-name nil))
+  "Return T if MODEL-NAME (or client's model) is available locally.
+Uses /api/show which returns metadata WITHOUT loading the model into VRAM."
+  (handler-case
+      (let* ((target (or model-name (client-model client)))
+             (body `(("model" . ,target)))
+             (response (http-post-json (ollama-api-url client "/api/show")
+                                       '() body
+                                       :connect-timeout 5
+                                       :read-timeout 10)))
+        (declare (ignore response))
+        t)
+    (error ()
+      nil)))
+
+(defun ollama-health-check (client)
+  "Comprehensive health check for Ollama server + model availability.
+Returns a plist:
+  :server-up   — T if Ollama server responds
+  :model-exists — T if the configured model is available locally
+  :model-loaded — T if the model is currently in VRAM
+  :capabilities — plist from detect-model-capabilities, or NIL"
+  (let ((server-up (ollama-server-reachable-p client)))
+    (if (not server-up)
+        (list :server-up nil :model-exists nil :model-loaded nil :capabilities nil)
+        (let ((model-exists (ollama-model-exists-p client))
+              (model-loaded (ollama-model-loaded-p client))
+              (caps (when (ollama-model-exists-p client)
+                      (detect-model-capabilities client))))
+          (list :server-up t
+                :model-exists model-exists
+                :model-loaded model-loaded
+                :capabilities caps)))))
 
 ;;; ============================================================
 ;;; Message format conversion
@@ -319,8 +425,25 @@ Supports two thinking modes:
                           (parse-ollama-tool-calls raw-tcs)))
          (prompt-tokens (gethash "prompt_eval_count" response))
          (output-tokens (gethash "eval_count" response))
+         ;; Duration metrics (nanoseconds from Ollama)
+         (load-duration-ns  (gethash "load_duration" response))
+         (total-duration-ns (gethash "total_duration" response))
+         (eval-duration-ns  (gethash "eval_duration" response))
+         (done-reason       (gethash "done_reason" response))
          (usage-plist   (list :input-tokens  (or prompt-tokens 0)
-                              :output-tokens (or output-tokens 0))))
+                              :output-tokens (or output-tokens 0)
+                              :load-duration-ms (when load-duration-ns
+                                                  (round load-duration-ns 1000000))
+                              :total-duration-ms (when total-duration-ns
+                                                   (round total-duration-ns 1000000))
+                              :eval-duration-ms (when eval-duration-ns
+                                                  (round eval-duration-ns 1000000)))))
+    ;; Log load duration — detect cold loads (>1s load time)
+    (when (and load-duration-ns (> load-duration-ns 1000000000))
+      (log-warn "llm" "Ollama cold load detected: ~,1fs (total: ~,1fs, reason: ~a)"
+                (/ load-duration-ns 1.0d9)
+                (if total-duration-ns (/ total-duration-ns 1.0d9) 0)
+                (or done-reason "unknown")))
     ;; Two thinking paths:
     ;; 1. If native thinking field is present (Ollama think API), use it directly
     ;; 2. Otherwise, extract inline <think> tags from content
@@ -351,10 +474,17 @@ Supports two thinking modes:
 ;;; Request body builder (shared by streaming and non-streaming)
 ;;; ============================================================
 
-(defun %ollama-keep-alive ()
-  "Return the keep_alive value from config, defaulting to \"30m\".
-Keeps the model loaded in VRAM between requests to avoid reload latency."
-  (or (config-value "ollama.keep-alive") "30m"))
+(defun %ollama-keep-alive (&optional model-name)
+  "Return the keep_alive value for a model.
+Large models (profile :large-model t) default to -1 (never unload)
+to avoid costly reload cycles. Small models default to 30m.
+Config key ollama.keep-alive overrides the profile-based default."
+  (or (config-value "ollama.keep-alive")
+      (when model-name
+        (let ((profile (lookup-model-profile model-name)))
+          (when (getf profile :large-model)
+            -1)))                          ; never unload large models
+      "30m"))
 
 (defun %parse-number (val)
   "Parse VAL as a number. Handles strings (both integer and float),
@@ -405,11 +535,11 @@ that support Ollama's native thinking (e.g. GLM-4)."
                          ("num_predict" . ,(client-max-tokens client))))
          (extra-options (%ollama-extra-options profile))
          (all-options (append base-options extra-options))
-         (body `(("model"      . ,(client-model client))
-                 ("messages"   . ,api-messages)
-                 ("stream"     . ,(if stream t yason:false))
-                 ("keep_alive" . ,(%ollama-keep-alive))
-                 ("options"    . ,all-options))))
+          (body `(("model"      . ,(client-model client))
+                  ("messages"   . ,api-messages)
+                  ("stream"     . ,(if stream t yason:false))
+                  ("keep_alive" . ,(%ollama-keep-alive (client-model client)))
+                  ("options"    . ,all-options))))
     ;; Add think API field for models that use Ollama's native thinking
     ;; (e.g. GLM-4 uses top-level "think": true/false in the request body,
     ;;  NOT the options sub-object).
@@ -483,27 +613,41 @@ and inline <think> tags in content."
      body
      ;; on-chunk: called for each NDJSON line
      (lambda (chunk)
-       (let* ((msg-obj  (gethash "message" chunk))
-              (text     (and msg-obj (gethash "content" msg-obj)))
-              (thinking (and msg-obj (gethash "thinking" msg-obj)))
-              (done     (gethash "done" chunk)))
-         ;; Collect native thinking tokens (Ollama think API)
-         (when (and thinking (stringp thinking) (not (string= thinking "")))
-           (push thinking thinking-chunks))
-         ;; Collect and stream content tokens
-         (when (and text (not (string= text "")))
-           (push text content-chunks)
-           (when *streaming-text-callback*
-             (funcall *streaming-text-callback* text)))
-         (when done
-           ;; Tool calls arrive in the final (done=true) chunk
-           (let ((tc (and msg-obj (gethash "tool_calls" msg-obj))))
-             (when tc (setf tool-calls-raw tc)))
-           (setf final-usage
-                 (list :input-tokens  (or (gethash "prompt_eval_count" chunk) 0)
-                       :output-tokens (or (gethash "eval_count" chunk) 0))))))
+        (let* ((msg-obj  (gethash "message" chunk))
+               (text     (and msg-obj (gethash "content" msg-obj)))
+               (thinking (and msg-obj (gethash "thinking" msg-obj)))
+               (done     (gethash "done" chunk)))
+          ;; Collect native thinking tokens (Ollama think API)
+          (when (and thinking (stringp thinking) (not (string= thinking "")))
+            (push thinking thinking-chunks))
+          ;; Collect and stream content tokens
+          (when (and text (not (string= text "")))
+            (push text content-chunks)
+            (when *streaming-text-callback*
+              (funcall *streaming-text-callback* text)))
+          (when done
+            ;; Tool calls arrive in the final (done=true) chunk
+            (let ((tc (and msg-obj (gethash "tool_calls" msg-obj))))
+              (when tc (setf tool-calls-raw tc)))
+            ;; Extract duration metrics from final chunk
+            (let ((load-ns (gethash "load_duration" chunk))
+                  (total-ns (gethash "total_duration" chunk))
+                  (eval-ns (gethash "eval_duration" chunk)))
+              (when (and load-ns (> load-ns 1000000000))
+                (log-warn "llm" "Ollama streaming cold load: ~,1fs"
+                          (/ load-ns 1.0d9)))
+              (setf final-usage
+                    (list :input-tokens  (or (gethash "prompt_eval_count" chunk) 0)
+                          :output-tokens (or (gethash "eval_count" chunk) 0)
+                          :load-duration-ms (when load-ns
+                                              (round load-ns 1000000))
+                          :total-duration-ms (when total-ns
+                                               (round total-ns 1000000))
+                          :eval-duration-ms (when eval-ns
+                                              (round eval-ns 1000000))))))))
      ;; on-done: http-post-ndjson-stream is synchronous; fires last
-     (lambda () nil))
+     (lambda () nil)
+     :read-timeout (%ollama-read-timeout client))
     ;; After stream ends — assemble thinking and content
     (let* ((has-native-thinking (not (null thinking-chunks)))
            (full-content (format nil "~{~a~}" (nreverse content-chunks)))
@@ -537,49 +681,58 @@ and inline <think> tags in content."
 ;;; CLOS methods
 ;;; ============================================================
 
+(defun %ollama-read-timeout (client)
+  "Compute read timeout for an Ollama request.
+Large models (profile :large-model t) use :load-timeout from profile;
+others use the global default."
+  (let* ((profile (lookup-model-profile (client-model client)))
+         (large-p (getf profile :large-model))
+         (load-timeout (getf profile :load-timeout)))
+    (if (and large-p load-timeout)
+        load-timeout
+        nil)))                            ; nil → use global default
+
 (defmethod complete ((client ollama-client) messages &key)
   "Send messages to the local Ollama server.
-Returns (values message usage-plist)."
+Returns (values message usage-plist).
+Uses retry with exponential backoff for transient failures."
   (log-info "llm" "Ollama complete (model: ~a, streaming: ~a)"
             (client-model client)
             (if *streaming-text-callback* "yes" "no"))
   (if *streaming-text-callback*
       (complete-ollama-streaming client messages)
-      (handler-case
-          (let* ((body     (build-ollama-request client messages :stream nil))
-                 (response (http-post-json
-                            (ollama-api-url client "/api/chat")
-                            '()                 ; no auth headers
-                            body)))
-            (parse-ollama-response response))
-        (error (e)
-          (error 'llm-api-error
-                 :message (format nil
-                                  "Cannot connect to Ollama at ~a: ~a"
-                                  (client-base-url client) e))))))
+      (call-with-retry
+       (lambda ()
+         (let* ((body     (build-ollama-request client messages :stream nil))
+                (response (http-post-json
+                           (ollama-api-url client "/api/chat")
+                           '()                 ; no auth headers
+                           body
+                           :read-timeout (%ollama-read-timeout client))))
+           (parse-ollama-response response)))
+       :description (format nil "Ollama /api/chat (~a)" (client-model client)))))
 
 (defmethod complete-with-tools ((client ollama-client) messages tools &key)
   "Send messages with tool schemas to the local Ollama server.
-Returns (values message usage-plist)."
+Returns (values message usage-plist).
+Uses retry with exponential backoff for transient failures."
   (log-info "llm" "Ollama complete-with-tools (model: ~a, tools: ~a, streaming: ~a)"
             (client-model client)
             (length tools)
             (if *streaming-text-callback* "yes" "no"))
   (if *streaming-text-callback*
       (complete-ollama-streaming client messages :tools tools)
-      (handler-case
-          (let* ((body     (build-ollama-request client messages
-                                                 :tools tools :stream nil))
-                 (response (http-post-json
-                            (ollama-api-url client "/api/chat")
-                            '()                 ; no auth headers
-                            body)))
-            (parse-ollama-response response))
-        (error (e)
-          (error 'llm-api-error
-                 :message (format nil
-                                  "Cannot connect to Ollama at ~a: ~a"
-                                   (client-base-url client) e))))))
+      (call-with-retry
+       (lambda ()
+         (let* ((body     (build-ollama-request client messages
+                                                :tools tools :stream nil))
+                (response (http-post-json
+                           (ollama-api-url client "/api/chat")
+                           '()                 ; no auth headers
+                           body
+                           :read-timeout (%ollama-read-timeout client))))
+           (parse-ollama-response response)))
+       :description (format nil "Ollama /api/chat+tools (~a)" (client-model client)))))
 
 (defmethod count-tokens ((client ollama-client) text)
   "Rough token estimate for Ollama models: ~4 characters per token."
@@ -592,18 +745,68 @@ Returns (values message usage-plist)."
 (defun ollama-pre-warm (client)
   "Send a minimal request to load the model into VRAM.
 Returns T on success, NIL on failure (non-fatal).
-Designed to be called in a background thread at REPL startup."
+Designed to be called in a background thread at REPL startup.
+Uses the Ollama empty-messages preload pattern (done_reason: load)."
   (handler-case
-      (let ((body `(("model"      . ,(client-model client))
-                    ("messages"   . ((("role" . "user")
-                                      ("content" . "hi"))))
-                    ("stream"     . ,yason:false)
-                    ("keep_alive" . ,(%ollama-keep-alive))
-                    ("options"    . (("num_predict" . 1))))))
-        (http-post-json (ollama-api-url client "/api/chat") '() body)
+      (let* ((profile (lookup-model-profile (client-model client)))
+             (large-p (getf profile :large-model))
+             (load-timeout (or (getf profile :load-timeout) 300))
+             ;; Use empty messages: Ollama treats this as a preload-only request
+             ;; Returns immediately with done_reason="load" after model is in VRAM
+             (body `(("model"      . ,(client-model client))
+                     ("messages"   . ())
+                     ("stream"     . ,yason:false)
+                     ("keep_alive" . ,(%ollama-keep-alive (client-model client))))))
+        (when large-p
+          (log-info "llm" "Pre-warming large model ~a (timeout: ~as)..."
+                    (client-model client) load-timeout))
+        (http-post-json (ollama-api-url client "/api/chat") '() body
+                        :read-timeout load-timeout)
         (log-info "llm" "Ollama model ~a pre-warmed successfully"
                   (client-model client))
         t)
     (error (e)
       (log-debug "llm" "Ollama pre-warm failed (non-fatal): ~a" e)
       nil)))
+
+(defun ollama-ensure-warm (client &key (timeout 600) (poll-interval 5)
+                                       (on-progress nil))
+  "Block until the model is loaded in VRAM, polling /api/ps.
+Triggers a preload if model is not already loaded.
+TIMEOUT — maximum seconds to wait (default 600 = 10 minutes).
+POLL-INTERVAL — seconds between /api/ps checks (default 5).
+ON-PROGRESS — optional callback (lambda (elapsed-seconds loaded-p) ...)
+              called each poll cycle for progress reporting.
+Returns T if model is warm, NIL if timeout exceeded."
+  (let ((model (client-model client)))
+    ;; Already loaded? Return immediately.
+    (when (ollama-model-loaded-p client)
+      (log-info "llm" "Model ~a already loaded in VRAM" model)
+      (when on-progress (funcall on-progress 0 t))
+      (return-from ollama-ensure-warm t))
+    ;; Server reachable?
+    (unless (ollama-server-reachable-p client)
+      (log-error "llm" "Ollama server not reachable at ~a" (client-base-url client))
+      (return-from ollama-ensure-warm nil))
+    ;; Trigger preload in a separate thread so we can poll /api/ps
+    (log-info "llm" "Triggering preload for model ~a..." model)
+    (let ((preload-thread
+            (bt:make-thread
+             (lambda () (ollama-pre-warm client))
+             :name "ollama-preload")))
+      (declare (ignore preload-thread))
+      ;; Poll /api/ps until model appears or timeout
+      (let ((start (get-internal-real-time)))
+        (loop
+          (let* ((now (get-internal-real-time))
+                 (elapsed (/ (- now start) internal-time-units-per-second)))
+            (when (> elapsed timeout)
+              (log-warn "llm" "Model ~a preload timed out after ~as" model elapsed)
+              (when on-progress (funcall on-progress elapsed nil))
+              (return nil))
+            (when (ollama-model-loaded-p client)
+              (log-info "llm" "Model ~a loaded in VRAM (~,1fs)" model elapsed)
+              (when on-progress (funcall on-progress elapsed t))
+              (return t))
+            (when on-progress (funcall on-progress elapsed nil))
+            (sleep poll-interval)))))))

@@ -1637,15 +1637,36 @@ Otherwise, use model-specific optimized prompt for Ollama models."
     ;; so that mbrtowc/wcwidth correctly handle multibyte characters.
     (%ensure-utf8-locale)
     (print-banner)
-    ;; Pre-warm Ollama model in background to avoid cold-start latency
+    ;; Pre-warm Ollama model — large models use blocking ensure-warm with
+    ;; progress display; small models use lightweight background pre-warm.
     (when (typep client 'sibyl.llm:ollama-client)
-      (let ((ollama-client client))
-        (bt:make-thread
-         (lambda ()
-           (log-info "repl" "Pre-warming Ollama model ~a..."
-                     (sibyl.llm:client-model ollama-client))
-           (sibyl.llm::ollama-pre-warm ollama-client))
-         :name "ollama-pre-warm")))
+      (let* ((ollama-client client)
+             (profile (sibyl.llm::lookup-model-profile
+                       (sibyl.llm:client-model ollama-client)))
+             (large-p (getf profile :large-model)))
+        (if large-p
+            ;; Large model: block with progress reporting
+            (progn
+              (format t "~%[Loading model ~a into VRAM — this may take several minutes...]~%"
+                      (sibyl.llm:client-model ollama-client))
+              (bt:make-thread
+               (lambda ()
+                 (sibyl.llm::ollama-ensure-warm
+                  ollama-client
+                  :timeout (or (getf profile :load-timeout) 600)
+                  :poll-interval 5
+                  :on-progress (lambda (elapsed loaded-p)
+                                 (if loaded-p
+                                     (format t "[Model loaded (~,0fs)]~%" elapsed)
+                                     (format t "." )))))
+               :name "ollama-ensure-warm"))
+            ;; Small model: lightweight background pre-warm
+            (bt:make-thread
+             (lambda ()
+               (log-info "repl" "Pre-warming Ollama model ~a..."
+                         (sibyl.llm:client-model ollama-client))
+               (sibyl.llm::ollama-pre-warm ollama-client))
+             :name "ollama-pre-warm"))))
     ;; Connect to configured MCP servers
     (handler-case
         (let ((count (sibyl.mcp:connect-configured-mcp-servers)))

@@ -106,17 +106,111 @@
         (null nil))
     (error () nil)))
 
-(defun http-post-json (url headers body)
-  "POST JSON BODY to URL with HEADERS. Returns parsed JSON as hash-table."
+;;; ============================================================
+;;; Retry with exponential backoff
+;;; ============================================================
+
+(defparameter *default-max-retries* 3
+  "Default number of retries for transient HTTP failures.")
+
+(defparameter *default-retry-base-delay* 2.0
+  "Base delay in seconds for exponential backoff (delay = base * 2^attempt).")
+
+(defparameter *default-retry-max-delay* 60.0
+  "Maximum delay in seconds between retries.")
+
+(defun %jitter (delay)
+  "Add ±25% jitter to DELAY to avoid thundering herd."
+  (let ((jitter (* delay 0.25 (- (random 2.0) 1.0))))
+    (max 0.1 (+ delay jitter))))
+
+(defun %retryable-error-p (condition)
+  "Return T if CONDITION represents a transient, retryable error.
+Retryable: connection refused, timeout, 429, 500, 502, 503, 504."
+  (or
+   ;; Rate limit (429) — already signalled as llm-rate-limit-error
+   (typep condition 'llm-rate-limit-error)
+   ;; Server errors (5xx) or timeout errors wrapped as llm-api-error
+   (and (typep condition 'llm-api-error)
+        (let ((code (llm-error-status-code condition))
+              (msg (format nil "~a" condition)))
+          (or (and code (>= code 500) (<= code 504))
+              (search "timeout" (string-downcase msg)))))
+   ;; Connection refused / network errors (not our conditions)
+   (and (typep condition 'error)
+        (not (typep condition 'llm-api-error))
+        (not (typep condition 'llm-error)))))
+
+(defun call-with-retry (fn &key (max-retries *default-max-retries*)
+                                (base-delay *default-retry-base-delay*)
+                                (max-delay *default-retry-max-delay*)
+                                (description "HTTP request"))
+  "Call FN, retrying on transient errors with exponential backoff + jitter.
+FN is a zero-argument function. Returns the result of FN on success.
+Signals the last error if all retries are exhausted."
+  (let ((last-error nil))
+    (dotimes (attempt (1+ max-retries))
+      (handler-case
+          (return-from call-with-retry (funcall fn))
+        (error (e)
+          (setf last-error e)
+          (if (and (< attempt max-retries)
+                   (%retryable-error-p e))
+              (let ((delay (min max-delay
+                                (%jitter (* base-delay (expt 2 attempt))))))
+                (log-warn "llm" "~a failed (attempt ~a/~a): ~a — retrying in ~,1fs"
+                          description (1+ attempt) (1+ max-retries) e delay)
+                (sleep delay))
+              ;; Non-retryable or last attempt: propagate
+              (error e)))))
+    ;; Should not reach here, but just in case
+    (when last-error (error last-error))))
+
+;;; ============================================================
+;;; Timeout configuration
+;;; ============================================================
+
+(defparameter *default-connect-timeout* 10
+  "Default TCP connect timeout in seconds for LLM HTTP requests.")
+
+(defparameter *default-read-timeout* 300
+  "Default read timeout in seconds for LLM HTTP requests.
+Covers the full response wait for non-streaming calls.")
+
+(defun effective-connect-timeout (&optional override)
+  "Return the connect timeout to use: OVERRIDE, config, or default."
+  (or override
+      (let ((cfg (config-value "http.connect-timeout")))
+        (when cfg (if (stringp cfg) (parse-integer cfg :junk-allowed t) cfg)))
+      *default-connect-timeout*))
+
+(defun effective-read-timeout (&optional override)
+  "Return the read timeout to use: OVERRIDE, config, or default."
+  (or override
+      (let ((cfg (config-value "http.read-timeout")))
+        (when cfg (if (stringp cfg) (parse-integer cfg :junk-allowed t) cfg)))
+      *default-read-timeout*))
+
+;;; ============================================================
+;;; HTTP POST helpers
+;;; ============================================================
+
+(defun http-post-json (url headers body &key connect-timeout read-timeout)
+  "POST JSON BODY to URL with HEADERS. Returns parsed JSON as hash-table.
+CONNECT-TIMEOUT and READ-TIMEOUT are in seconds (defaults from config or *default-*-timeout*)."
   (log-debug "llm" "HTTP POST JSON to ~a" url)
   (let ((json-body (with-output-to-string (s)
-                     (yason:encode (to-json-value body) s))))
+                     (yason:encode (to-json-value body) s)))
+        (ct (effective-connect-timeout connect-timeout))
+        (rt (effective-read-timeout read-timeout)))
     (multiple-value-bind (response-body status-code)
         (handler-case
             (dex:post url
                       :headers (append headers
                                        '(("Content-Type" . "application/json")))
-                      :content json-body)
+                      :content json-body
+                      :connect-timeout ct
+                      :read-timeout rt)
           (dex:http-request-failed (e)
             (let ((code (dex:response-status e))
                   (body (read-response-body (dex:response-body e))))
@@ -129,7 +223,18 @@
                   (error 'llm-api-error
                          :message (format nil "HTTP ~a" code)
                          :status-code code
-                         :body body)))))
+                         :body body))))
+          ;; Socket-level timeouts (dexador raises usocket conditions or
+          ;; SB-SYS:IO-TIMEOUT for connect/read timeouts)
+          (error (e)
+            (if (or (search "timeout" (string-downcase (princ-to-string e)))
+                    (search "timed out" (string-downcase (princ-to-string e))))
+                (progn
+                  (log-error "llm" "HTTP timeout for ~a (connect: ~as, read: ~as): ~a"
+                             url ct rt e)
+                  (error 'llm-api-error
+                         :message (format nil "HTTP timeout (connect: ~as, read: ~as)" ct rt)))
+                (error e))))
       (declare (ignore status-code))
       (yason:parse response-body :object-as :hash-table))))
 
@@ -171,20 +276,26 @@
              (setf event-type nil
                    data-parts nil))))))))
 
-(defun http-post-stream (url headers body on-event on-done &key (on-error nil))
+(defun http-post-stream (url headers body on-event on-done
+                         &key (on-error nil) connect-timeout read-timeout)
   "POST JSON BODY to URL, read response as SSE stream.
    ON-EVENT — called with (event-type data-string) per SSE event
    ON-DONE  — called when stream completes
-   ON-ERROR — optional error handler"
+   ON-ERROR — optional error handler
+   CONNECT-TIMEOUT / READ-TIMEOUT — in seconds (defaults from config)."
   (log-debug "llm" "HTTP POST stream to ~a" url)
   (let ((json-body (with-output-to-string (s)
-                     (yason:encode (to-json-value body) s))))
+                     (yason:encode (to-json-value body) s)))
+        (ct (effective-connect-timeout connect-timeout))
+        (rt (effective-read-timeout read-timeout)))
     (handler-case
         (let ((stream (dex:post url
-                                :headers (append headers
-                                                 '(("Content-Type" . "application/json")))
-                                :content json-body
-                                :want-stream t)))
+                                 :headers (append headers
+                                                  '(("Content-Type" . "application/json")))
+                                 :content json-body
+                                 :want-stream t
+                                 :connect-timeout ct
+                                 :read-timeout rt)))
           (unwind-protect
                (parse-sse-stream stream on-event on-done :on-error on-error)
             (close stream)))
@@ -200,7 +311,15 @@
                (error 'llm-api-error
                       :message (format nil "HTTP ~a" code)
                       :status-code code
-                      :body body)))))))
+                      :body body))))
+      (error (e)
+        (if (or (search "timeout" (string-downcase (princ-to-string e)))
+                (search "timed out" (string-downcase (princ-to-string e))))
+            (progn
+              (log-error "llm" "HTTP stream timeout for ~a: ~a" url e)
+              (error 'llm-api-error
+                     :message (format nil "HTTP stream timeout (connect: ~as, read: ~as)" ct rt)))
+            (error e))))))
 
 (defun parse-ndjson-stream (stream on-chunk on-done &key (on-error nil))
   "Parse a newline-delimited JSON (NDJSON) stream.
@@ -229,20 +348,26 @@
                   (funcall on-error e)
                   (warn "parse-ndjson-stream: failed to parse line: ~a" trimmed)))))))))
 
-(defun http-post-ndjson-stream (url headers body on-chunk on-done &key (on-error nil))
+(defun http-post-ndjson-stream (url headers body on-chunk on-done
+                                &key (on-error nil) connect-timeout read-timeout)
   "POST JSON BODY to URL, read response as NDJSON stream.
    ON-CHUNK — called with (parsed-object) per NDJSON line
    ON-DONE  — called when stream completes
-   ON-ERROR — optional error handler"
+   ON-ERROR — optional error handler
+   CONNECT-TIMEOUT / READ-TIMEOUT — in seconds (defaults from config)."
   (log-debug "llm" "HTTP POST NDJSON stream to ~a" url)
   (let ((json-body (with-output-to-string (s)
-                     (yason:encode (to-json-value body) s))))
+                     (yason:encode (to-json-value body) s)))
+        (ct (effective-connect-timeout connect-timeout))
+        (rt (effective-read-timeout read-timeout)))
     (handler-case
          (let* ((raw-stream (dex:post url
-                                      :headers (append headers
-                                                       '(("Content-Type" . "application/json")))
-                                      :content json-body
-                                      :want-stream t))
+                                       :headers (append headers
+                                                        '(("Content-Type" . "application/json")))
+                                       :content json-body
+                                       :want-stream t
+                                       :connect-timeout ct
+                                       :read-timeout rt))
                 (stream (flexi-streams:make-flexi-stream raw-stream :external-format :utf-8)))
            (unwind-protect
                 (parse-ndjson-stream stream on-chunk on-done :on-error on-error)
@@ -259,7 +384,16 @@
               (error 'llm-api-error
                      :message (format nil "HTTP ~a" code)
                      :status-code code
-                     :body body)))))))
+                     :body body))))
+      (error (e)
+        (if (or (search "timeout" (string-downcase (princ-to-string e)))
+                (search "timed out" (string-downcase (princ-to-string e))))
+            (progn
+              (log-error "llm" "HTTP NDJSON stream timeout for ~a: ~a" url e)
+              (error 'llm-api-error
+                     :message (format nil "HTTP NDJSON stream timeout (connect: ~as, read: ~as)"
+                                      ct rt)))
+            (error e))))))
 
 (defun build-headers (client &rest extra-headers)
   "Build HTTP headers for CLIENT with optional EXTRA-HEADERS."

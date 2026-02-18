@@ -247,9 +247,20 @@
    #:*ollama-model-profiles*
    #:lookup-model-profile
    #:extract-thinking-blocks
-   #:ollama-model-info
+    #:ollama-model-info
    #:detect-model-capabilities
-    #:ollama-pre-warm))
+    #:ollama-pre-warm
+    #:ollama-ensure-warm
+    #:ollama-server-reachable-p
+    #:ollama-running-models
+    #:ollama-model-loaded-p
+    #:ollama-model-exists-p
+    #:ollama-health-check
+    ;; HTTP timeout configuration
+    #:*default-connect-timeout*
+    #:*default-read-timeout*
+    ;; Retry
+    #:call-with-retry))
 
 (defpackage #:sibyl.plan
   (:use #:cl #:sibyl.util)
@@ -406,6 +417,7 @@
    #:generate-task-id
    #:generate-agent-id
    #:*current-agent*
+   #:infer-tool-categories
    #:agent-reset))
 
 (defpackage #:sibyl.mcp
@@ -525,8 +537,9 @@
   (:import-from #:sibyl.config
                 #:load-config #:config-value #:config-set #:with-config)
    (:import-from #:sibyl.llm
-                 #:make-anthropic-client #:make-openai-client
-                 #:make-ollama-client #:ollama-client)
+                  #:make-anthropic-client #:make-openai-client
+                  #:make-ollama-client #:ollama-client
+                  #:ollama-health-check #:ollama-ensure-warm)
    (:import-from #:sibyl.tools
                 #:deftool #:list-tools #:execute-tool)
   (:import-from #:sibyl.agent
@@ -547,7 +560,9 @@
     #:make-openai-client
     #:make-ollama-client
     #:ollama-client
-    #:deftool
+    #:ollama-health-check
+    #:ollama-ensure-warm
+     #:deftool
    #:list-tools
    #:make-agent
    #:agent-run

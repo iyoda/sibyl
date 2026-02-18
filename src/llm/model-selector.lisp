@@ -177,8 +177,8 @@
 
 (defun build-model-tiers-from-config ()
   "Build model-tier instances from config values.
-   Reads models.<tier>.<provider> keys. Falls back to *default-model-tiers*
-   if no config values are found."
+   Reads models.<tier>.<provider> keys (anthropic, openai, ollama).
+   Falls back to *default-model-tiers* if no config values are found."
   (let ((any-configured nil))
     (let ((tiers
             (mapcar
@@ -187,8 +187,9 @@
                       (props (rest meta))
                       (anthropic-model (configured-model-name name "anthropic"))
                       (openai-model (configured-model-name name "openai"))
+                      (ollama-model (configured-model-name name "ollama"))
                       (max-tokens (getf props :max-tokens 4096)))
-                 (when (or anthropic-model openai-model)
+                 (when (or anthropic-model openai-model ollama-model)
                    (setf any-configured t))
                  (make-instance 'model-tier
                                 :name name
@@ -207,6 +208,11 @@
                                                    (make-instance 'model-config
                                                                   :provider :openai
                                                                   :model-name openai-model
+                                                                  :max-tokens max-tokens))
+                                                 (when ollama-model
+                                                   (make-instance 'model-config
+                                                                  :provider :ollama
+                                                                  :model-name ollama-model
                                                                   :max-tokens max-tokens)))))))
              *tier-metadata*)))
       (if any-configured tiers *default-model-tiers*))))
@@ -321,6 +327,12 @@
      (make-openai-client
       :api-key (sibyl.config:config-value "llm.openai.api-key")
       :model (model-name model-config)
+      :max-tokens (model-max-tokens model-config)
+      :temperature (model-temperature model-config)))
+    (:ollama
+     (make-ollama-client
+      :model (model-name model-config)
+      :host (sibyl.config:config-value "llm.ollama.host")
       :max-tokens (model-max-tokens model-config)
       :temperature (model-temperature model-config)))
     (t
@@ -507,7 +519,17 @@
                                           :max-tokens 32768
                                           :context-window 200000
                                           :temperature 0.05
-                                          :capabilities '(:advanced-reasoning :multimodal :high-precision))))))
+                                          :capabilities '(:advanced-reasoning :multimodal :high-precision))
+                           ;; GPT-OSS 120B (local Ollama, 116.8B MXFP4)
+                           (make-instance 'enhanced-model-config
+                                          :provider :ollama
+                                          :model-name "gpt-oss:120b"
+                                          :release-date "2025-01-01"
+                                          :version "120b"
+                                          :max-tokens 8192
+                                          :context-window 131072
+                                          :temperature 1.0
+                                          :capabilities '(:deep-reasoning :code-generation :thinking :tool-calling))))))
 
 ;; Model selection with latest model preference
 (defmethod select-latest-model-for-task ((selector model-selector) task-description &key force-tier prefer-provider)

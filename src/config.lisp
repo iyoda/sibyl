@@ -105,6 +105,9 @@ Convenience function equivalent to (setf (config-value KEY) VALUE)."
                      ;; Optimization defaults
                     ("optimization.cache-enabled" . t)
                      ("optimization.auto-model-routing" . nil)
+                     ;; HTTP timeout defaults (seconds)
+                     ("http.connect-timeout" . 10)
+                     ("http.read-timeout"    . 300)
                      ;; Ollama performance defaults
                      ("ollama.num-predict" . 8192)
                      ("ollama.keep-alive"  . "30m")
