@@ -47,11 +47,14 @@
   "The *safe-suites* list contains expected suites."
   ;; Note: these suites live in cross-package namespaces (sibyl.evolution.tests,
   ;; sibyl.agent.tests) — check with the correct package-qualified symbols.
+  (is (member 'sibyl.tests::core-tests sibyl.tests::*safe-suites*))
+  (is (member 'sibyl.tests::message-tests sibyl.tests::*safe-suites*))
   (is (member 'sibyl.evolution.tests::evolution-state-tests sibyl.tests::*safe-suites*))
   (is (member 'sibyl.evolution.tests::evolution-report-tests sibyl.tests::*safe-suites*))
   (is (member 'sibyl.tests::read-sexp-tests sibyl.tests::*safe-suites*)))
 
 (test parallel-unsafe-suites-defined
   "The *unsafe-suites* list contains expected suites."
+  (is (member 'sibyl.tests::planning-tests sibyl.tests::*unsafe-suites*))
   (is (member 'sibyl.tests::self-assess-tests sibyl.tests::*unsafe-suites*))
   (is (member 'sibyl.tests::write-test-tests sibyl.tests::*unsafe-suites*)))
