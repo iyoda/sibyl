@@ -451,23 +451,31 @@ Returns (values message usage-plist)."
   "Parse OpenAI API response into a message struct."
   (let* ((raw-choices (gethash "choices" response))
          (choices (if (listp raw-choices) raw-choices (coerce raw-choices 'list)))
-         (first-choice (first choices))
-         (msg (gethash "message" first-choice))
-         (content (gethash "content" msg))
-         (raw-tool-calls (gethash "tool_calls" msg))
-         (tool-calls nil))
-    (when raw-tool-calls
-      (let ((tcs (if (listp raw-tool-calls) raw-tool-calls (coerce raw-tool-calls 'list))))
-        (loop for tc in tcs
-              for func = (gethash "function" tc)
-              do (push (make-tool-call
-                        :id (gethash "id" tc)
-                        :name (gethash "name" func)
-                        :arguments (hash-to-alist
-                                    (yason:parse (gethash "arguments" func)
-                                                 :object-as :hash-table)))
-                       tool-calls))))
-    (assistant-message content :tool-calls (nreverse tool-calls))))
+         (first-choice (first choices)))
+    (unless (and choices first-choice)
+      (error 'llm-invalid-response
+             :message "OpenAI response missing choices"
+             :raw-response response))
+    (let* ((msg (gethash "message" first-choice)))
+      (unless msg
+        (error 'llm-invalid-response
+               :message "OpenAI response missing message"
+               :raw-response response))
+      (let* ((content (gethash "content" msg))
+             (raw-tool-calls (gethash "tool_calls" msg))
+             (tool-calls nil))
+        (when raw-tool-calls
+          (let ((tcs (if (listp raw-tool-calls) raw-tool-calls (coerce raw-tool-calls 'list))))
+            (loop for tc in tcs
+                  for func = (gethash "function" tc)
+                  do (push (make-tool-call
+                            :id (gethash "id" tc)
+                            :name (gethash "name" func)
+                            :arguments (hash-to-alist
+                                        (yason:parse (gethash "arguments" func)
+                                                     :object-as :hash-table)))
+                           tool-calls))))
+        (assistant-message content :tool-calls (nreverse tool-calls))))))
 
 (defun complete-openai-streaming (client messages tools)
   "Stream OpenAI responses, invoking *streaming-text-callback* per text delta.
