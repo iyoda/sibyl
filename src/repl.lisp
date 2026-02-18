@@ -151,6 +151,20 @@
   "No-op on non-SBCL implementations which typically inherit locale."
   (values))
 
+(defun %ensure-readline ()
+  "Attempt to load cl-readline for line-editing support (history, Emacs
+   keybindings, CJK-aware cursor movement).  If cl-readline is already
+   loaded or Quicklisp is not available, this is a no-op.  Any load
+   error is logged and silently ignored so the REPL falls back to the
+   basic read-line path."
+  (unless (find-package :cl-readline)
+    (handler-case
+        (progn
+          (uiop:symbol-call '#:ql '#:quickload :cl-readline :silent t)
+          (log-info "repl" "cl-readline loaded — line-editing enabled"))
+      (error (e)
+        (log-debug "repl" "cl-readline not available: ~a" e)))))
+
 (defun %rl-escape (ansi-string)
   "Wrap ANSI escape sequences in STRING with readline's invisible markers.
    \\001 (RL_PROMPT_START_IGNORE) and \\002 (RL_PROMPT_END_IGNORE) tell
@@ -1220,6 +1234,9 @@
     ;; in read-user-input.  Kernel-level termios manipulation (INLCR+IGNCR)
     ;; was removed because it also suppresses normal Enter (CR), making the
     ;; REPL unusable.
+    ;; Auto-load cl-readline for line-editing support (history, Emacs keys).
+    ;; Must happen before %ensure-utf8-locale so readline sees the correct locale.
+    (%ensure-readline)
     ;; SBCL starts with LC_ALL="C" — fix locale before any readline use
     ;; so that mbrtowc/wcwidth correctly handle multibyte characters.
     (%ensure-utf8-locale)

@@ -61,10 +61,11 @@
      (:file "repl"))))
   :in-order-to ((test-op (test-op #:sibyl/tests))))
 
-;;; Optional subsystem: loads cl-readline alongside Sibyl.
-;;; Loading this system enables input history (↑↓ arrows) in the REPL.
-;;; The main :sibyl system works without this — readline-available-p
-;;; will return NIL and read-user-input falls back to read-line.
+;;; Optional subsystem: ensures cl-readline is available at ASDF load time.
+;;; Since v0.1.0+, start-repl auto-loads cl-readline via Quicklisp at
+;;; startup (%ensure-readline), so this subsystem is no longer required
+;;; for normal use.  It remains useful for CI or reproducible builds
+;;; where you want an explicit ASDF dependency on cl-readline.
 (asdf:defsystem #:sibyl/readline
   :description "Optional cl-readline integration for Sibyl REPL history"
   :depends-on (#:sibyl #:cl-readline)
