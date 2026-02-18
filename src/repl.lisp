@@ -414,8 +414,11 @@
   (declare (ignore agent input))
   (format t "~%Running tests in parallel mode...~%~%")
   (handler-case
-      (let ((results (uiop:symbol-call '#:sibyl.tests '#:run-tests-parallel)))
-        (format t "~%Parallel test run complete. ~a total checks.~%" (length results)))
+      (let* ((start (get-internal-real-time))
+             (results (uiop:symbol-call '#:sibyl.tests '#:run-tests-parallel))
+             (elapsed (/ (float (- (get-internal-real-time) start))
+                         internal-time-units-per-second)))
+        (format t "~%Parallel test run complete. ~a total checks in ~,2fs.~%" (length results) elapsed))
     (error (e)
       (format t "~%Test run error: ~a~%" e)))
   nil)
@@ -855,23 +858,88 @@
 
 (defun make-tool-call-hook (&optional spinner)
   "Return a closure suitable for the :on-tool-call agent hook.
-   The closure accepts a TOOL-CALL struct and displays the tool name in cyan.
-   If SPINNER is provided, also updates the spinner message.
+   The closure accepts a TOOL-CALL struct and displays the tool name in cyan,
+   followed by a brief summary of the primary argument(s).
+   Output is flushed immediately so the message appears before tool execution.
 
    Usage:
      (cons :on-tool-call (make-tool-call-hook spinner))"
   (lambda (tc)
     (let* ((tool-name (sibyl.llm:tool-call-name tc))
+           (summary (format-tool-call-summary tc))
+           (display (if (string= summary "")
+                        (format nil "🔧 ~a を実行中..." tool-name)
+                        (format nil "🔧 ~a を実行中... ~a" tool-name summary)))
            (active-spinner (or spinner *current-spinner*)))
-      (log-info "agent" "Tool call: ~a" tool-name)
+      (log-info "agent" "Tool call: ~a ~a" tool-name summary)
       (if *use-colors*
           (progn
-            (format-colored-text (format nil "🔧 ~a を実行中..." tool-name) :cyan)
+            (format-colored-text display :cyan)
             (format t "~%"))
-          (format t "🔧 ~a を実行中...~%" tool-name))
+          (format t "~a~%" display))
+      (force-output)
       (when active-spinner
-        (sibyl.repl.spinner:update-spinner-message
-         active-spinner (format nil "🔧 ~a" tool-name))))))
+        (sibyl.repl.spinner:update-spinner-message active-spinner
+                                                   (format nil "🔧 ~a ~a"
+                                                           tool-name summary))))))
+
+(defun format-tool-call-summary (tc &key (max-length 50))
+  "ツールコールの引数を人間が読みやすい短い文字列に整形する。
+   例: shell + ((command . \"ls -la\")) → \"(ls -la)\"
+       eval-form + ((form . \"(defun foo () 42)\")) → \"(defun foo () 42)\"
+   引数が長い場合は max-length 文字で切り詰める。"
+  (let* ((args (sibyl.llm:tool-call-arguments tc))
+         (tool-name (sibyl.llm:tool-call-name tc))
+         ;; ツールごとの主要引数キー（優先順位順）
+         (primary-keys
+           (cond
+             ((string= tool-name "shell")           '("command"))
+             ((string= tool-name "read-file")       '("path"))
+             ((string= tool-name "write-file")      '("path"))
+             ((string= tool-name "eval-form")       '("form"))
+             ((string= tool-name "grep")            '("pattern" "path"))
+             ((string= tool-name "list-directory")  '("path"))
+             ((string= tool-name "file-info")       '("path"))
+             ((string= tool-name "read-sexp")       '("path" "name"))
+             ((string= tool-name "describe-symbol") '("symbol"))
+             ((string= tool-name "who-calls")       '("function"))
+             ((string= tool-name "safe-redefine")   '("name"))
+             ((string= tool-name "sync-to-file")    '("name" "file"))
+             ((string= tool-name "run-tests")       '("suite" "test"))
+             ((string= tool-name "write-test")      '("name"))
+             ((string= tool-name "add-definition")  '("file"))
+             ((string= tool-name "create-module")   '("path"))
+             (t nil)))
+         ;; 主要引数の値を取得
+         (values-to-show
+           (if primary-keys
+               (remove nil
+                 (mapcar (lambda (k)
+                           (let ((pair (assoc k args :test #'string=)))
+                             (when pair
+                               (let ((v (cdr pair)))
+                                 (if (stringp v) v (format nil "~a" v))))))
+                         primary-keys))
+               ;; フォールバック: 最初の引数の値
+               (when args
+                 (let ((v (cdr (first args))))
+                   (list (if (stringp v) v (format nil "~a" v)))))))
+         ;; 値を結合
+         (summary (if values-to-show
+                      (format nil "~{~a~^ ~}" values-to-show)
+                      "")))
+    (cond
+      ((string= summary "") "")
+      ;; 値が既に括弧で始まる場合（Lispフォームなど）はそのまま表示
+      ((char= (char summary 0) #\()
+       (if (> (length summary) max-length)
+           (format nil "~a..." (subseq summary 0 max-length))
+           summary))
+      ;; 通常は括弧で囲む
+      (t
+       (if (> (length summary) max-length)
+           (format nil "(~a...)" (subseq summary 0 max-length))
+           (format nil "(~a)" summary))))))
 
 (defun make-before-step-hook (&optional spinner)
   "Return a closure suitable for the :before-step agent hook.
@@ -901,13 +969,17 @@
   (/ (- (get-internal-real-time) start-time) 
      (float internal-time-units-per-second)))
 
-(defun format-elapsed-time (seconds &key (stream *standard-output*) model)
-  "Format elapsed time as [model · elapsed: X.Xs] with optional dim styling.
+(defun format-elapsed-time (seconds &key (stream *standard-output*) model tokens)
+  "Format elapsed time as [model · elapsed: X.Xs · N tok] with optional dim styling.
    When MODEL is non-NIL, includes the model name before the elapsed time.
+   When TOKENS is non-NIL, appends the token count (delta for this request).
    When *use-colors* is nil, outputs plain text. Otherwise uses ANSI dim code."
-  (let ((label (if model
-                   (format nil "~a · elapsed: ~,1fs" model seconds)
-                   (format nil "elapsed: ~,1fs" seconds))))
+  (let ((label (with-output-to-string (s)
+                 (when model
+                   (format s "~a · " model))
+                 (format s "elapsed: ~,1fs" seconds)
+                 (when tokens
+                   (format s " · ~:d tok" tokens)))))
     (if *use-colors*
         (format stream "~C[2m[~a]~C[0m" #\Escape label #\Escape)
         (format stream "[~a]" label))))
@@ -1140,7 +1212,15 @@
                                            (setf first-chunk-p nil))
                                          (write-string text *standard-output*)
                                          (force-output *standard-output*))))
-                                   (response (sibyl.agent:agent-run agent input)))
+                                   (tracker (sibyl.agent:agent-token-tracker agent))
+                                   (tokens-before
+                                     (+ (sibyl.llm::token-tracker-input-tokens tracker)
+                                        (sibyl.llm::token-tracker-output-tokens tracker)))
+                                   (response (sibyl.agent:agent-run agent input))
+                                   (tokens-after
+                                     (+ (sibyl.llm::token-tracker-input-tokens tracker)
+                                        (sibyl.llm::token-tracker-output-tokens tracker)))
+                                   (tokens-delta (- tokens-after tokens-before)))
                               (stop-current-spinner)
                               (when (or (not *stream-enabled*)
                                         (not sibyl.llm:*streaming-text-callback*)
@@ -1151,7 +1231,8 @@
                               (format-elapsed-time (elapsed-seconds start-time)
                                                    :model (ignore-errors
                                                             (sibyl.llm::client-model
-                                                             (sibyl.agent:agent-client agent))))
+                                                             (sibyl.agent:agent-client agent)))
+                                                   :tokens (when (plusp tokens-delta) tokens-delta))
                               (format t "~%")))
                                                #+sbcl (sb-sys:interactive-interrupt (e)
                                                        (declare (ignore e))
