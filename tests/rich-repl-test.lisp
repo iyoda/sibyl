@@ -204,6 +204,20 @@
   "*command-history* is bound (initial value NIL = empty history)"
   (is (boundp 'sibyl.repl::*command-history*)))
 
+(test ignore-ctrl-j-defvar
+  "*ignore-ctrl-j* is bound and defaults to NIL"
+  (is (boundp 'sibyl.repl::*ignore-ctrl-j*))
+  (is (null sibyl.repl::*ignore-ctrl-j*)))
+
+;;; ============================================================
+;;; input sanitization
+;;; ============================================================
+
+(test strip-ctrl-j-removes-linefeed
+  "%strip-ctrl-j removes Ctrl+J (linefeed) characters"
+  (let ((input (concatenate 'string "hi" (string (code-char 10)) "there")))
+    (is (string= "hithere" (sibyl.repl::%strip-ctrl-j input)))))
+
 ;;; ============================================================
 ;;; streaming defaults
 ;;; ============================================================
