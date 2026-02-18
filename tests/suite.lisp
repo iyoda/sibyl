@@ -56,7 +56,8 @@
     package-symbols-tests
     codebase-map-tests
     sync-to-file-tests
-    evolve-tests)
+    evolve-tests
+    ollama-tests)
   "Test suites in sibyl.tests package safe for parallel execution.
 Cross-package suites are resolved at runtime via %safe-suites-resolved.")
 
