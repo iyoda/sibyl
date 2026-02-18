@@ -1216,6 +1216,53 @@
 ;;; Programmatic test execution
 ;;; ============================================================
 
+
+(defun %file-to-suite-mapping ()
+  "Return a hash-table mapping source file paths to their test suite name(s).
+   Values are either a string (single suite) or a list of strings (multiple suites)."
+  (let ((m (make-hash-table :test 'equal)))
+    (setf (gethash "src/tools/lisp-tools.lisp" m)
+          '("read-sexp-tests" "describe-symbol-tests" "eval-form-tests"
+            "macroexpand-form-tests" "package-symbols-tests" "codebase-map-tests"
+            "who-calls-tests"))
+    (setf (gethash "src/tools/analysis-tools.lisp" m)
+          '("suggest-improvements-tests" "suggest-improvements-enhanced-tests"
+            "self-assess-tests" "improvement-plan-tests" "safe-redefine-tests"
+            "sync-to-file-tests" "run-tests-tests" "write-test-tests"))
+    (setf (gethash "src/tools/creation-tools.lisp" m)
+          '("creation-integration-tests" "add-definition-tests" "add-export-tests"
+            "create-module-tests" "asdf-registration-tests"))
+    (setf (gethash "src/tools/planning-tools.lisp" m) "planning-tests")
+    (setf (gethash "src/tools/tools.lisp" m) "tools-tests")
+    (setf (gethash "src/agent/core.lisp" m) "core-tests")
+    (setf (gethash "src/agent/message.lisp" m) "message-tests")
+    (setf (gethash "src/agent/client.lisp" m) "client-tests")
+    (setf (gethash "src/agent/token-tracking.lisp" m)
+          '("token-tracking-suite" "model-selector-suite" "memory-compaction-suite"))
+    (setf (gethash "src/agent/parallel-agent.lisp" m) "parallel-agent-tests")
+    (setf (gethash "src/agent/parallel-runner.lisp" m) "parallel-runner-tests")
+    (setf (gethash "src/repl/repl.lisp" m)
+          '("repl-tests" "register-command-tests" "tokens-tests" "evolve-tests"))
+    (setf (gethash "src/repl/rich-repl.lisp" m) "rich-repl-tests")
+    (setf (gethash "src/system/asdf-protection.lisp" m) "asdf-protection-tests")
+    (setf (gethash "src/system/evolution-state.lisp" m) "evolution-state-tests")
+    (setf (gethash "src/mcp/client.lisp" m) "mcp-tests")
+    m))
+
+(defun %suites-for-files (file-paths)
+  "Given a list of source file paths, return a deduplicated list of test suite names.
+   Handles both single-string and list values in the mapping."
+  (let ((mapping (%file-to-suite-mapping))
+        (suites nil))
+    (dolist (path file-paths)
+      (let ((entry (gethash path mapping)))
+        (when entry
+          (let ((names (if (listp entry) entry (list entry))))
+            (dolist (name names)
+              (unless (member name suites :test #'string=)
+                (push name suites)))))))
+    (nreverse suites)))
+
 (defun %run-tests-resolve-target (suite-name test-name)
   "Resolve suite or test name to a symbol in SIBYL.TESTS package."
   (let ((tests-package (find-package "SIBYL.TESTS")))
@@ -1295,25 +1342,34 @@
      :parameters ((:name "suite" :type "string" :required nil
                    :description "Suite name (e.g., \"sibyl-tests\"), defaults to all tests")
                   (:name "test" :type "string" :required nil
-                   :description "Specific test name (e.g., \"read-sexp-basic\")")))
+                   :description "Specific test name (e.g., \"read-sexp-basic\")")
+                  (:name "files" :type "string" :required nil
+                   :description "Comma-separated source file paths; runs only their mapped test suites")))
   (block run-tests
     (let* ((suite-name (getf args :suite))
            (test-name (getf args :test))
+           (files-str (getf args :files))
+           (suite-name (or suite-name
+                           (when files-str
+                             (let* ((paths (mapcar (lambda (s) (string-trim '(#\Space #\Tab) s))
+                                                   (uiop:split-string files-str :separator ",")))
+                                    (suites (%suites-for-files paths)))
+                               (when suites (first suites))))))
            (target (%run-tests-resolve-target suite-name test-name))
            (fiveam-pkg (find-package "FIVEAM")))
-      
+
       (unless fiveam-pkg
         (error "FiveAM package not found. Load FiveAM first."))
-      
+
       (let ((run-fn (find-symbol "RUN" fiveam-pkg)))
         (unless run-fn
           (error "FiveAM:RUN function not found"))
-        
+
         ;; Suppress output during test execution
         (let* ((*standard-output* (make-string-output-stream))
                (*error-output* (make-string-output-stream))
                (results (funcall run-fn target)))
-          
+
           ;; Build result structure
           (multiple-value-bind (total passed failed failures)
               (%run-tests-count-results results)
