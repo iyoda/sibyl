@@ -59,7 +59,9 @@
          (s (sibyl.repl.spinner:start-spinner "Test"))
          (thread (sibyl.repl.spinner::spinner-thread s)))
     (sibyl.repl.spinner:stop-spinner s)
-    (sleep 0.3)
+    (loop repeat 30  ; max 300ms (30 * 10ms)
+          while (bt:thread-alive-p thread)
+          do (sleep 0.01))
     (is (not (bt:thread-alive-p thread)))))
 
 (test spinner-message-default
