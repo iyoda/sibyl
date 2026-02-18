@@ -460,20 +460,8 @@
                suggestions)))
 
 (defun %suggest-improvements-filter-attempted (suggestions)
-  "Filter out suggestions whose description matches previously-attempted improvements.
-   Reads from *evolution-state* (key \"attempted-improvements\").
-   If *evolution-state* is not bound or has no attempted list, returns SUGGESTIONS unchanged."
-  (if (boundp '*evolution-state*)
-      (let* ((state (symbol-value '*evolution-state*))
-             (attempted (when state
-                          (gethash "attempted-improvements" state))))
-        (if (and attempted (> (length attempted) 0))
-            (remove-if (lambda (s)
-                         (let ((desc (gethash "description" s)))
-                           (some (lambda (a) (string= desc a)) attempted)))
-                       suggestions)
-            suggestions))
-      suggestions))
+  "Return SUGGESTIONS unchanged (evolution tracking removed)."
+  suggestions)
 
 (defun %suggest-improvements-build-note (scope suggestions)
   (with-output-to-string (stream)
@@ -517,13 +505,10 @@
      :parameters ((:name "scope" :type "string" :required nil
                    :description "Scope: all, module-name, or file-path")
                   (:name "min-priority" :type "string" :required nil
-                   :description "Minimum priority to include: high, medium, or low (default: low)")
-                  (:name "exclude-attempted" :type "string" :required nil
-                   :description "If true, exclude improvements previously attempted (uses *evolution-state*)")))
+                   :description "Minimum priority to include: high, medium, or low (default: low)")))
   (block suggest-improvements
     (let* ((scope (getf args :scope))
            (min-priority (getf args :min-priority))
-           (exclude-attempted (getf args :exclude-attempted))
            (normalized-scope (%suggest-improvements-normalize-scope scope))
            (map-result (execute-tool "codebase-map"
                                      '(("detail-level" . "summary"))))
@@ -544,8 +529,6 @@
       (setf suggestions (%suggest-improvements-dedupe suggestions))
       (setf suggestions (%suggest-improvements-sort suggestions))
       (setf suggestions (%suggest-improvements-filter-by-priority suggestions min-priority))
-      (when exclude-attempted
-        (setf suggestions (%suggest-improvements-filter-attempted suggestions)))
       (setf suggestions (%suggest-improvements-limit suggestions 10))
       (setf suggestions (%suggest-improvements-assign-ids suggestions))
       (%suggest-improvements-append-learnings normalized-scope suggestions)
@@ -1242,10 +1225,9 @@
     (setf (gethash "src/agent/parallel-agent.lisp" m) "parallel-agent-tests")
     (setf (gethash "src/agent/parallel-runner.lisp" m) "parallel-runner-tests")
     (setf (gethash "src/repl/repl.lisp" m)
-          '("repl-tests" "register-command-tests" "tokens-tests" "evolve-tests"))
+          '("repl-tests" "register-command-tests" "tokens-tests"))
     (setf (gethash "src/repl/rich-repl.lisp" m) "rich-repl-tests")
     (setf (gethash "src/system/asdf-protection.lisp" m) "asdf-protection-tests")
-    (setf (gethash "src/system/evolution-state.lisp" m) "evolution-state-tests")
     (setf (gethash "src/mcp/client.lisp" m) "mcp-tests")
     m))
 
@@ -1476,4 +1458,3 @@
         
         (format nil "Success: Test ~a created and registered in ~a"
                 name (file-namestring file))))))
-

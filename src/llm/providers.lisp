@@ -67,6 +67,24 @@
         (cons (cons "x-api-key" (client-api-key client))
               headers))))
 
+(defun anthropic-content-blocks-p (content)
+  "Return T when CONTENT is a list of Anthropic content-block alists."
+  (and (listp content)
+       (every (lambda (block)
+                (and (listp block)
+                     (assoc "type" block :test #'string=)))
+              content)))
+
+(defun ensure-anthropic-content-blocks (content)
+  "Normalize CONTENT into a list of Anthropic content-block alists."
+  (cond
+    ((null content) '())
+    ((anthropic-content-blocks-p content) content)
+    ((stringp content)
+     (list `(("type" . "text") ("text" . ,content))))
+    (t
+     (list `(("type" . "text") ("text" . ,(prin1-to-string content)))))))
+
 (defun messages-to-anthropic-format (messages)
   "Convert message structs to Anthropic API format.
    Returns (values system-prompt api-messages).
@@ -84,30 +102,32 @@
          ;; a JSON array of objects (the structured system-prompt format).
          (setf system (message-content msg)))
         (:user
-         (push `(("role" . "user")
-                 ("content" . ,(message-content msg)))
-               api-msgs))
+          (push `(("role" . "user")
+                  ("content" . ,(ensure-anthropic-content-blocks
+                                 (message-content msg))))
+                api-msgs))
         (:assistant
-         (if (message-tool-calls msg)
-             ;; Assistant with tool use
-             (let ((content-blocks nil))
-               (when (message-content msg)
-                 (push `(("type" . "text") ("text" . ,(message-content msg)))
-                       content-blocks))
-                (dolist (tc (message-tool-calls msg))
-                  (push `(("type" . "tool_use")
-                          ("id" . ,(tool-call-id tc))
-                          ("name" . ,(tool-call-name tc))
-                          ("input" . ,(or (tool-call-arguments tc)
-                                          (make-hash-table :test 'equal))))
-                        content-blocks))
-               (push `(("role" . "assistant")
-                       ("content" . ,(nreverse content-blocks)))
-                     api-msgs))
-             ;; Plain assistant message
-             (push `(("role" . "assistant")
-                     ("content" . ,(message-content msg)))
-                   api-msgs)))
+          (if (message-tool-calls msg)
+              ;; Assistant with tool use
+              (let ((content-blocks
+                      (ensure-anthropic-content-blocks (message-content msg))))
+                 (dolist (tc (message-tool-calls msg))
+                   (setf content-blocks
+                         (nconc content-blocks
+                                (list `(("type" . "tool_use")
+                                        ("id" . ,(tool-call-id tc))
+                                        ("name" . ,(tool-call-name tc))
+                                        ("input" . ,(or (tool-call-arguments tc)
+                                                        (make-hash-table
+                                                         :test 'equal))))))))
+                (push `(("role" . "assistant")
+                        ("content" . ,content-blocks))
+                      api-msgs))
+              ;; Plain assistant message
+              (push `(("role" . "assistant")
+                      ("content" . ,(ensure-anthropic-content-blocks
+                                     (message-content msg))))
+                    api-msgs)))
         (:tool
          (push `(("role" . "user")
                  ("content" . ((("type" . "tool_result")
