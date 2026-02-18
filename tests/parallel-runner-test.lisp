@@ -11,15 +11,8 @@
 ;;; sibyl.evolution.tests packages exist), so those cross-package
 ;;; symbols cannot be included in the *safe-suites* defparameter.
 ;;; This file is loaded LAST, so all packages are available here.
+;;; Cross-package suites are resolved at runtime by %safe-suites-resolved.
 ;;; ============================================================
-
-(setf *safe-suites*
-      (append *safe-suites*
-              (list 'sibyl.agent.tests::agent-tests
-                    'sibyl.agent.tests::tdd-orchestration-tests
-                    'sibyl.agent.tests::run-hook-tests
-                    'sibyl.evolution.tests::evolution-state-tests
-                    'sibyl.evolution.tests::evolution-report-tests)))
 
 (def-suite parallel-runner-tests
   :description "Tests for the parallel test runner (run-tests-parallel)."
@@ -49,8 +42,9 @@
   ;; sibyl.agent.tests) — check with the correct package-qualified symbols.
   (is (member 'sibyl.tests::core-tests sibyl.tests::*safe-suites*))
   (is (member 'sibyl.tests::message-tests sibyl.tests::*safe-suites*))
-  (is (member 'sibyl.evolution.tests::evolution-state-tests sibyl.tests::*safe-suites*))
-  (is (member 'sibyl.evolution.tests::evolution-report-tests sibyl.tests::*safe-suites*))
+  ;; Cross-package suites are resolved at runtime, not in *safe-suites* directly
+  (is (member 'sibyl.evolution.tests::evolution-state-tests (sibyl.tests::%safe-suites-resolved)))
+  (is (member 'sibyl.evolution.tests::evolution-report-tests (sibyl.tests::%safe-suites-resolved)))
   (is (member 'sibyl.tests::read-sexp-tests sibyl.tests::*safe-suites*)))
 
 (test parallel-unsafe-suites-defined

@@ -70,16 +70,17 @@ Cross-package suites are resolved at runtime via %safe-suites-resolved.")
 (defun %safe-suites-resolved ()
   "Return the full list of SAFE suites with cross-package symbols resolved at runtime.
 Called at run-tests-parallel invocation time, after all packages are loaded."
-  (append
-   *safe-suites*
-   (remove nil
-           (list
-            (%resolve-suite 'agent-tests             '#:sibyl.agent.tests)
-            (%resolve-suite 'tdd-orchestration-tests '#:sibyl.agent.tests)
-            (%resolve-suite 'run-hook-tests          '#:sibyl.agent.tests)
-             (%resolve-suite 'memory-compact-tests    '#:sibyl.agent.tests)
-             (%resolve-suite 'evolution-state-tests   '#:sibyl.evolution.tests)
-             (%resolve-suite 'evolution-report-tests  '#:sibyl.evolution.tests)))))
+  (remove-duplicates
+   (append
+    *safe-suites*
+    (remove nil
+            (list
+             (%resolve-suite 'agent-tests             '#:sibyl.agent.tests)
+             (%resolve-suite 'tdd-orchestration-tests '#:sibyl.agent.tests)
+             (%resolve-suite 'run-hook-tests          '#:sibyl.agent.tests)
+              (%resolve-suite 'memory-compact-tests    '#:sibyl.agent.tests)
+              (%resolve-suite 'evolution-state-tests   '#:sibyl.evolution.tests)
+              (%resolve-suite 'evolution-report-tests  '#:sibyl.evolution.tests))))))
 
 (defparameter *unsafe-suites*
   '(planning-tests
