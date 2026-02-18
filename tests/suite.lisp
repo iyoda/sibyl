@@ -37,7 +37,7 @@
 ;;; Helper to resolve a suite symbol at runtime.
 ;;; FiveAM uses the full package-qualified symbol for suite lookup,
 ;;; so cross-package suites must be resolved from their defining package.
-;;; Lock order: tool-registry (1) -> evolution-state (2) -> modified-files (3) -> command-handlers (4)
+;;; Lock order: tool-registry (1) -> modified-files (2) -> command-handlers (3)
 (defun %resolve-suite (name package)
   "Return the suite symbol for NAME in PACKAGE (a package designator), or NIL if not found."
   (let ((pkg (find-package package)))
@@ -57,7 +57,6 @@
     codebase-map-tests
     sync-to-file-tests
     provisioning-tests
-    evolve-tests
     ollama-tests
     cache-key-tests
     cache-adapter-tests)
@@ -71,14 +70,12 @@ Called at run-tests-parallel invocation time, after all packages are loaded."
    (append
     *safe-suites*
     (remove nil
-            (list
-             (%resolve-suite 'agent-tests             '#:sibyl.agent.tests)
-             (%resolve-suite 'tdd-orchestration-tests '#:sibyl.agent.tests)
-             (%resolve-suite 'run-hook-tests          '#:sibyl.agent.tests)
+             (list
+              (%resolve-suite 'agent-tests             '#:sibyl.agent.tests)
+              (%resolve-suite 'tdd-orchestration-tests '#:sibyl.agent.tests)
+              (%resolve-suite 'run-hook-tests          '#:sibyl.agent.tests)
               (%resolve-suite 'memory-compact-tests    '#:sibyl.agent.tests)
-              (%resolve-suite 'memory-sanitize-tests   '#:sibyl.agent.tests)
-              (%resolve-suite 'evolution-state-tests   '#:sibyl.evolution.tests)
-              (%resolve-suite 'evolution-report-tests  '#:sibyl.evolution.tests))))))
+              (%resolve-suite 'memory-sanitize-tests   '#:sibyl.agent.tests))))))
 
 (defparameter *unsafe-suites*
   '(planning-tests

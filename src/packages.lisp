@@ -317,20 +317,6 @@
      #:eval-form
      #:macroexpand-form
      #:package-symbols
-      ;; Evolution state management
-      #:*evolution-state*
-      #:*evolution-state-lock*
-      #:evolution-state-init
-      #:evolution-state-record-attempt
-      #:evolution-state-save
-      #:evolution-state-load
-       ;; Evolution progress reporting
-       #:evolution-report-cycle-start
-       #:evolution-report-improvement-start
-       #:evolution-report-step
-       #:evolution-report-improvement-result
-       #:evolution-report-cycle-summary
-       #:evolution-report-final-summary
         ;; Self-assess guard (exported for test runner binding)
         #:*self-assess-running*
         ;; Codebase-map cache (exported for test runner use)

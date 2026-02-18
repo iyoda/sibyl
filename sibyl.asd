@@ -103,7 +103,6 @@
      (:file "asdf-protection-test")
      (:file "repl-test")
      (:file "rich-repl-test")
-     (:file "evolution-state-test")
      (:file "parallel-runner-test")
      (:file "parallel-agent-test")
      (:file "mcp-test")

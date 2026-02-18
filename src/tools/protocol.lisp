@@ -31,7 +31,7 @@
 
 (defvar *tool-registry-lock* (bt:make-recursive-lock "tool-registry-lock")
   "Recursive lock protecting *tool-registry*. Acquire before accessing registry.
-   Lock order: tool-registry (1st) < evolution-state (2nd) < modified-files (3rd) < command-handlers (4th)")
+   Lock order: tool-registry (1st) < modified-files (2nd) < command-handlers (3rd)")
 
 (defvar *tool-schema-generation* 0
   "Monotonically increasing counter bumped on every tool registration/removal.

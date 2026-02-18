@@ -18,7 +18,6 @@
     ("/plan"          . :plan)
     ("/improve"       . :improve)
     ("/review"        . :review)
-    ("/evolve"        . :evolve)
     ("/test-parallel" . :test-parallel)
     ("/tokens"        . :tokens)
     ("/model"         . :model)
@@ -43,8 +42,8 @@
   "Counter for generating unique suggestion IDs.")
 
 (defvar *command-handlers-lock* (bt:make-recursive-lock "command-handlers-lock")
-  "Recursive lock protecting *command-handlers* and *pending-suggestions*.
-   Lock order: tool-registry (1st) < evolution-state (2nd) < modified-files (3rd) < command-handlers (4th)")
+   "Recursive lock protecting *command-handlers* and *pending-suggestions*.
+    Lock order: tool-registry (1st) < modified-files (2nd) < command-handlers (3rd)")
 
 (defvar *use-colors* t
   "Whether to use colored output in the REPL. Defaults to t (colors enabled).")
@@ -381,8 +380,6 @@ Returns TEXT unchanged when it is not a string."
         (format t "       — Request self-improvement (TDD cycle)~%")
         (format-colored-text "  /review" :green)
         (format t "        — Review improvement suggestions~%")
-        (format-colored-text "  /evolve" :green)
-        (format t "        — Autonomous continuous improvement loop~%")
         (format-colored-text "  /test-parallel" :green)
         (format t "  — Run test suite in parallel mode~%")
         (format-colored-text "  /tokens" :green)
@@ -405,7 +402,6 @@ Returns TEXT unchanged when it is not a string."
         (format t "  /plan            — Manage development plans~%")
         (format t "  /improve         — Request self-improvement (TDD cycle)~%")
         (format t "  /review          — Review improvement suggestions~%")
-        (format t "  /evolve          — Autonomous continuous improvement loop~%")
         (format t "  /test-parallel   — Run test suite in parallel mode~%")
         (format t "  /tokens          — Show cumulative token usage statistics~%")
         (format t "  /model           — Manage model tier selection~%")
@@ -481,10 +477,6 @@ Returns TEXT unchanged when it is not a string."
   (handle-review-command agent input)
   nil)
 
-(defun handle-evolve-command-wrapper (agent input)
-  "Wrapper handler for :evolve command."
-  (handle-evolve-command agent input)
-  nil)
 
 (defun handle-plan-command (agent input)
   "Handler for /plan command. Manages development plans.
@@ -905,7 +897,6 @@ Returns TEXT unchanged when it is not a string."
         (cons :plan    #'handle-plan-command)
         (cons :improve #'handle-improve-command-wrapper)
         (cons :review  #'handle-review-command-wrapper)
-        (cons :evolve  #'handle-evolve-command-wrapper)
         (cons :test-parallel #'handle-test-parallel-command)
         (cons :tokens        #'handle-tokens-command)
         (cons :model         #'handle-model-command)
@@ -970,97 +961,6 @@ Returns TEXT unchanged when it is not a string."
                       (error () nil)))
                    modification)))))
 
-(defun %evolve-normalize-priority (value)
-  (when value
-    (let ((normalized (string-downcase (string-trim '(#\Space #\Tab) value))))
-      (when (member normalized '("high" "medium" "low") :test #'string=)
-        normalized))))
-
-(defun parse-evolve-args (input)
-  "Parse /evolve command arguments. Returns (values max-cycles priority-threshold).
-   Examples:
-   - '/evolve' => (10 "medium")
-   - '/evolve 5 high' => (5 "high")
-   - '/evolve max-cycles=3 priority=low' => (3 "low")"
-  (let* ((trimmed (string-trim '(#\Space #\Tab) (or input "")))
-         (args-str (if (search "/evolve" trimmed :test #'string-equal)
-                       (string-trim '(#\Space #\Tab)
-                                    (subseq trimmed (length "/evolve")))
-                       trimmed))
-         (parts (if (string= args-str "")
-                    nil
-                    (cl-ppcre:split "\\s+" args-str)))
-         (max-cycles nil)
-         (priority nil))
-    (dolist (part parts)
-      (let* ((clean (string-trim '(#\Space #\Tab) part))
-             (token (string-left-trim '(#\-) clean)))
-        (cond
-          ((search "=" token)
-           (let* ((pair (cl-ppcre:split "=" token :limit 2))
-                  (key (string-downcase (first pair)))
-                  (value (second pair)))
-             (cond
-               ((member key '("max-cycles" "cycles" "max") :test #'string=)
-                (let ((parsed (ignore-errors (parse-integer value :junk-allowed t))))
-                  (when parsed
-                    (setf max-cycles parsed))))
-               ((member key '("priority" "priority-threshold" "min-priority" "threshold")
-                        :test #'string=)
-                (let ((parsed (%evolve-normalize-priority value)))
-                  (when parsed
-                    (setf priority parsed)))))))
-          (t
-           (let ((parsed-int (ignore-errors (parse-integer token :junk-allowed t)))
-                 (parsed-priority (%evolve-normalize-priority token)))
-             (when (and parsed-int (null max-cycles))
-               (setf max-cycles parsed-int))
-             (when (and parsed-priority (null priority))
-               (setf priority parsed-priority)))))))
-    (values (max 0 (or max-cycles 10))
-            (or priority "medium"))))
-
-(defun %evolve-parse-json (json)
-  (handler-case
-      (yason:parse json :object-as :hash-table)
-    (error () nil)))
-
-(defun %evolve-ensure-list (value)
-  (cond
-    ((vectorp value) (coerce value 'list))
-    ((null value) nil)
-    (t value)))
-
-(defun %evolve-format-location (file line)
-  (cond
-    ((and file (integerp line))
-     (format nil "~a:~a" file line))
-    (file file)
-    (t "unknown")))
-
-(defun %evolve-build-prompt (suggestion)
-  (let* ((description (or (gethash "description" suggestion) ""))
-         (rationale (or (gethash "rationale" suggestion) ""))
-         (priority (or (gethash "priority" suggestion) "medium"))
-         (category (or (gethash "category" suggestion) "unknown"))
-         (file (gethash "file" suggestion))
-         (line (gethash "line" suggestion))
-         (location (%evolve-format-location file line)))
-    (format nil
-            "Improve Sibyl autonomously based on this suggestion:~%~%~
-             Description: ~a~%~
-             Rationale: ~a~%~
-             Priority: ~a~%~
-             Category: ~a~%~
-             Location: ~a~%~%~
-             Follow the TDD workflow strictly:~%~
-             1. UNDERSTAND: use read-sexp and who-calls to inspect current code~%~
-             2. RED: write a failing test using write-test; confirm with run-tests~%~
-             3. GREEN: implement using safe-redefine; re-run run-tests~%~
-             4. REFACTOR if needed; re-run run-tests~%~
-             5. PERSIST: use sync-to-file to write changes to disk and unprotect file~%~%~
-             Constraints: stay within sibyl.* packages, compile new code, do not modify system prompt."
-            description rationale priority category location)))
 
 (defun list-pending-suggestions ()
   "Display all pending suggestions."
@@ -1217,94 +1117,6 @@ Returns TEXT unchanged when it is not a string."
         (error (e)
           (format t "~%[Error: ~a]~%~%" e))))))
 
-(defun handle-evolve-command (agent original-input)
-  "Handle /evolve command for autonomous continuous improvement.
-   Usage: /evolve [max-cycles] [priority]
-          /evolve max-cycles=5 priority=high"
-  (multiple-value-bind (max-cycles priority-threshold)
-      (parse-evolve-args original-input)
-    (let ((cycles-run 0)
-          (productive-cycles 0)
-          (total-succeeded 0)
-          (total-skipped 0)
-          (consecutive-skip-cycles 0)
-          (baseline-tests 0)
-          (current-tests 0)
-          (baseline-tools (length (sibyl.tools:list-tools)))
-          (current-tools (length (sibyl.tools:list-tools))))
-      (sibyl.tools:evolution-state-init)
-      (when (<= max-cycles 0)
-        (sibyl.tools:evolution-report-final-summary 0 0 0 0 baseline-tests current-tests)
-        (return-from handle-evolve-command))
-      (block evolve-loop
-        (loop for cycle from 1 to max-cycles do
-          (setf cycles-run cycle)
-          (setf current-tools (length (sibyl.tools:list-tools)))
-          (sibyl.tools:evolution-report-cycle-start cycle max-cycles)
-          (let* ((suggestions-json
-                   (sibyl.tools:execute-tool
-                    "suggest-improvements"
-                    (list (cons "min-priority" priority-threshold)
-                          (cons "exclude-attempted" "true"))))
-                 (parsed (%evolve-parse-json suggestions-json))
-                 (suggestions (%evolve-ensure-list
-                               (and parsed (gethash "suggestions" parsed))))
-                 (suggestion-count (length suggestions)))
-            (when (or (null suggestions) (zerop suggestion-count))
-              (format t "~%No new suggestions. Stopping.~%")
-              (return-from evolve-loop))
-            (incf productive-cycles)
-            (let ((cycle-succeeded 0)
-                  (cycle-skipped 0))
-              (loop for suggestion in suggestions
-                    for index from 1 do
-                      (let* ((name (or (gethash "description" suggestion) "(unnamed)"))
-                             (prompt (%evolve-build-prompt suggestion)))
-                        (sibyl.tools:evolution-report-improvement-start index suggestion-count name)
-                        (handler-case
-                            (let ((response (sibyl.agent:agent-run agent prompt)))
-                              (sibyl.tools:evolution-state-record-attempt name "success")
-                              (incf cycle-succeeded)
-                              (incf total-succeeded)
-                              (sibyl.tools:evolution-report-improvement-result t)
-                              (when response
-                                (format t "~%~a~%" response)))
-                          (sibyl.conditions:llm-error (e)
-                            (sibyl.tools:evolution-state-record-attempt name (format nil "failed: ~a" e))
-                            (incf cycle-skipped)
-                            (incf total-skipped)
-                            (format t "~%[LLM Error: ~a]~%" e)
-                            (sibyl.tools:evolution-report-improvement-result nil))
-                          (error (e)
-                            (sibyl.tools:evolution-state-record-attempt name (format nil "failed: ~a" e))
-                            (incf cycle-skipped)
-                            (incf total-skipped)
-                            (format t "~%[Error: ~a]~%" e)
-                            (sibyl.tools:evolution-report-improvement-result nil)))))
-              (let* ((tests-json (sibyl.tools:execute-tool "run-tests" nil))
-                     (tests-parsed (%evolve-parse-json tests-json))
-                     (failed (or (and tests-parsed (gethash "failed" tests-parsed)) 0))
-                     (total (or (and tests-parsed (gethash "total" tests-parsed)) current-tests)))
-                (setf current-tests total)
-                (setf current-tools (length (sibyl.tools:list-tools)))
-                (when (and (integerp failed) (> failed 0))
-                  (format t "~%Test regression detected. Stopping.~%")
-                  (sibyl.tools:evolution-report-cycle-summary
-                   cycle-succeeded cycle-skipped baseline-tests current-tests baseline-tools current-tools)
-                  (return-from evolve-loop))
-                (sibyl.tools:evolution-report-cycle-summary
-                 cycle-succeeded cycle-skipped baseline-tests current-tests baseline-tools current-tools)
-                (setf baseline-tests current-tests)
-                (setf baseline-tools current-tools)
-                (if (zerop cycle-succeeded)
-                    (incf consecutive-skip-cycles)
-                    (setf consecutive-skip-cycles 0))
-                (when (>= consecutive-skip-cycles 3)
-                  (format t "~%Three consecutive skip cycles. Stopping.~%")
-                  (return-from evolve-loop)))))))
-      (sibyl.tools:evolution-report-final-summary
-       cycles-run productive-cycles total-succeeded total-skipped baseline-tests current-tests)
-      nil)))
 
 ;;; ============================================================
 ;;; Hook functions
