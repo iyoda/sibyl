@@ -2,7 +2,11 @@
 
 (in-package #:sibyl.tests)
 
-(in-suite sibyl-tests)
+(def-suite tools-tests
+  :description "Tests for the tool system."
+  :in sibyl-tests)
+
+(in-suite tools-tests)
 
 (test tool-registration
   "Tools can be registered and found."

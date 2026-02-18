@@ -2,7 +2,11 @@
 
 (in-package #:sibyl.tests)
 
-(in-suite sibyl-tests)
+(def-suite message-tests
+  :description "Tests for message and conversation utilities."
+  :in sibyl-tests)
+
+(in-suite message-tests)
 
 (test message-creation
   "Messages are created with correct roles."

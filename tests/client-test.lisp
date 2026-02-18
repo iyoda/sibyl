@@ -2,7 +2,11 @@
 
 (in-package #:sibyl.tests)
 
-(in-suite sibyl-tests)
+(def-suite client-tests
+  :description "Tests for LLM client utilities."
+  :in sibyl-tests)
+
+(in-suite client-tests)
 
 (test to-json-value-alist-keys
   "to-json-value normalizes alist keys and recurses values."

@@ -2,7 +2,11 @@
 
 (in-package #:sibyl.tests)
 
-(in-suite sibyl-tests)
+(def-suite planning-tests
+  :description "Tests for the plan persistence system."
+  :in sibyl-tests)
+
+(in-suite planning-tests)
 
 ;;; ── Helpers ──────────────────────────────────────────────────────────────
 
