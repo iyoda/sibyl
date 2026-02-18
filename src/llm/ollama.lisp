@@ -11,7 +11,7 @@
   ()
   (:default-initargs
    :base-url "http://localhost:11434"
-   :model "glm-4.7-flash:q8_0"
+   :model "gpt-oss:120b"
    :api-key "")
   (:documentation "Client for the local Ollama inference server."))
 
@@ -111,7 +111,7 @@ Falls back to '*default*' if no prefix matches."
       ;; Fallback to default
       (cdr (find "*default*" *ollama-model-profiles* :key #'car :test #'string=))))
 
-(defun make-ollama-client (&key (model "glm-4.7-flash:q8_0")
+(defun make-ollama-client (&key (model "gpt-oss:120b")
                                 (host nil)
                                 (max-tokens nil)
                                 (temperature nil))
@@ -477,14 +477,22 @@ Supports two thinking modes:
 (defun %ollama-keep-alive (&optional model-name)
   "Return the keep_alive value for a model.
 Large models (profile :large-model t) default to -1 (never unload)
-to avoid costly reload cycles. Small models default to 30m.
-Config key ollama.keep-alive overrides the profile-based default."
-  (or (config-value "ollama.keep-alive")
-      (when model-name
-        (let ((profile (lookup-model-profile model-name)))
-          (when (getf profile :large-model)
-            -1)))                          ; never unload large models
-      "30m"))
+to avoid costly reload cycles. Small models default to \"30m\".
+Config key ollama.keep-alive overrides the profile-based default.
+Ollama accepts: integer (-1 = never, 0 = immediate) or duration string (\"30m\")."
+  (let ((raw (or (config-value "ollama.keep-alive")
+                 (when model-name
+                   (let ((profile (lookup-model-profile model-name)))
+                     (when (getf profile :large-model)
+                       -1)))
+                 "30m")))
+    ;; Normalize: if a string looks like an integer (e.g. "-1", "0"),
+    ;; convert to integer so yason encodes it as a JSON number.
+    ;; Ollama expects integer for -1/0 and duration string for "30m"/"1h".
+    (if (stringp raw)
+        (let ((n (ignore-errors (parse-integer raw))))
+          (if n n raw))
+        raw)))
 
 (defun %parse-number (val)
   "Parse VAL as a number. Handles strings (both integer and float),

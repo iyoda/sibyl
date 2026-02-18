@@ -51,7 +51,7 @@
 (test make-ollama-client-defaults
   "make-ollama-client returns correct default model, base-url and api-key"
   (let ((c (sibyl:make-ollama-client)))
-    (is (string= "glm-4.7-flash:q8_0"    (sibyl.llm::client-model    c)))
+    (is (string= "gpt-oss:120b"           (sibyl.llm::client-model    c)))
     (is (string= "http://localhost:11434" (sibyl.llm::client-base-url c)))
     (is (string= ""                       (sibyl.llm::client-api-key  c)))))
 
