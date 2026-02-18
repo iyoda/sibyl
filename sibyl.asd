@@ -78,8 +78,10 @@
     :components
     ((:file "suite")
      (:file "tools-test")
-     (:file "sexp-tools-test")
-     (:file "message-test")
+      (:file "sexp-tools-test")
+      (:file "analysis-tools-test")
+      (:file "creation-tools-test")
+      (:file "message-test")
      (:file "planning-test")
      (:file "client-test")
      (:file "agent-test")

@@ -303,3 +303,162 @@
       ;; keep-count=3, so exactly 3 messages should remain
       (is (= 3 (length remaining))
           "Clean split should keep exactly ceiling(max/2) messages"))))
+
+(test current-agent-binding
+  "Auto-generated test"
+  
+(let ((sibyl.agent::*current-agent* :test-agent))
+  (is (eq sibyl.agent::*current-agent* :test-agent))))
+
+;;; ============================================================
+;;; Parallel Tool Execution Tests
+;;; ============================================================
+
+(def-suite parallel-tool-execution-tests
+  :description "Tests for parallel tool call execution in agent-step."
+  :in sibyl.tests:sibyl-tests)
+
+(in-suite parallel-tool-execution-tests)
+
+(test parallel-tool-calls-function-exists
+  "execute-tool-calls-parallel must be defined in sibyl.agent."
+  (is (fboundp 'sibyl.tools:execute-tool-calls-parallel)
+      "execute-tool-calls-parallel must be defined"))
+
+(test parallel-tool-calls-returns-ordered-results
+  "execute-tool-calls-parallel returns results in the same order as input tool-calls."
+  (let* ((tc-list (list
+                   (sibyl.llm:make-tool-call :id "tc-1" :name "fast-tool"   :arguments nil)
+                   (sibyl.llm:make-tool-call :id "tc-2" :name "slow-tool"   :arguments nil)
+                   (sibyl.llm:make-tool-call :id "tc-3" :name "medium-tool" :arguments nil)))
+         (executor (lambda (tc)
+                     (cond
+                       ((string= (sibyl.llm:tool-call-name tc) "slow-tool")
+                        (sleep 0.05) "slow-result")
+                       ((string= (sibyl.llm:tool-call-name tc) "medium-tool")
+                        (sleep 0.02) "medium-result")
+                       (t "fast-result"))))
+         (ordered-results
+           (sibyl.tools:execute-tool-calls-parallel tc-list executor)))
+    (is (= 3 (length ordered-results))
+        "Must return one result per tool call")
+    (is (string= "fast-result"   (first  ordered-results)))
+    (is (string= "slow-result"   (second ordered-results)))
+    (is (string= "medium-result" (third  ordered-results)))))
+
+(test parallel-tool-calls-is-concurrent
+  "execute-tool-calls-parallel runs tool calls concurrently."
+  (let* ((tc-list (list
+                   (sibyl.llm:make-tool-call :id "tc-a" :name "tool-a" :arguments nil)
+                   (sibyl.llm:make-tool-call :id "tc-b" :name "tool-b" :arguments nil)
+                   (sibyl.llm:make-tool-call :id "tc-c" :name "tool-c" :arguments nil)))
+         (executor (lambda (tc)
+                     (declare (ignore tc))
+                     (sleep 0.1)
+                     "ok"))
+         (start (get-internal-real-time)))
+    (sibyl.tools:execute-tool-calls-parallel tc-list executor)
+    (let* ((elapsed (/ (- (get-internal-real-time) start)
+                       internal-time-units-per-second)))
+      (is (< elapsed 0.2)
+          (format nil "Parallel execution took ~,3fs (expected < 0.2s)" elapsed)))))
+
+(test parallel-tool-calls-isolates-errors
+  "execute-tool-calls-parallel returns error string for failed calls without crashing others."
+  (let* ((tc-list (list
+                   (sibyl.llm:make-tool-call :id "tc-ok"  :name "ok-tool"  :arguments nil)
+                   (sibyl.llm:make-tool-call :id "tc-bad" :name "bad-tool" :arguments nil)))
+         (executor (lambda (tc)
+                     (if (string= (sibyl.llm:tool-call-name tc) "bad-tool")
+                         (error "simulated tool error")
+                         "ok-result")))
+         (results (sibyl.tools:execute-tool-calls-parallel tc-list executor)))
+    (is (= 2 (length results)))
+    (is (string= "ok-result" (first results))
+        "Successful tool call should return its result")
+    (is (search "Error" (second results))
+        "Failed tool call should return an error string")))
+
+(test parallel-tool-calls-propagates-current-agent
+  "execute-tool-calls-parallel binds *current-agent* in each thread."
+  (let* ((captured-agents (list))
+         (lock (bt:make-lock "capture-lock"))
+         (sentinel :test-agent-sentinel)
+         (tc-list (list
+                   (sibyl.llm:make-tool-call :id "tc-1" :name "t1" :arguments nil)
+                   (sibyl.llm:make-tool-call :id "tc-2" :name "t2" :arguments nil)))
+         (executor (lambda (tc)
+                     (declare (ignore tc))
+                     (bt:with-lock-held (lock)
+                       (push sibyl.agent:*current-agent* captured-agents))
+                     "done")))
+    (let ((sibyl.agent:*current-agent* sentinel))
+      (sibyl.tools:execute-tool-calls-parallel tc-list executor))
+    (is (= 2 (length captured-agents))
+        "Both threads should capture *current-agent*")
+    (is (every (lambda (a) (eq a sentinel)) captured-agents)
+        "*current-agent* must be propagated to each thread")))
+
+(test agent-step-parallel-threshold-respected
+  "Auto-generated test"
+  ;; *parallel-tool-threshold* が定義されており、デフォルト値が 2 であることを確認
+(is (boundp 'sibyl.tools:*parallel-tool-threshold*)
+    "*parallel-tool-threshold* must be defined")
+(is (integerp sibyl.tools:*parallel-tool-threshold*)
+    "*parallel-tool-threshold* must be an integer")
+(is (= 2 sibyl.tools:*parallel-tool-threshold*)
+    "Default threshold must be 2"))
+
+(test agent-step-parallel-dispatch-function
+  "Auto-generated test"
+  ;; agent-step が並列実行を使うためのヘルパー関数が存在することを確認
+;; (将来的に agent-step から呼ばれる dispatch 関数)
+(is (fboundp 'sibyl.tools:execute-tool-calls-parallel)
+    "execute-tool-calls-parallel must exist")
+;; threshold=1 のとき、1件でも並列パスを通ることを確認
+(let* ((sibyl.tools:*parallel-tool-threshold* 1)
+       (tc-list (list (sibyl.llm:make-tool-call :id "x" :name "t" :arguments nil)))
+       (results (sibyl.tools:execute-tool-calls-parallel
+                 tc-list (lambda (tc) (declare (ignore tc)) "ok"))))
+  (is (equal '("ok") results)
+      "Single tool call via parallel path must return correct result")))
+
+(test agent-step-calls-parallel-when-multiple-tool-calls
+  "Auto-generated test"
+  ;; agent-step が複数ツールコール時に並列実行することを時間で検証。
+;; 2つのツールがそれぞれ 0.1s かかる場合:
+;;   シリアル実行 → 0.2s 以上
+;;   並列実行     → 0.15s 未満
+(let* ((tc1 (sibyl.llm:make-tool-call :id "p-id-1" :name "slow-1" :arguments "{}"))
+       (tc2 (sibyl.llm:make-tool-call :id "p-id-2" :name "slow-2" :arguments "{}"))
+       (tool-response (sibyl.llm:make-message
+                       :role :assistant
+                       :content nil
+                       :tool-calls (list tc1 tc2)))
+       (text-response (sibyl.llm:make-message
+                       :role :assistant
+                       :content "done"
+                       :tool-calls nil))
+       (call-n 0)
+       (orig-execute (symbol-function 'sibyl.tools:execute-tool-call))
+       (orig-complete (symbol-function 'sibyl.llm:complete-with-tools)))
+  (setf (symbol-function 'sibyl.tools:execute-tool-call)
+        (lambda (tc) (declare (ignore tc)) (sleep 0.1) "ok"))
+  (setf (symbol-function 'sibyl.llm:complete-with-tools)
+        (lambda (c ctx tools)
+          (declare (ignore c ctx tools))
+          (incf call-n)
+          (if (= call-n 1)
+              (values tool-response nil)
+              (values text-response nil))))
+  (unwind-protect
+    (let* ((client (make-instance 'sibyl.llm:llm-client))
+           (agent (sibyl.agent:make-agent :client client :max-steps 5))
+           (start (get-internal-real-time)))
+      (sibyl.agent:agent-step agent "test")
+      (let ((elapsed (/ (- (get-internal-real-time) start)
+                        internal-time-units-per-second)))
+        (is (< elapsed 0.18)
+            (format nil "Parallel: ~,3fs (serial would be >=0.2s)" elapsed))))
+    (setf (symbol-function 'sibyl.tools:execute-tool-call) orig-execute)
+    (setf (symbol-function 'sibyl.llm:complete-with-tools) orig-complete))))

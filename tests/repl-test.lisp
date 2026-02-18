@@ -561,3 +561,125 @@
              (is (eq t agent-called))))
       (setf (symbol-function 'sibyl.tools:execute-tool) original-execute)
       (setf (symbol-function 'sibyl.agent:agent-run) original-agent-run))))
+
+(test format-elapsed-time-with-tokens
+  "Auto-generated test"
+  
+(let* ((sibyl.repl::*use-colors* nil)
+       (result (with-output-to-string (s)
+                 (sibyl.repl::format-elapsed-time 1.5 :stream s
+                                                      :model "claude-sonnet"
+                                                      :tokens 123))))
+  (is (search "1.5s" result) "should contain elapsed time")
+  (is (search "123" result) "should contain token count")
+  (is (search "claude-sonnet" result) "should contain model name"))
+)
+
+(test tracker-delta-tokens
+  "Auto-generated test"
+  
+(let* ((tracker (sibyl.llm::make-token-tracker)))
+  ;; 最初に100トークン追加
+  (sibyl.llm::tracker-add-usage tracker '(:input-tokens 100 :output-tokens 50
+                                           :cache-read-tokens 0 :cache-write-tokens 0))
+  (let ((before-total (+ (sibyl.llm::token-tracker-input-tokens tracker)
+                         (sibyl.llm::token-tracker-output-tokens tracker))))
+    ;; さらに200トークン追加
+    (sibyl.llm::tracker-add-usage tracker '(:input-tokens 200 :output-tokens 80
+                                             :cache-read-tokens 0 :cache-write-tokens 0))
+    (let ((after-total (+ (sibyl.llm::token-tracker-input-tokens tracker)
+                          (sibyl.llm::token-tracker-output-tokens tracker))))
+      (is (= 150 before-total) "before: 100+50=150")
+      (is (= 430 after-total) "after: 300+130=430")
+      (is (= 280 (- after-total before-total)) "delta: 280 tokens"))))
+)
+
+(test format-tool-call-summary-shell
+  "Auto-generated test"
+  
+(let ((tc (sibyl.llm:make-tool-call
+           :name "shell"
+           :arguments '(("command" . "ls -la src/") ("timeout" . 30)))))
+  (is (string= "(ls -la src/)"
+               (sibyl.repl::format-tool-call-summary tc))))
+)
+
+(test format-tool-call-summary-eval-form
+  "Auto-generated test"
+  
+;; eval-form: Lispフォームは括弧なしでそのまま表示
+(let ((tc (sibyl.llm:make-tool-call
+           :name "eval-form"
+           :arguments '(("form" . "(defun foo () 42)") ("package" . "SIBYL")))))
+  (is (string= "(defun foo () 42)"
+               (sibyl.repl::format-tool-call-summary tc))))
+)
+
+(test format-tool-call-summary-grep
+  "Auto-generated test"
+  
+;; grep: pattern と path を両方表示
+(let ((tc (sibyl.llm:make-tool-call
+           :name "grep"
+           :arguments '(("pattern" . "spinner") ("path" . "src/")))))
+  (is (string= "(spinner src/)"
+               (sibyl.repl::format-tool-call-summary tc))))
+)
+
+(test format-tool-call-summary-truncate
+  "Auto-generated test"
+  
+;; 長い引数は max-length で切り詰め
+(let ((tc (sibyl.llm:make-tool-call
+           :name "shell"
+           :arguments '(("command" . "find . -name '*.lisp' -exec grep -l 'defun' {} \\; | sort | head -20")))))
+  (let ((result (sibyl.repl::format-tool-call-summary tc :max-length 20)))
+    (is (> (length result) 0))
+    (is (search "..." result))))
+)
+
+(test format-tool-call-summary-no-args
+  "Auto-generated test"
+  
+;; 引数なしのツールは空文字列を返す
+(let ((tc (sibyl.llm:make-tool-call
+           :name "evolution-status"
+           :arguments nil)))
+  (is (string= "" (sibyl.repl::format-tool-call-summary tc))))
+)
+
+(test make-tool-call-hook-force-output
+  "make-tool-call-hook の出力が即座に取得できることを確認する"
+  ;; force-output を SBCL パッケージロックの制約でモックできないため、
+  ;; with-output-to-string で出力が即座に取得できることで間接的に検証する
+  (let* ((output (with-output-to-string (s)
+                   (let ((*standard-output* s)
+                         (sibyl.repl::*current-spinner* nil)
+                         (sibyl.repl::*use-colors* nil))
+                     (let ((hook (sibyl.repl::make-tool-call-hook)))
+                       (funcall hook (sibyl.llm:make-tool-call
+                                      :name "shell"
+                                      :arguments '(("command" . "echo test")))))))))
+    (is (search "shell" output) "tool name must appear in output")
+    (is (search "echo test" output) "command argument must appear in output"))
+)
+
+(test tool-call-hook-outputs-before-execution
+  "Auto-generated test"
+  ;; スピナーなし状態でフックが即座に出力することを確認
+(let* ((output (with-output-to-string (s)
+                 (let ((*standard-output* s)
+                       (sibyl.repl::*current-spinner* nil)
+                       (sibyl.repl::*use-colors* nil))
+                   (let ((hook (sibyl.repl::make-tool-call-hook)))
+                     (let ((tc (sibyl.llm:make-tool-call
+                                :id "test-id"
+                                :name "update-plan-status"
+                                :arguments '(("plan-id" . "plan-123")
+                                             ("status" . "completed")))))
+                       (funcall hook tc)))))))
+  (is (search "update-plan-status" output)
+      "tool name must appear in output immediately")
+  (is (search "を実行中" output)
+      "execution message must appear immediately")))
+

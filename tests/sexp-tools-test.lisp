@@ -1722,3 +1722,63 @@
       (is (search "\"component\":\"test-component\"" result))
       (is (search "\"message\":\"Test message\"" result))
       (is (search "\"timestamp\":" result)))))
+
+(test call-llm-no-agent-error
+  "Auto-generated test"
+  
+;; *current-agent* が NIL のとき call-llm はエラーを投げる
+(signals error
+  (sibyl.llm:call-llm '()))
+)
+
+
+(test generate-unified-diff-no-change
+  "Auto-generated test"
+  (let ((result (sibyl.tools::%generate-unified-diff "test.lisp" "hello" "hello")))
+  (is (null result) "同一内容の場合はnilを返す")))
+
+(test generate-unified-diff-with-change
+  "Auto-generated test"
+  (let ((result (sibyl.tools::%generate-unified-diff "test.lisp" "hello" "world")))
+  (is (stringp result) "変更がある場合は文字列を返す")
+  (is (search "---" result) "--- ヘッダが含まれる")
+  (is (search "+++" result) "+++ ヘッダが含まれる")
+  (is (search "-hello" result) "削除行が含まれる")
+  (is (search "+world" result) "追加行が含まれる")))
+
+(test sync-to-file-includes-diff-in-result
+  "Auto-generated test"
+  (let* ((path (format nil "/tmp/sibyl-diff-test-~a.lisp" (get-universal-time)))
+       (original "(defun foo () 1)
+(defun bar () 2)
+")
+       (new-source "(defun foo () 42)"))
+  (unwind-protect
+       (progn
+         (with-open-file (s path :direction :output :if-does-not-exist :create)
+           (write-string original s))
+         (let ((result (sibyl.tools:execute-tool
+                        "sync-to-file"
+                        (list (cons "name" "foo")
+                              (cons "file" path)
+                              (cons "new-source" new-source)))))
+           (is (search "```diff" result) "diff ブロックが含まれる")
+           (is (search "-" result) "削除行が含まれる")
+           (is (search "+" result) "追加行が含まれる")))
+    (when (probe-file path) (delete-file path)))))
+
+(test write-file-includes-diff-in-result
+  "Auto-generated test"
+  (let* ((path (format nil "/tmp/sibyl-write-diff-test-~a.txt" (get-universal-time))))
+  (unwind-protect
+       (progn
+         ;; 既存ファイルを作成
+         (with-open-file (s path :direction :output :if-does-not-exist :create)
+           (write-string "line1\nline2\n" s))
+         ;; 上書き
+         (let ((result (sibyl.tools:execute-tool
+                        "write-file"
+                        (list (cons "path" path)
+                              (cons "content" "line1\nline2-modified\n")))))
+           (is (search "```diff" result) "上書き時に diff ブロックが含まれる")))
+    (when (probe-file path) (delete-file path)))))

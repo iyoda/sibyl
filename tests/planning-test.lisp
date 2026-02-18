@@ -406,3 +406,33 @@
             (is (= 1 (length tasks)))
             (is (string= "New Task" (getf (first tasks) :title)))))
       (cleanup-plan-dir dir))))
+
+;;; ── Regression: *print-pretty* corruption fix ────────────────────────────
+
+(test plan-save-load-roundtrip-long-notes
+  "save-plan and load-plan roundtrip with long multi-line UTF-8 notes.
+Regression test for *print-pretty* t causing line-wrap corruption."
+  (let* ((dir (make-temp-plan-dir))
+         (long-notes
+           (format nil
+                   "実装の核心は %generate-unified-diff 関数。~%~
+- 変更前の内容を (uiop:with-temporary-file ...) で /tmp に書き出す~%~
+- (uiop:run-program (list \"diff\" \"-u\" old new) ...) で diff を取得~%~
+- diff の exit code は変更あり=1, エラー=2 なので正常に扱う~%~
+- レスポンス形式: 成功メッセージ + 改行 + \"```diff\" + diff文字列 + \"```\""))
+         (plan (sibyl.plan:make-plan
+                :title "ラウンドトリップテスト"
+                :description "save-plan → load-plan の往復テスト"
+                :notes long-notes))
+         (plan-id (getf plan :id)))
+    (unwind-protect
+        (progn
+          (sibyl.plan:save-plan plan :directory dir)
+          (let ((loaded (sibyl.plan:load-plan plan-id :directory dir)))
+            (is (not (null loaded))
+                "load-plan should return a plan plist")
+            (is (string= (getf loaded :title) "ラウンドトリップテスト")
+                "title should roundtrip correctly")
+            (is (string= (getf loaded :notes) long-notes)
+                "long UTF-8 notes should roundtrip without corruption")))
+      (cleanup-plan-dir dir))))
