@@ -9,13 +9,20 @@
 (def-suite sibyl-tests
   :description "Top-level test suite for Sibyl.")
 
-(in-suite sibyl-tests)
+
+(def-suite core-tests
+  :description "Core sanity tests for the test harness."
+  :in sibyl-tests)
+
+(in-suite core-tests)
 
 ;;; Placeholder test to verify the suite loads
 (test sanity-check
   "Basic sanity check."
   (is (= 1 1))
   (is (string= "sibyl" (string-downcase "SIBYL"))))
+
+(in-suite sibyl-tests)
 
 (defun run-sibyl-tests ()
   "Run the full test suite with self-assess nested execution prevention
@@ -28,6 +35,12 @@ and codebase-map caching for faster repeated scans."
 ;;; Suite classification for parallel execution
 ;;; ============================================================
 
+;;; LLM GUIDANCE:
+;;; - Always define a per-file test suite and add it to *safe-suites* or *unsafe-suites*.
+;;; - SAFE: pure logic, no file I/O, no global state mutation, no external processes.
+;;; - UNSAFE: file I/O, global registries/state, random timing, network, or tool execution.
+;;; - If you add a new suite and forget to classify it, run-tests-parallel will miss it.
+
 ;;; Helper to resolve a suite symbol at runtime.
 ;;; FiveAM uses the full package-qualified symbol for suite lookup,
 ;;; so cross-package suites must be resolved from their defining package.
@@ -39,7 +52,12 @@ and codebase-map caching for faster repeated scans."
 
 (defparameter *safe-suites*
   ;; Suites defined in sibyl.tests package (same package as this file)
-  '(read-sexp-tests
+  '(core-tests
+    tools-tests
+    message-tests
+    client-tests
+    repl-tests
+    read-sexp-tests
     describe-symbol-tests
     macroexpand-form-tests
     package-symbols-tests
@@ -64,7 +82,8 @@ Called at run-tests-parallel invocation time, after all packages are loaded."
              (%resolve-suite 'evolution-report-tests  '#:sibyl.evolution.tests)))))
 
 (defparameter *unsafe-suites*
-  '(suggest-improvements-tests
+  '(planning-tests
+    suggest-improvements-tests
     self-assess-tests
     improvement-plan-tests
     suggest-improvements-enhanced-tests
@@ -99,9 +118,6 @@ Called at run-tests-parallel invocation time, after all packages are loaded."
 Execution strategy:
   1. SAFE suites: run in parallel threads (serialized via lock due to FiveAM not being thread-safe)
   2. UNSAFE suites: run sequentially (shared state, file I/O)
-  3. Full sibyl-tests suite: run to capture top-level tests not in any named sub-suite
-     (e.g. sanity-check, tool-registration from tools-test.lisp). The full suite result
-     is used as the authoritative result set when it has >= checks than named sub-suites.
 
 Uses with-codebase-map-cache and *self-assess-running* guard for optimal performance.
 
@@ -135,45 +151,34 @@ Returns a list of all test results (same format as fiveam:run)."
         (bt:join-thread thread))
 
       ;; Sequential phase: run UNSAFE suites
-      (let ((unsafe-results
-              (loop for suite in *unsafe-suites*
-                    nconc
-                    (handler-case
-                        (%collect-fiveam-results suite)
-                      (error (e)
-                        (format *error-output* "~%[parallel-runner] Error in ~a: ~a~%"
-                                suite e)
-                        nil)))))
+      (let* ((unsafe-results
+               (loop for suite in *unsafe-suites*
+                     nconc
+                     (handler-case
+                         (%collect-fiveam-results suite)
+                       (error (e)
+                         (format *error-output* "~%[parallel-runner] Error in ~a: ~a~%"
+                                 suite e)
+                         nil))))
+             (final-results (append (loop for i from 0 below n-safe
+                                          nconc (or (aref safe-results i) nil))
+                                    unsafe-results)))
 
-        ;; Full suite phase: run sibyl-tests to capture top-level tests not in named sub-suites.
-        ;; fiveam:run 'sibyl-tests recurses into all sub-suites, so its result count >= named suites.
-        ;; We use the full suite results as the authoritative set.
-        (let* ((full-results (%collect-fiveam-results 'sibyl-tests))
-               (named-count (+ (loop for i from 0 below n-safe
-                                     sum (length (or (aref safe-results i) nil)))
-                               (length unsafe-results)))
-               ;; Use full results (which include everything) as the final answer
-               (final-results (if (>= (length full-results) named-count)
-                                  full-results
-                                  (append (loop for i from 0 below n-safe
-                                                nconc (or (aref safe-results i) nil))
-                                          unsafe-results))))
+        ;; Print summary (like fiveam:run! does)
+        ;; Uses find-symbol+find-class to avoid SBCL package-lock on IT.BESE.FIVEAM
+        (let* ((fiveam-pkg (find-package "IT.BESE.FIVEAM"))
+               (passed-class  (find-class (find-symbol "TEST-PASSED"             fiveam-pkg) nil))
+               (failed-class  (find-class (find-symbol "TEST-FAILED"             fiveam-pkg) nil))
+               (skipped-class (find-class (find-symbol "TEST-SKIPPED"            fiveam-pkg) nil))
+               (error-class   (find-class (find-symbol "UNEXPECTED-TEST-FAILURE" fiveam-pkg) nil))
+               (total (length final-results))
+               (pass (count-if (lambda (r) (and passed-class  (typep r passed-class)))  final-results))
+               (fail (count-if (lambda (r) (and failed-class  (typep r failed-class)))  final-results))
+               (skip (count-if (lambda (r) (and skipped-class (typep r skipped-class))) final-results))
+               (err  (count-if (lambda (r) (and error-class   (typep r error-class)))   final-results)))
+          (format t "~% Did ~a checks.~%" total)
+          (format t "    Pass: ~a (~a%)~%" pass (if (> total 0) (round (* 100 (/ pass total))) 0))
+          (format t "    Skip: ~a~%" skip)
+          (format t "    Fail: ~a~%" (+ fail err)))
 
-          ;; Print summary (like fiveam:run! does)
-          ;; Uses find-symbol+find-class to avoid SBCL package-lock on IT.BESE.FIVEAM
-          (let* ((fiveam-pkg (find-package "IT.BESE.FIVEAM"))
-                 (passed-class  (find-class (find-symbol "TEST-PASSED"             fiveam-pkg) nil))
-                 (failed-class  (find-class (find-symbol "TEST-FAILED"             fiveam-pkg) nil))
-                 (skipped-class (find-class (find-symbol "TEST-SKIPPED"            fiveam-pkg) nil))
-                 (error-class   (find-class (find-symbol "UNEXPECTED-TEST-FAILURE" fiveam-pkg) nil))
-                 (total (length final-results))
-                 (pass (count-if (lambda (r) (and passed-class  (typep r passed-class)))  final-results))
-                 (fail (count-if (lambda (r) (and failed-class  (typep r failed-class)))  final-results))
-                 (skip (count-if (lambda (r) (and skipped-class (typep r skipped-class))) final-results))
-                 (err  (count-if (lambda (r) (and error-class   (typep r error-class)))   final-results)))
-            (format t "~% Did ~a checks.~%" total)
-            (format t "    Pass: ~a (~a%)~%" pass (if (> total 0) (round (* 100 (/ pass total))) 0))
-            (format t "    Skip: ~a~%" skip)
-            (format t "    Fail: ~a~%" (+ fail err)))
-
-          final-results)))))
+        final-results))))
