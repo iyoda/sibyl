@@ -109,9 +109,22 @@ Called at run-tests-parallel invocation time, after all packages are loaded."
 
 (defun %collect-fiveam-results (suite)
   "Run SUITE collecting results with thread-safe serialization.
-   Uses a lock to prevent concurrent FiveAM global state mutation."
+    Uses a lock to prevent concurrent FiveAM global state mutation."
   (bt:with-lock-held (*fiveam-run-lock*)
     (fiveam:run suite)))
+
+(defun %validate-suites (suites label)
+  "Check SUITES against FiveAM registry. Returns (values valid-suites skipped-names).
+LABEL is a string like \"SAFE\" or \"UNSAFE\" for warning messages."
+  (let (valid skipped)
+    (dolist (suite suites)
+      (if (fiveam:get-test suite)
+          (push suite valid)
+          (progn
+            (format *error-output* "~%[parallel-runner] WARNING: ~a suite ~a not found in FiveAM registry, skipping~%"
+                    label suite)
+            (push suite skipped))))
+    (values (nreverse valid) (nreverse skipped))))
 
 (defun run-tests-parallel ()
   "Run the full test suite with parallel execution of safe suites.
@@ -126,7 +139,7 @@ Returns a list of all test results (same format as fiveam:run)."
   (sibyl.tools:with-codebase-map-cache ()
     (let* ((sibyl.tools:*self-assess-running* t)
            ;; Resolve cross-package suite symbols at runtime
-           (safe-suites (%safe-suites-resolved))
+           (safe-suites (nth-value 0 (%validate-suites (%safe-suites-resolved) "SAFE")))
            ;; Parallel phase: run SAFE suites in threads
            (n-safe (length safe-suites))
            (safe-results (make-array n-safe :initial-element nil))
@@ -147,20 +160,21 @@ Returns a list of all test results (same format as fiveam:run)."
                             (setf (aref safe-results i-capture) nil))))
                       :name (format nil "test-~a" suite-capture))))))
 
-      ;; Wait for all parallel threads to complete
-      (dolist (thread threads)
-        (bt:join-thread thread))
+       ;; Wait for all parallel threads to complete
+       (dolist (thread threads)
+         (bt:join-thread thread))
 
-      ;; Sequential phase: run UNSAFE suites
-      (let* ((unsafe-results
-               (loop for suite in *unsafe-suites*
-                     nconc
-                     (handler-case
-                         (%collect-fiveam-results suite)
-                       (error (e)
-                         (format *error-output* "~%[parallel-runner] Error in ~a: ~a~%"
-                                 suite e)
-                         nil))))
+       ;; Sequential phase: run UNSAFE suites
+       (let* ((unsafe-suites (nth-value 0 (%validate-suites *unsafe-suites* "UNSAFE")))
+              (unsafe-results
+                (loop for suite in unsafe-suites
+                      nconc
+                      (handler-case
+                          (%collect-fiveam-results suite)
+                        (error (e)
+                          (format *error-output* "~%[parallel-runner] Error in ~a: ~a~%"
+                                  suite e)
+                          nil))))
              (final-results (append (loop for i from 0 below n-safe
                                           nconc (or (aref safe-results i) nil))
                                     unsafe-results)))
