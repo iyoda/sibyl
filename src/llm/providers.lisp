@@ -69,12 +69,19 @@
 
 (defun messages-to-anthropic-format (messages)
   "Convert message structs to Anthropic API format.
-   Returns (values system-prompt api-messages)."
+   Returns (values system-prompt api-messages).
+   The system value may be a plain string or a list of content-block alists —
+   the Anthropic API accepts both forms for the top-level \"system\" field.
+   Callers pass it through to alist-to-hash / to-json-value unchanged."
   (let ((system nil)
         (api-msgs nil))
     (dolist (msg messages)
       (case (message-role msg)
         (:system
+         ;; message-content may be a string or a list of content-block alists.
+         ;; Either form is accepted by the Anthropic API and serialised correctly
+         ;; by to-json-value: a string stays a string; a list of alists becomes
+         ;; a JSON array of objects (the structured system-prompt format).
          (setf system (message-content msg)))
         (:user
          (push `(("role" . "user")

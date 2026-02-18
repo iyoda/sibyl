@@ -24,7 +24,7 @@
 (defstruct (message (:constructor %make-message))
   "A single message in a conversation."
   (role         :user    :type keyword)     ; :system :user :assistant :tool
-  (content      ""       :type (or string null))
+  (content      ""       :type (or string list null))  ; string for most roles; list of content-block alists for :system
   (tool-calls   nil      :type list)        ; list of tool-call structs
   (tool-call-id nil      :type (or string null))  ; for :tool role
   (timestamp    ""       :type string)
@@ -42,7 +42,10 @@
 ;;; Convenience constructors
 
 (defun system-message (content)
-  "Create a system message."
+  "Create a system message.
+CONTENT may be a plain string or a list of content-block alists
+  (e.g. ((\"type\" . \"text\") (\"text\" . \"...\")))).
+The Anthropic API accepts both forms for the top-level \"system\" field."
   (make-message :role :system :content content))
 
 (defun user-message (content)

@@ -117,3 +117,34 @@
       (declare (ignore usage))
       (is (null (sibyl.llm:message-thinking msg)))
       (is (string= "Normal response" (sibyl.llm:message-content msg))))))
+
+;; Test 9: system prompt without summary → single content block
+(test memory-context-window-single-block-no-summary
+  "memory-context-window with no summary gives system prompt as single block list"
+  (let ((mem (sibyl.agent::make-memory)))
+    ;; No summary set
+    (let ((ctx (sibyl.agent::memory-context-window mem :system-prompt "Static system prompt")))
+      (let ((sys-msg (first ctx)))
+        (is (eq :system (sibyl.llm:message-role sys-msg)))
+        ;; System content should be a list of one block: (("type" . "text") ("text" . "Static system prompt"))
+        (let ((content (sibyl.llm:message-content sys-msg)))
+          ;; content is now a list of alists, not a plain string
+          (is (listp content))
+          (is (= 1 (length content)))
+          (is (string= "text" (cdr (assoc "type" (first content) :test #'string=))))
+          (is (string= "Static system prompt" (cdr (assoc "text" (first content) :test #'string=)))))))))
+
+;; Test 10: system prompt with summary → two content blocks
+(test memory-context-window-two-blocks-with-summary
+  "memory-context-window with summary gives system prompt as two-block list"
+  (let ((mem (sibyl.agent::make-memory)))
+    (setf (sibyl.agent::memory-summary mem) "Previous summary text")
+    (let ((ctx (sibyl.agent::memory-context-window mem :system-prompt "Static prompt")))
+      (let* ((sys-msg (first ctx))
+             (content (sibyl.llm:message-content sys-msg)))
+        (is (listp content))
+        (is (= 2 (length content)))
+        ;; First block: static prompt
+        (is (string= "Static prompt" (cdr (assoc "text" (first content) :test #'string=))))
+        ;; Second block: summary
+        (is (search "Previous summary text" (cdr (assoc "text" (second content) :test #'string=))))))))

@@ -42,16 +42,24 @@
 
 (defmethod memory-context-window ((mem memory) &key system-prompt)
   "Build the full context window for LLM submission.
-   Prepends system prompt and any summary of compacted history."
+   System prompt is returned as a list of content blocks for caching support.
+   Static content (the base system prompt) is always the first block so it
+   can be marked cache_control in a later task.  The dynamic summary, which
+   changes every compaction, is kept as a separate second block so the first
+   block remains cache-stable."
   (let ((messages nil))
     ;; System prompt first
     (when system-prompt
-      (let ((full-system
+      (let ((content-blocks
               (if (memory-summary mem)
-                  (format nil "~a~%~%## Previous conversation summary:~%~a"
-                          system-prompt (memory-summary mem))
-                  system-prompt)))
-        (push (system-message full-system) messages)))
+                  ;; Two blocks: static (cacheable) + dynamic summary
+                  (list `(("type" . "text") ("text" . ,system-prompt))
+                        `(("type" . "text")
+                          ("text" . ,(format nil "## Previous conversation summary:~%~a"
+                                             (memory-summary mem)))))
+                  ;; One block: static only
+                  (list `(("type" . "text") ("text" . ,system-prompt))))))
+        (push (system-message content-blocks) messages)))
     ;; Current conversation messages
     (setf messages (append messages
                            (conversation-to-list
