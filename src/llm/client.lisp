@@ -237,14 +237,15 @@
   (let ((json-body (with-output-to-string (s)
                      (yason:encode (to-json-value body) s))))
     (handler-case
-        (let ((stream (dex:post url
-                               :headers (append headers
-                                                '(("Content-Type" . "application/json")))
-                               :content json-body
-                               :want-stream t)))
-          (unwind-protect
-               (parse-ndjson-stream stream on-chunk on-done :on-error on-error)
-            (close stream)))
+         (let* ((raw-stream (dex:post url
+                                      :headers (append headers
+                                                       '(("Content-Type" . "application/json")))
+                                      :content json-body
+                                      :want-stream t))
+                (stream (flexi-streams:make-flexi-stream raw-stream :external-format :utf-8)))
+           (unwind-protect
+                (parse-ndjson-stream stream on-chunk on-done :on-error on-error)
+             (close raw-stream)))
       (dex:http-request-failed (e)
         (let ((code (dex:response-status e))
               (body (read-response-body (dex:response-body e))))

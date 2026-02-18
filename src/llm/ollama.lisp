@@ -233,11 +233,11 @@ Returns (values message usage-plist)."
                             '()                 ; no auth headers
                             body)))
             (parse-ollama-response response))
-        (usocket:connection-refused-error ()
+        (error (e)
           (error 'llm-api-error
                  :message (format nil
-                                  "Cannot connect to Ollama at ~a. Is it running?"
-                                  (client-base-url client)))))))
+                                  "Cannot connect to Ollama at ~a: ~a"
+                                  (client-base-url client) e))))))
 
 (defmethod complete-with-tools ((client ollama-client) messages tools &key)
   "Send messages with tool schemas to the local Ollama server.
@@ -256,11 +256,11 @@ Returns (values message usage-plist)."
                             '()                 ; no auth headers
                             body)))
             (parse-ollama-response response))
-        (usocket:connection-refused-error ()
+        (error (e)
           (error 'llm-api-error
                  :message (format nil
-                                  "Cannot connect to Ollama at ~a. Is it running?"
-                                  (client-base-url client)))))))
+                                  "Cannot connect to Ollama at ~a: ~a"
+                                   (client-base-url client) e))))))
 
 (defmethod count-tokens ((client ollama-client) text)
   "Rough token estimate for Ollama models: ~4 characters per token."
