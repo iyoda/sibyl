@@ -196,6 +196,65 @@
                      :message "Rate limited"
                      :status-code code
                      :body body)
+               (error 'llm-api-error
+                      :message (format nil "HTTP ~a" code)
+                      :status-code code
+                      :body body)))))))
+
+(defun parse-ndjson-stream (stream on-chunk on-done &key (on-error nil))
+  "Parse a newline-delimited JSON (NDJSON) stream.
+   STREAM   — readable stream from dexador :want-stream t
+   ON-CHUNK — (lambda (parsed-object) ...) called per JSON object
+   ON-DONE  — (lambda () ...) called when stream ends
+   ON-ERROR — optional (lambda (condition) ...) for parse errors
+   
+   NDJSON format: one JSON object per line, empty lines skipped."
+  (loop
+    (let ((line (handler-case
+                    (read-line stream nil :eof)
+                  (error (e)
+                    (when on-error (funcall on-error e))
+                    (return)))))
+      (when (eq line :eof)
+        (funcall on-done)
+        (return))
+      (let ((trimmed (string-trim '(#\Space #\Tab #\Return) line)))
+        (unless (string= trimmed "")
+          (handler-case
+              (let ((parsed (yason:parse trimmed :object-as :hash-table)))
+                (funcall on-chunk parsed))
+            (error (e)
+              (if on-error
+                  (funcall on-error e)
+                  (warn "parse-ndjson-stream: failed to parse line: ~a" trimmed)))))))))
+
+(defun http-post-ndjson-stream (url headers body on-chunk on-done &key (on-error nil))
+  "POST JSON BODY to URL, read response as NDJSON stream.
+   ON-CHUNK — called with (parsed-object) per NDJSON line
+   ON-DONE  — called when stream completes
+   ON-ERROR — optional error handler"
+  (log-debug "llm" "HTTP POST NDJSON stream to ~a" url)
+  (let ((json-body (with-output-to-string (s)
+                     (yason:encode (to-json-value body) s))))
+    (handler-case
+         (let* ((raw-stream (dex:post url
+                                      :headers (append headers
+                                                       '(("Content-Type" . "application/json")))
+                                      :content json-body
+                                      :want-stream t))
+                (stream (flexi-streams:make-flexi-stream raw-stream :external-format :utf-8)))
+           (unwind-protect
+                (parse-ndjson-stream stream on-chunk on-done :on-error on-error)
+             (close raw-stream)))
+      (dex:http-request-failed (e)
+        (let ((code (dex:response-status e))
+              (body (read-response-body (dex:response-body e))))
+          (log-error "llm" "HTTP error ~a for ~a: ~@[~a~]" code url body)
+          (if (= code 429)
+              (error 'llm-rate-limit-error
+                     :message "Rate limited"
+                     :status-code code
+                     :body body)
               (error 'llm-api-error
                      :message (format nil "HTTP ~a" code)
                      :status-code code

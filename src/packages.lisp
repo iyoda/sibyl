@@ -162,9 +162,11 @@
    #:model-release-date
    #:model-version
    #:model-context-window
-   #:model-capabilities
-   #:call-llm
-   #:make-openai-client))
+    #:model-capabilities
+    #:call-llm
+    #:make-openai-client
+    #:ollama-client
+    #:make-ollama-client))
 
 (defpackage #:sibyl.plan
   (:use #:cl #:sibyl.util)
@@ -379,9 +381,10 @@
   (:use #:cl)
   (:import-from #:sibyl.config
                 #:load-config #:config-value #:config-set #:with-config)
-  (:import-from #:sibyl.llm
-                #:make-anthropic-client #:make-openai-client)
-  (:import-from #:sibyl.tools
+   (:import-from #:sibyl.llm
+                 #:make-anthropic-client #:make-openai-client
+                 #:make-ollama-client #:ollama-client)
+   (:import-from #:sibyl.tools
                 #:deftool #:list-tools #:execute-tool)
   (:import-from #:sibyl.agent
                 #:make-agent #:agent-run #:agent-step #:agent-reset)
@@ -397,9 +400,11 @@
    #:config-value
    #:config-set
    #:with-config
-   #:make-anthropic-client
-   #:make-openai-client
-   #:deftool
+    #:make-anthropic-client
+    #:make-openai-client
+    #:make-ollama-client
+    #:ollama-client
+    #:deftool
    #:list-tools
    #:make-agent
    #:agent-run
