@@ -113,13 +113,21 @@ Be precise and concise. Use tools for actions."
 
 (defun select-ollama-system-prompt (model-name)
   "Select an optimized system prompt for an Ollama model.
-Prepends the model profile's system-prompt-hint (if any) to the compact prompt."
+Large models (profile :large-model t) use the full *default-system-prompt*
+since they have sufficient context window. Smaller models use the compact
+prompt with an optional system-prompt-hint prefix to save tokens."
   (let ((profile (sibyl.llm::lookup-model-profile model-name)))
-    (if (and profile (getf profile :system-prompt-hint))
-        (format nil "~a~%~%~a"
-                (getf profile :system-prompt-hint)
-                *compact-system-prompt*)
-        *compact-system-prompt*)))
+    (cond
+      ;; Large models (e.g. gpt-oss:120b) — use full prompt
+      ((and profile (getf profile :large-model))
+       *default-system-prompt*)
+      ;; Small models with hint — hint + compact
+      ((and profile (getf profile :system-prompt-hint))
+       (format nil "~a~%~%~a"
+               (getf profile :system-prompt-hint)
+               *compact-system-prompt*))
+      ;; Fallback — compact only
+      (t *compact-system-prompt*))))
 
 
 ;;; ============================================================
