@@ -11,7 +11,7 @@
   ()
   (:default-initargs
    :base-url "http://localhost:11434"
-   :model "qwen3-coder:30b"
+   :model "glm-4.7-flash:q8_0"
    :api-key "")
   (:documentation "Client for the local Ollama inference server."))
 
@@ -95,7 +95,7 @@ Falls back to '*default*' if no prefix matches."
       ;; Fallback to default
       (cdr (find "*default*" *ollama-model-profiles* :key #'car :test #'string=))))
 
-(defun make-ollama-client (&key (model "qwen3-coder:30b")
+(defun make-ollama-client (&key (model "glm-4.7-flash:q8_0")
                                 (host nil)
                                 (max-tokens nil)
                                 (temperature nil))

@@ -1601,8 +1601,11 @@ Otherwise, use model-specific optimized prompt for Ollama models."
    Or with an existing agent:
      (start-repl :client my-client)"
   (let* ((effective-prompt (%select-system-prompt client system-prompt))
-         (agent (if (or use-model-selector
-                        (sibyl.config:config-value "optimization.auto-model-routing"))
+         ;; Ollama runs a single local model — skip adaptive model selection
+         (ollama-p (typep client 'sibyl.llm:ollama-client))
+         (agent (if (and (not ollama-p)
+                         (or use-model-selector
+                             (sibyl.config:config-value "optimization.auto-model-routing")))
                     (make-instance 'sibyl.llm::adaptive-agent
                                    :client client
                                    :name name
