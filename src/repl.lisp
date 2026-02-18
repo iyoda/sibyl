@@ -65,6 +65,11 @@
 (defvar *current-spinner* nil
   "Currently active spinner for LLM calls, or NIL when idle.")
 
+(defvar *spinner-output-lock* (bt:make-lock "spinner-output")
+  "Lock serializing spinner stop/start and terminal output in the tool-call hook.
+   Prevents garbled escape sequences when parallel tool calls each fire the hook
+   from separate worker threads.")
+
 (defvar *last-interrupt-time* 0
   "Internal real time (from GET-INTERNAL-REAL-TIME) of the most recent Ctrl+C press.
    Used to detect double-press within 2 seconds for REPL exit.")
@@ -874,24 +879,28 @@
            (display
             (if (string= summary "")
                 (format nil "🔧 ~a を実行中..." tool-name)
-                (format nil "🔧 ~a を実行中... ~a" tool-name summary)))
-           (active-spinner (or spinner *current-spinner*)))
+                (format nil "🔧 ~a を実行中... ~a" tool-name summary))))
       (log-info "agent" "Tool call: ~a ~a" tool-name summary)
-      ;; Stop the spinner BEFORE printing so the line-clear (\r\e[2K) from
-      ;; stop-spinner runs first, then our message is written on a clean line.
-      (when (and active-spinner
-                 (sibyl.repl.spinner:spinner-active-p active-spinner))
-        (sibyl.repl.spinner:stop-spinner active-spinner)
-        (setf *current-spinner* nil))
-      (if *use-colors*
-          (progn (format-colored-text display :cyan) (format t "~%"))
-          (format t "~a~%" display))
-      (force-output)
-      ;; Restart spinner to give visual feedback during tool execution.
-      ;; The spinner runs until the next LLM streaming chunk arrives
-      ;; (which stops it via the streaming callback).
-      (let ((new-spinner (sibyl.repl.spinner:start-spinner "考え中...")))
-        (setf *current-spinner* new-spinner)))))
+      ;; Serialize spinner stop → output → spinner restart across threads.
+      ;; Parallel tool execution fires this hook from multiple worker threads;
+      ;; without the lock, concurrent escape-sequence writes garble the terminal.
+      (bt:with-lock-held (*spinner-output-lock*)
+        (let ((active-spinner (or spinner *current-spinner*)))
+          ;; Stop the spinner BEFORE printing so the line-clear (\r\e[2K) from
+          ;; stop-spinner runs first, then our message is written on a clean line.
+          (when (and active-spinner
+                     (sibyl.repl.spinner:spinner-active-p active-spinner))
+            (sibyl.repl.spinner:stop-spinner active-spinner)
+            (setf *current-spinner* nil))
+          (if *use-colors*
+              (progn (format-colored-text display :cyan) (format t "~%"))
+              (format t "~a~%" display))
+          (force-output)
+          ;; Restart spinner to give visual feedback during tool execution.
+          ;; The spinner runs until the next LLM streaming chunk arrives
+          ;; (which stops it via the streaming callback).
+          (let ((new-spinner (sibyl.repl.spinner:start-spinner "考え中...")))
+            (setf *current-spinner* new-spinner)))))))
 
 (defun format-tool-call-summary (tc &key (max-length 50))
   "ツールコールの引数を人間が読みやすい短い文字列に整形する。
