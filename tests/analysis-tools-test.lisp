@@ -99,63 +99,71 @@
   "Parse JSON result from self-assess tool."
   (yason:parse json :object-as :hash-table))
 
+;;; Helper: bind *self-assess-running* with mock test results so that
+;;; self-assess skips the full (run-tests) call, preventing recursive
+;;; re-execution of the entire test suite.
+(defun %mock-test-results ()
+  (let ((h (make-hash-table :test 'equal)))
+    (setf (gethash "passed" h) 100
+          (gethash "failed" h) 0
+          (gethash "total" h) 100)
+    h))
+
+(defmacro with-self-assess-guard (&body body)
+  `(let ((sibyl.tools::*self-assess-running* t)
+         (sibyl.tools::*self-assess-last-test-results* (%mock-test-results)))
+     ,@body))
+
 (test self-assess-generates-report
   "self-assess returns a non-empty JSON report."
-  (let ((result (sibyl.tools:execute-tool "self-assess" '())))
-    (is (stringp result))
-    (is (> (length result) 0))))
+  (with-self-assess-guard
+    (let ((result (sibyl.tools:execute-tool "self-assess" '())))
+      (is (stringp result))
+      (is (> (length result) 0)))))
 
 (test self-assess-has-required-sections
   "self-assess includes toolset, codebase, test_coverage, and limitations."
-  (let* ((result (sibyl.tools:execute-tool "self-assess" '()))
-         (parsed (parse-self-assess-result result)))
-    (is (gethash "toolset" parsed))
-    (is (gethash "codebase" parsed))
-    (is (gethash "test_coverage" parsed))
-    (is (gethash "limitations" parsed))))
+  (with-self-assess-guard
+    (let* ((result (sibyl.tools:execute-tool "self-assess" '()))
+           (parsed (parse-self-assess-result result)))
+      (is (gethash "toolset" parsed))
+      (is (gethash "codebase" parsed))
+      (is (gethash "test_coverage" parsed))
+      (is (gethash "limitations" parsed)))))
 
 (test self-assess-metrics-reasonable
   "self-assess returns reasonable non-zero metrics."
-  (let* ((result (sibyl.tools:execute-tool "self-assess" '()))
-         (parsed (parse-self-assess-result result))
-         (toolset (gethash "toolset" parsed))
-         (codebase (gethash "codebase" parsed))
-         (test-coverage (gethash "test_coverage" parsed))
-         (total-tools (gethash "total_tools" toolset))
-         (total-lines (gethash "total_lines" codebase))
-         (total-functions (gethash "total_functions" codebase))
-         (total-modules (gethash "total_modules" codebase))
-         (total-tests (gethash "total_tests" test-coverage))
-         (coverage (gethash "coverage_estimate" test-coverage)))
-    (is (integerp total-tools))
-    (is (> total-tools 0))
-    (is (integerp total-lines))
-    (is (> total-lines 0))
-    (is (integerp total-functions))
-    (is (> total-functions 0))
-    (is (integerp total-modules))
-    (is (> total-modules 0))
-    (is (integerp total-tests))
-    (is (> total-tests 0))
-    (is (numberp coverage))
-    (is (>= coverage 0.0))
-    (is (<= coverage 1.0))))
+  (with-self-assess-guard
+    (let* ((result (sibyl.tools:execute-tool "self-assess" '()))
+           (parsed (parse-self-assess-result result))
+           (toolset (gethash "toolset" parsed))
+           (codebase (gethash "codebase" parsed))
+           (test-coverage (gethash "test_coverage" parsed))
+           (total-tools (gethash "total_tools" toolset))
+           (total-lines (gethash "total_lines" codebase))
+           (total-functions (gethash "total_functions" codebase))
+           (total-modules (gethash "total_modules" codebase))
+           (total-tests (gethash "total_tests" test-coverage))
+           (coverage (gethash "coverage_estimate" test-coverage)))
+      (is (integerp total-tools))
+      (is (> total-tools 0))
+      (is (integerp total-lines))
+      (is (> total-lines 0))
+      (is (integerp total-functions))
+      (is (> total-functions 0))
+      (is (integerp total-modules))
+      (is (> total-modules 0))
+      (is (integerp total-tests))
+      (is (> total-tests 0))
+      (is (numberp coverage))
+      (is (>= coverage 0.0))
+      (is (<= coverage 1.0)))))
 
 (test self-assess-does-not-rerun-full-suite
   "*self-assess-running* が t の時、self-assess は run-tests をスキップしキャッシュを返すべき。"
-  ;; テスト中（*self-assess-running* = t）でself-assessを呼んでも
-  ;; スイート全体が再実行されないことを確認
-  (let ((sibyl.tools::*self-assess-running* t)
-        ;; キャッシュに既存の結果をセット
-        (sibyl.tools::*self-assess-last-test-results*
-          (let ((h (make-hash-table :test 'equal)))
-            (setf (gethash "passed" h) 100
-                  (gethash "failed" h) 0
-                  (gethash "total" h) 100)
-            h)))
+  (with-self-assess-guard
     (let ((result (sibyl.tools:execute-tool "self-assess" nil)))
       (is (stringp result))
-      ;; キャッシュ使用時は "test_coverage" セクションが存在する
       (is (search "test_coverage" result)))))
 
 (def-suite improvement-plan-tests
@@ -173,50 +181,53 @@
 
 (test improvement-plan-generates-plan
   "improvement-plan returns a non-empty plan with improvements."
-  (let* ((result (sibyl.tools:execute-tool "improvement-plan" '()))
-         (parsed (parse-improvement-plan-result result))
-         (improvements (improvement-plan-improvements parsed)))
-    (is (stringp result))
-    (is (> (length result) 0))
-    (is (listp improvements))
-    (is (> (length improvements) 0))))
+  (with-self-assess-guard
+    (let* ((result (sibyl.tools:execute-tool "improvement-plan" '()))
+           (parsed (parse-improvement-plan-result result))
+           (improvements (improvement-plan-improvements parsed)))
+      (is (stringp result))
+      (is (> (length result) 0))
+      (is (listp improvements))
+      (is (> (length improvements) 0)))))
 
 (test improvement-plan-has-required-fields
   "improvement-plan includes required fields and improvement structure."
-  (let* ((result (sibyl.tools:execute-tool "improvement-plan" '()))
-         (parsed (parse-improvement-plan-result result))
-         (improvements (improvement-plan-improvements parsed))
-         (summary (gethash "summary" parsed)))
-    (is (stringp (gethash "plan_id" parsed)))
-    (is (stringp (gethash "based_on_assessment" parsed)))
-    (is (hash-table-p summary))
-    (is (integerp (gethash "total_improvements" summary)))
-    (dolist (improvement improvements)
-      (is (integerp (gethash "id" improvement)))
-      (is (stringp (gethash "title" improvement)))
-      (is (stringp (gethash "description" improvement)))
-      (is (stringp (gethash "category" improvement)))
-      (is (stringp (gethash "priority" improvement)))
-      (is (stringp (gethash "risk" improvement)))
-      (is (stringp (gethash "effect" improvement)))
-      (is (stringp (gethash "timeframe" improvement)))
-      (is (stringp (gethash "rationale" improvement)))
-      (is (stringp (gethash "estimated_effort" improvement))))))
+  (with-self-assess-guard
+    (let* ((result (sibyl.tools:execute-tool "improvement-plan" '()))
+           (parsed (parse-improvement-plan-result result))
+           (improvements (improvement-plan-improvements parsed))
+           (summary (gethash "summary" parsed)))
+      (is (stringp (gethash "plan_id" parsed)))
+      (is (stringp (gethash "based_on_assessment" parsed)))
+      (is (hash-table-p summary))
+      (is (integerp (gethash "total_improvements" summary)))
+      (dolist (improvement improvements)
+        (is (integerp (gethash "id" improvement)))
+        (is (stringp (gethash "title" improvement)))
+        (is (stringp (gethash "description" improvement)))
+        (is (stringp (gethash "category" improvement)))
+        (is (stringp (gethash "priority" improvement)))
+        (is (stringp (gethash "risk" improvement)))
+        (is (stringp (gethash "effect" improvement)))
+        (is (stringp (gethash "timeframe" improvement)))
+        (is (stringp (gethash "rationale" improvement)))
+        (is (stringp (gethash "estimated_effort" improvement)))))))
 
 (test improvement-plan-priorities-valid
   "improvement-plan uses valid priority, risk, effect, and timeframe values."
-  (let* ((result (sibyl.tools:execute-tool "improvement-plan" '()))
-         (parsed (parse-improvement-plan-result result))
-         (improvements (improvement-plan-improvements parsed)))
-    (dolist (improvement improvements)
-      (let ((priority (gethash "priority" improvement))
-            (risk (gethash "risk" improvement))
-            (effect (gethash "effect" improvement))
-            (timeframe (gethash "timeframe" improvement)))
-        (is (member priority '("high" "medium" "low") :test #'string=))
-        (is (member risk '("high" "medium" "low") :test #'string=))
-        (is (member effect '("high" "medium" "low") :test #'string=))
-        (is (member timeframe '("short" "medium" "long") :test #'string=))))))
+  (with-self-assess-guard
+    (let* ((result (sibyl.tools:execute-tool "improvement-plan" '()))
+           (parsed (parse-improvement-plan-result result))
+           (improvements (improvement-plan-improvements parsed)))
+      (dolist (improvement improvements)
+        (let ((priority (gethash "priority" improvement))
+              (risk (gethash "risk" improvement))
+              (effect (gethash "effect" improvement))
+              (timeframe (gethash "timeframe" improvement)))
+          (is (member priority '("high" "medium" "low") :test #'string=))
+          (is (member risk '("high" "medium" "low") :test #'string=))
+          (is (member effect '("high" "medium" "low") :test #'string=))
+          (is (member timeframe '("short" "medium" "long") :test #'string=)))))))
 
 (def-suite safe-redefine-tests
   :description "Tests for safe-redefine tool."

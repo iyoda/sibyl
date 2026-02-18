@@ -24,13 +24,6 @@
 
 (in-suite sibyl-tests)
 
-(defun run-sibyl-tests ()
-  "Run the full test suite with self-assess nested execution prevention
-and codebase-map caching for faster repeated scans."
-  (sibyl.tools:with-codebase-map-cache ()
-    (let ((sibyl.tools:*self-assess-running* t))
-      (fiveam:run! 'sibyl-tests))))
-
 ;;; ============================================================
 ;;; Suite classification for parallel execution
 ;;; ============================================================
@@ -108,6 +101,18 @@ Called at run-tests-parallel invocation time, after all packages are loaded."
 (defvar *fiveam-run-lock* (bt:make-lock "fiveam-run-lock")
   "Lock to serialize FiveAM run calls across threads.")
 
+;;; Recursion guard — prevents tests from re-entering run-tests-parallel
+(defvar *run-tests-parallel-running* nil
+  "T while run-tests-parallel is executing. Prevents recursive re-entry.")
+
+(defun run-sibyl-tests ()
+  "Run the full test suite with self-assess nested execution prevention
+and codebase-map caching for faster repeated scans."
+  (sibyl.tools:with-codebase-map-cache ()
+    (let ((sibyl.tools:*self-assess-running* t)
+          (*run-tests-parallel-running* t))
+      (fiveam:run! 'sibyl-tests))))
+
 (defun %collect-fiveam-results (suite)
   "Run SUITE collecting results with thread-safe serialization.
     Uses a lock to prevent concurrent FiveAM global state mutation."
@@ -146,6 +151,10 @@ Execution strategy:
 Uses with-codebase-map-cache and *self-assess-running* guard for optimal performance.
 
 Returns a list of all test results (same format as fiveam:run)."
+  (when *run-tests-parallel-running*
+    (format *error-output* "~%[parallel-runner] WARNING: recursive re-entry detected, skipping~%")
+    (return-from run-tests-parallel nil))
+  (let ((*run-tests-parallel-running* t))
   (sibyl.tools:with-codebase-map-cache ()
     (let* ((sibyl.tools:*self-assess-running* t)
            ;; Resolve cross-package suite symbols at runtime
@@ -238,4 +247,4 @@ Returns a list of all test results (same format as fiveam:run)."
           (format t "~% Total wall-clock: ~6,3fs (safe: ~6,3fs, unsafe: ~6,3fs)~%"
                   total-wall safe-wall unsafe-wall))
 
-        final-results))))
+        final-results)))))
