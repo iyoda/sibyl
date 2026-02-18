@@ -143,6 +143,7 @@
 
 (deftool "describe-symbol"
     (:description "Describe a Lisp symbol: bindings, functions, and types."
+     :category :code
      :parameters ((:name "symbol" :type "string" :required t
                    :description "Symbol name, optionally with package prefix (e.g. \"pkg:name\")")
                   (:name "package" :type "string" :required nil
@@ -355,6 +356,7 @@
 
 (deftool "read-sexp"
     (:description "Read Lisp source as top-level S-expressions with metadata."
+     :category :code
      :parameters ((:name "path" :type "string" :required t
                    :description "Path to the Lisp source file")
                   (:name "name" :type "string" :required nil
@@ -463,6 +465,7 @@
 
 (deftool "codebase-map"
     (:description "Map Sibyl's codebase modules, files, and definitions."
+     :category :code
      :parameters ((:name "detail-level" :type "string" :required nil
                    :description "Detail level: summary (default) or full")))
   (block codebase-map
@@ -583,6 +586,7 @@
     (:description "Evaluate one or more Lisp forms in the current image.
 Multiple forms are read and evaluated in sequence; the result of the last form is returned.
 Use the package parameter to set the evaluation context (e.g. \"SIBYL.AGENT\")."
+     :category :code
      :parameters ((:name "form" :type "string" :required t
                    :description "Lisp form(s) to evaluate. Multiple forms are supported.")
                   (:name "package" :type "string" :required nil
@@ -702,6 +706,7 @@ Use the package parameter to set the evaluation context (e.g. \"SIBYL.AGENT\")."
 
 (deftool "safe-redefine"
     (:description "Safely redefine a function with rollback restart support."
+     :category :code
      :parameters ((:name "name" :type "string" :required t
                    :description "Function name with package prefix (e.g., \"sibyl.tools:find-tool\")")
                   (:name "new-definition" :type "string" :required t
@@ -785,6 +790,7 @@ Use the package parameter to set the evaluation context (e.g. \"SIBYL.AGENT\")."
 
 (deftool "sync-to-file"
     (:description "Sync an in-memory definition back to its source file."
+     :category :code
      :parameters ((:name "name" :type "string" :required t
                    :description "Definition name to replace")
                   (:name "file" :type "string" :required t
@@ -926,6 +932,7 @@ Use the package parameter to set the evaluation context (e.g. \"SIBYL.AGENT\")."
 
 (deftool "add-definition"
     (:description "Append a new definition to an existing Lisp source file."
+     :category :code
      :parameters ((:name "file" :type "string" :required t
                    :description "Path to the source file")
                   (:name "new-definition" :type "string" :required t
@@ -1025,6 +1032,7 @@ Use the package parameter to set the evaluation context (e.g. \"SIBYL.AGENT\")."
 
 (deftool "macroexpand-form"
     (:description "Expand Lisp macros using macroexpand or macroexpand-1, returning pretty-printed S-expressions."
+     :category :code
      :parameters ((:name "form" :type "string" :required t
                    :description "Lisp form to expand (string).")
                   (:name "full" :type "string" :required nil
@@ -1098,6 +1106,7 @@ Use the package parameter to set the evaluation context (e.g. \"SIBYL.AGENT\")."
 
 (deftool "package-symbols"
     (:description "List symbols in a Lisp package with type annotations."
+     :category :code
      :parameters ((:name "package" :type "string" :required t
                    :description "Package name (e.g., \"SIBYL.TOOLS\")")
                   (:name "external-only" :type "boolean" :required nil
@@ -1197,6 +1206,7 @@ Use the package parameter to set the evaluation context (e.g. \"SIBYL.AGENT\")."
 
 (deftool "who-calls"
     (:description "Analyze function call relationships using sb-introspect:who-calls. Reports which functions call a given function."
+     :category :code
      :parameters ((:name "function" :type "string" :required t
                    :description "Function name with optional package prefix (e.g., \"sibyl.tools:execute-tool-call\")")
                    (:name "direction" :type "string" :required nil

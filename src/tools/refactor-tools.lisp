@@ -90,6 +90,7 @@
     (:description "Rename a symbol across a Lisp source file. Replaces all non-string,
 non-comment occurrences of OLD-NAME with NEW-NAME in the specified file.
 Returns a summary of changes made."
+     :category :code
      :parameters ((:name "file" :type "string" :required t
                    :description "Path to the Lisp source file")
                   (:name "old-name" :type "string" :required t
@@ -152,6 +153,7 @@ Returns a summary of changes made."
     (:description "Extract a range of lines from within a function body into a new named function.
 The original function is updated to call the new function.
 Returns a summary of the extraction."
+     :category :code
      :parameters ((:name "file" :type "string" :required t
                    :description "Path to the Lisp source file")
                   (:name "source-function" :type "string" :required t

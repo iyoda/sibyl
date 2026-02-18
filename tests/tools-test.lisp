@@ -148,3 +148,63 @@
   (let ((result (sibyl.tools:execute-tool-call nil)))
     (is (stringp result))
     (is (search "Tool execution failed" result))))
+
+;;; ============================================================
+;;; Category tests
+;;; ============================================================
+
+(test deftool-with-category
+  "deftool creates tool with specified category"
+  (let ((sibyl.tools:*tool-registry* (make-hash-table :test 'equal)))
+    (sibyl.tools:deftool "test-categorized-tool"
+        (:description "A test tool with category"
+         :category :file
+         :parameters ((:name "path" :type "string" :required t :description "File path")))
+      "result")
+    (let ((tool (sibyl.tools:find-tool "test-categorized-tool")))
+      (is (not (null tool)))
+      (is (eq :file (sibyl.tools:tool-category tool))))))
+
+(test deftool-default-category
+  "deftool defaults to :general category when not specified"
+  (let ((sibyl.tools:*tool-registry* (make-hash-table :test 'equal)))
+    (sibyl.tools:deftool "test-general-tool"
+        (:description "A test tool without category"
+         :parameters ())
+      "result")
+    (let ((tool (sibyl.tools:find-tool "test-general-tool")))
+      (is (eq :general (sibyl.tools:tool-category tool))))))
+
+(test tools-as-schema-with-category-filter
+  "tools-as-schema with :categories returns only matching tools"
+  (let ((sibyl.tools:*tool-registry* (make-hash-table :test 'equal)))
+    ;; Register a file-category tool
+    (sibyl.tools:deftool "test-file-tool-for-filter"
+        (:description "File tool" :category :file :parameters ())
+      "ok")
+    ;; Register a code-category tool
+    (sibyl.tools:deftool "test-code-tool-for-filter"
+        (:description "Code tool" :category :code :parameters ())
+      "ok")
+    ;; Filter for :file only
+    (let ((file-tools (sibyl.tools:tools-as-schema :categories '(:file))))
+      ;; Should include the file tool
+      (is (find "test-file-tool-for-filter" file-tools
+                :key (lambda (s) (getf s :name))
+                :test #'string=))
+      ;; Should NOT include the code tool
+      (is (null (find "test-code-tool-for-filter" file-tools
+                      :key (lambda (s) (getf s :name))
+                      :test #'string=))))))
+
+(test tools-as-schema-no-filter-returns-all
+  "tools-as-schema without :categories returns all tools (backward compat)"
+  (let ((sibyl.tools:*tool-registry* (make-hash-table :test 'equal)))
+    (sibyl.tools:deftool "test-tool-a"
+        (:description "Tool A" :category :file :parameters ())
+      "a")
+    (sibyl.tools:deftool "test-tool-b"
+        (:description "Tool B" :category :code :parameters ())
+      "b")
+    (let ((all (sibyl.tools:tools-as-schema)))
+      (is (= 2 (length all))))))

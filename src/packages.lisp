@@ -197,12 +197,13 @@
    (:use #:cl #:sibyl.conditions #:sibyl.util #:sibyl.logging)
    (:export
     ;; Tool protocol
-    #:tool
-    #:tool-name
-    #:tool-description
-    #:tool-parameters
-    #:tool-handler
-    #:deftool
+     #:tool
+     #:tool-name
+     #:tool-description
+     #:tool-parameters
+     #:tool-handler
+     #:tool-category
+     #:deftool
      ;; Registry
      #:*tool-registry*
      #:*tool-registry-lock*

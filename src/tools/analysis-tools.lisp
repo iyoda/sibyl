@@ -513,6 +513,7 @@
 
 (deftool "suggest-improvements"
     (:description "Analyze the codebase and suggest improvements."
+     :category :analysis
      :parameters ((:name "scope" :type "string" :required nil
                    :description "Scope: all, module-name, or file-path")
                   (:name "min-priority" :type "string" :required nil
@@ -826,6 +827,7 @@
 
 (deftool "self-assess"
     (:description "Evaluate Sibyl's current capabilities and limitations."
+     :category :analysis
      :parameters ())
   (block self-assess
     (let* ((map-json (execute-tool "codebase-map"
@@ -1099,6 +1101,7 @@
 
 (deftool "improvement-plan"
     (:description "Generate a prioritized improvement plan from self-assessment."
+     :category :analysis
      :parameters ())
   (block improvement-plan
     (let* ((assessment-json (execute-tool "self-assess" nil))
@@ -1288,6 +1291,7 @@
 
 (deftool "run-tests"
     (:description "Run FiveAM tests programmatically and return structured results."
+     :category :analysis
      :parameters ((:name "suite" :type "string" :required nil
                    :description "Suite name (e.g., \"sibyl-tests\"), defaults to all tests")
                   (:name "test" :type "string" :required nil
@@ -1379,6 +1383,7 @@
 
 (deftool "write-test"
     (:description "Generate and register a FiveAM test programmatically."
+     :category :analysis
      :parameters ((:name "name" :type "string" :required t
                    :description "Test name (e.g., \"my-new-test\")")
                   (:name "suite" :type "string" :required nil

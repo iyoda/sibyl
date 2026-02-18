@@ -9,6 +9,7 @@
 
 (deftool "read-file"
     (:description "Read the contents of a file at the given path."
+     :category :file
      :parameters ((:name "path" :type "string" :required t
                    :description "Absolute or relative file path to read")))
   (let ((path (getf args :path)))
@@ -18,6 +19,7 @@
 
 (deftool "write-file"
     (:description "Write content to a file, creating or overwriting it."
+     :category :file
      :parameters ((:name "path" :type "string" :required t
                    :description "File path to write to")
                   (:name "content" :type "string" :required t
@@ -33,6 +35,7 @@
 
 (deftool "list-directory"
     (:description "List files and subdirectories in a directory."
+     :category :file
      :parameters ((:name "path" :type "string" :required t
                    :description "Directory path to list")))
   (let* ((path (getf args :path))
@@ -51,6 +54,7 @@
 
 (deftool "shell"
     (:description "Execute a shell command and return its output."
+     :category :general
      :parameters ((:name "command" :type "string" :required t
                    :description "Shell command to execute")
                   (:name "timeout" :type "integer" :required nil
@@ -74,6 +78,7 @@
 
 (deftool "grep"
     (:description "Search for a pattern in files using regular expressions."
+     :category :analysis
      :parameters ((:name "pattern" :type "string" :required t
                    :description "Regular expression pattern to search for")
                   (:name "path" :type "string" :required t
@@ -99,6 +104,7 @@
 
 (deftool "file-info"
     (:description "Get metadata about a file: size, type, modification time."
+     :category :file
      :parameters ((:name "path" :type "string" :required t
                    :description "Path to the file")))
   (let ((path (getf args :path)))
@@ -128,6 +134,7 @@
 
 (deftool "create-agent-team"
     (:description "Create a team of specialized agents for collaborative work"
+     :category :general
      :parameters ((:name "roles" :type "string" :required t 
                    :description "Comma-separated list of agent roles (coder,tester,architect,coordinator)")
                   (:name "strategy" :type "string" :required nil
@@ -164,6 +171,7 @@
 
 (deftool "create-adaptive-agent-team"
     (:description "Create a team of adaptive agents that select models based on task complexity"
+     :category :general
      :parameters ((:name "roles" :type "string" :required t 
                    :description "Comma-separated list of agent roles (coder,tester,architect,coordinator)")
                   (:name "strategy" :type "string" :required nil
@@ -203,6 +211,7 @@
 
 (deftool "delegate-task"
     (:description "Delegate a task to a specific agent in the team"
+     :category :general
      :parameters ((:name "task-description" :type "string" :required t
                    :description "Description of the task to delegate")
                   (:name "agent-role" :type "string" :required nil
@@ -238,6 +247,7 @@
 
 (deftool "list-agent-status"
     (:description "Show status of all agents in the current team"
+     :category :general
      :parameters ())
   (let ((coordinator *current-coordinator*))
     (if coordinator
@@ -255,6 +265,7 @@
 
 (deftool "execute-team-task"
     (:description "Execute a collaborative task using the agent team"
+     :category :general
      :parameters ((:name "task-description" :type "string" :required t
                    :description "High-level description of the collaborative task")))
   (let ((coordinator *current-coordinator*))
@@ -267,6 +278,7 @@
 
 (deftool "send-agent-message"
     (:description "Send a message between agents in the team"
+     :category :general
      :parameters ((:name "from-agent" :type "string" :required t
                    :description "ID or role of the sending agent")
                   (:name "to-agent" :type "string" :required t
@@ -292,6 +304,7 @@
 
 (deftool "analyze-task-complexity"
     (:description "Analyze the complexity of a task description"
+     :category :analysis
      :parameters ((:name "task-description" :type "string" :required t
                    :description "Description of the task to analyze")))
   (let* ((analyzer (sibyl.llm:make-task-analyzer))

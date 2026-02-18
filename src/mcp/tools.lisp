@@ -88,6 +88,7 @@ to match ^[a-zA-Z0-9_-]{1,128}$."
                  :name prefixed-name
                  :description description
                  :parameters parameters
+                 :category :external
                  :handler handler)))
       (sibyl.tools:register-tool tool)
       (log-debug "mcp" "Registered MCP tool: ~a" prefixed-name)

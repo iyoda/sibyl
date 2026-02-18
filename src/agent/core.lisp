@@ -131,6 +131,28 @@ If you are unsure, ask for clarification."
                 :message (format nil "Hook ~a error: ~a" hook-name e)))))))
 
 ;;; ============================================================
+;;; Tool category heuristic
+;;; ============================================================
+
+(defun infer-tool-categories (user-input)
+  "Infer relevant tool categories from user input using simple heuristics.
+Always includes :general. Adds :file if input mentions file paths or file ops.
+Adds :code if input has code-related keywords. Adds :analysis for analysis keywords."
+  (let ((cats '(:general)))
+    (when (and user-input (stringp user-input))
+      ;; File-related: file extensions or file operation keywords
+      (when (or (cl-ppcre:scan "\\.(lisp|py|js|ts|rb|go|rs|c|h|cpp|java|txt|json|yaml)" user-input)
+                (cl-ppcre:scan "(?i)\\bfile\\b|\\bpath\\b|\\bread\\b|\\bwrite\\b|\\bdirectory\\b" user-input))
+        (pushnew :file cats))
+      ;; Code-related: Lisp forms or code keywords
+      (when (cl-ppcre:scan "(?i)\\bdefun\\b|\\bdefmethod\\b|\\bcode\\b|\\bfunction\\b|\\bclass\\b|\\brepl\\b|\\beval\\b|\\bsymbol\\b|\\bpackage\\b|\\bmacro\\b" user-input)
+        (pushnew :code cats))
+      ;; Analysis-related
+      (when (cl-ppcre:scan "(?i)\\banalyze\\b|\\banalysis\\b|\\bsearch\\b|\\bfind\\b|\\bgrep\\b|\\btest\\b|\\bassess\\b|\\bimprove\\b" user-input)
+        (pushnew :analysis cats)))
+    cats))
+
+;;; ============================================================
 ;;; Single step: send context → get response → handle tool calls
 ;;; ============================================================
 
@@ -152,7 +174,10 @@ If you are unsure, ask for clarification."
   (let* ((context (memory-context-window
                    (agent-memory agent)
                    :system-prompt (agent-system-prompt agent)))
-         (tools-schema (tools-as-schema)))
+         (inferred-cats (when user-input (infer-tool-categories user-input)))
+         (tools-schema (if inferred-cats
+                           (tools-as-schema :categories inferred-cats)
+                           (tools-as-schema))))
     (multiple-value-bind (response usage)
         (if tools-schema
             (complete-with-tools

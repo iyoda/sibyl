@@ -14,7 +14,8 @@
   (name        "" :type string)
   (description "" :type string)
   (parameters  nil :type list)    ; list of parameter specs
-  (handler     nil :type (or function null)))
+  (handler     nil :type (or function null))
+  (category    :general :type keyword))
 
 ;;; Parameter spec: (:name "param" :type "string" :required t :description "...")
 
@@ -40,12 +41,18 @@
   (bt:with-recursive-lock-held (*tool-registry-lock*)
     (gethash name *tool-registry*)))
 
-(defun list-tools ()
-  "Return a list of all registered tool structs."
+(defun list-tools (&key categories)
+  "Return a list of registered tool structs.
+   If CATEGORIES (a list of keywords) is specified, only return tools
+   whose category is a member of CATEGORIES."
   (bt:with-recursive-lock-held (*tool-registry-lock*)
     (let ((tools nil))
       (maphash (lambda (k v) (declare (ignore k)) (push v tools))
                *tool-registry*)
+      (when categories
+        (setf tools (remove-if-not
+                     (lambda (tool) (member (tool-category tool) categories))
+                     tools)))
       (sort tools #'string< :key #'tool-name))))
 
 (defun unregister-tool (name)
@@ -57,12 +64,13 @@
 ;;; DEFTOOL macro — Lisp-idiomatic tool definition
 ;;; ============================================================
 
-(defmacro deftool (name (&key description parameters) &body handler-body)
+(defmacro deftool (name (&key description parameters (category :general)) &body handler-body)
   "Define and register a tool.
 
    Usage:
      (deftool \"read-file\"
        (:description \"Read contents of a file\"
+        :category :file
         :parameters ((:name \"path\" :type \"string\" :required t
                       :description \"Absolute file path\")))
        (let ((path (getf args :path)))
@@ -70,7 +78,8 @@
 
    Within HANDLER-BODY, the variable ARGS is bound to a plist of
    the tool's arguments (keyword keys, e.g. :path, :content).
-   TOOL-NAME is bound to the tool's name string."
+   TOOL-NAME is bound to the tool's name string.
+   CATEGORY (optional, default :general) groups the tool for filtering."
   (let ((tool-var (gensym "TOOL"))
         (args-var (intern "ARGS" *package*))
         (tname-var (intern "TOOL-NAME" *package*)))
@@ -79,6 +88,7 @@
               :name ,name
               :description ,description
               :parameters ',parameters
+              :category ,category
               :handler (lambda (,args-var)
                          (declare (ignorable ,args-var))
                          (let ((,tname-var ,name))
@@ -113,9 +123,11 @@
                         ("properties" . ,properties)
                         ("required" . ,required)))))
 
-(defun tools-as-schema ()
-  "Return all registered tools as a list of schema plists."
-  (mapcar #'tool-to-schema (list-tools)))
+(defun tools-as-schema (&key categories)
+  "Return registered tools as a list of schema plists.
+   If CATEGORIES (a list of keywords) is specified, only include tools
+   whose category is a member of CATEGORIES. Without CATEGORIES, returns all."
+  (mapcar #'tool-to-schema (list-tools :categories categories)))
 
 ;;; ============================================================
 ;;; Tool execution with condition-based error handling
