@@ -113,6 +113,15 @@ Called at run-tests-parallel invocation time, after all packages are loaded."
   (bt:with-lock-held (*fiveam-run-lock*)
     (fiveam:run suite)))
 
+(defun %time-call (thunk)
+  "Call THUNK, returning (values result elapsed-seconds).
+THUNK is a zero-argument function. elapsed-seconds is a float."
+  (let ((start (get-internal-real-time)))
+    (let ((result (funcall thunk)))
+      (values result
+              (/ (float (- (get-internal-real-time) start))
+                 internal-time-units-per-second)))))
+
 (defun %validate-suites (suites label)
   "Check SUITES against FiveAM registry. Returns (values valid-suites skipped-names).
 LABEL is a string like \"SAFE\" or \"UNSAFE\" for warning messages."
@@ -152,12 +161,13 @@ Returns a list of all test results (same format as fiveam:run)."
                      (bt:make-thread
                       (lambda ()
                         (handler-case
-                            (setf (aref safe-results i-capture)
-                                  (%collect-fiveam-results suite-capture))
+                            (multiple-value-bind (results elapsed)
+                                (%time-call (lambda () (%collect-fiveam-results suite-capture)))
+                              (setf (aref safe-results i-capture) (cons results elapsed)))
                           (error (e)
                             (format *error-output* "~%[parallel-runner] Error in ~a: ~a~%"
                                     suite-capture e)
-                            (setf (aref safe-results i-capture) nil))))
+                            (setf (aref safe-results i-capture) (cons nil 0.0)))))
                       :name (format nil "test-~a" suite-capture))))))
 
        ;; Wait for all parallel threads to complete
@@ -166,18 +176,22 @@ Returns a list of all test results (same format as fiveam:run)."
 
        ;; Sequential phase: run UNSAFE suites
        (let* ((unsafe-suites (nth-value 0 (%validate-suites *unsafe-suites* "UNSAFE")))
-              (unsafe-results
+              ;; Collect (results . elapsed) cons for each unsafe suite
+              (unsafe-timed
                 (loop for suite in unsafe-suites
-                      nconc
+                      collect
                       (handler-case
-                          (%collect-fiveam-results suite)
+                          (multiple-value-bind (results elapsed)
+                              (%time-call (lambda () (%collect-fiveam-results suite)))
+                            (cons results elapsed))
                         (error (e)
                           (format *error-output* "~%[parallel-runner] Error in ~a: ~a~%"
                                   suite e)
-                          nil))))
-             (final-results (append (loop for i from 0 below n-safe
-                                          nconc (or (aref safe-results i) nil))
-                                    unsafe-results)))
+                          (cons nil 0.0)))))
+              (unsafe-results (loop for cell in unsafe-timed nconc (car cell)))
+              (final-results (append (loop for i from 0 below n-safe
+                                           nconc (car (aref safe-results i)))
+                                     unsafe-results)))
 
         ;; Print summary (like fiveam:run! does)
         ;; Uses find-symbol+find-class to avoid SBCL package-lock on IT.BESE.FIVEAM
@@ -190,10 +204,37 @@ Returns a list of all test results (same format as fiveam:run)."
                (pass (count-if (lambda (r) (and passed-class  (typep r passed-class)))  final-results))
                (fail (count-if (lambda (r) (and failed-class  (typep r failed-class)))  final-results))
                (skip (count-if (lambda (r) (and skipped-class (typep r skipped-class))) final-results))
-               (err  (count-if (lambda (r) (and error-class   (typep r error-class)))   final-results)))
+               (err  (count-if (lambda (r) (and error-class   (typep r error-class)))   final-results))
+               ;; Wall-clock totals
+               (safe-wall   (loop for i from 0 below n-safe
+                                  sum (or (cdr (aref safe-results i)) 0.0)))
+               (unsafe-wall (loop for cell in unsafe-timed sum (or (cdr cell) 0.0)))
+               (total-wall  (+ safe-wall unsafe-wall)))
           (format t "~% Did ~a checks.~%" total)
           (format t "    Pass: ~a (~a%)~%" pass (if (> total 0) (round (* 100 (/ pass total))) 0))
           (format t "    Skip: ~a~%" skip)
-          (format t "    Fail: ~a~%" (+ fail err)))
+          (format t "    Fail: ~a~%" (+ fail err))
+          ;; Per-suite timing: safe
+          (format t "~% Per-suite timing (safe):~%")
+          (loop for suite in safe-suites
+                for i from 0
+                do (let* ((cell    (aref safe-results i))
+                          (results (car cell))
+                          (elapsed (or (cdr cell) 0.0))
+                          (checks  (length results)))
+                     (format t "  ~a~30t~6,3fs (~a checks)~%"
+                             suite elapsed checks)))
+          ;; Per-suite timing: unsafe
+          (format t "~% Per-suite timing (unsafe):~%")
+          (loop for suite in unsafe-suites
+                for cell in unsafe-timed
+                do (let* ((results (car cell))
+                          (elapsed (or (cdr cell) 0.0))
+                          (checks  (length results)))
+                     (format t "  ~a~30t~6,3fs (~a checks)~%"
+                             suite elapsed checks)))
+          ;; Total wall-clock
+          (format t "~% Total wall-clock: ~6,3fs (safe: ~6,3fs, unsafe: ~6,3fs)~%"
+                  total-wall safe-wall unsafe-wall))
 
         final-results))))
