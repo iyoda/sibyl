@@ -659,3 +659,36 @@
   (is (> (length suites) 1))
   (is (member "run-tests-tests" suites :test #'string=))
   (is (member "suggest-improvements-tests" suites :test #'string=))))
+
+(test run-tests-compact-output-all-pass
+  "Auto-generated test"
+  
+(let ((result (make-hash-table :test 'equal)))
+  (setf (gethash "total" result) 10)
+  (setf (gethash "passed" result) 10)
+  (setf (gethash "failed" result) 0)
+  (setf (gethash "failures" result) nil)
+  (let ((text (sibyl.tools::%run-tests-format-result result)))
+    (5am:is (stringp text))
+    (5am:is (not (null (search "10" text))) "Should contain total count")
+    (5am:is (null (search "failures" text)) "Should NOT contain 'failures' key")
+    (5am:is (null (search "{" text)) "Should NOT be JSON")))
+)
+
+(test run-tests-compact-output-with-failures
+  "Auto-generated test"
+  
+(let ((result (make-hash-table :test 'equal))
+      (f1 (make-hash-table :test 'equal)))
+  (setf (gethash "test" f1) "my-test")
+  (setf (gethash "reason" f1) "Expected T got NIL")
+  (setf (gethash "total" result) 5)
+  (setf (gethash "passed" result) 4)
+  (setf (gethash "failed" result) 1)
+  (setf (gethash "failures" result) (list f1))
+  (let ((text (sibyl.tools::%run-tests-format-result result)))
+    (5am:is (stringp text))
+    (5am:is (not (null (search "my-test" text))) "Should contain failing test name")
+    (5am:is (not (null (search "Expected T got NIL" text))) "Should contain failure reason")
+    (5am:is (null (search "{" text)) "Should NOT be JSON")))
+)

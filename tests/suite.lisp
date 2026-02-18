@@ -112,16 +112,18 @@ Called at run-tests-parallel invocation time, after all packages are loaded."
 (defun run-sibyl-tests ()
   "Run the full test suite with self-assess nested execution prevention
 and codebase-map caching for faster repeated scans."
-  (sibyl.tools:with-codebase-map-cache ()
+  (sibyl.tools:with-codebase-map-cache nil
     (let ((sibyl.tools:*self-assess-running* t)
-          (*run-tests-parallel-running* t))
-      (fiveam:run! 'sibyl-tests))))
+          (*run-tests-parallel-running* t)
+          (it.bese.fiveam:*test-dribble* (make-broadcast-stream)))
+      (it.bese.fiveam:run! 'sibyl-tests))))
 
 (defun %collect-fiveam-results (suite)
   "Run SUITE collecting results with thread-safe serialization.
     Uses a lock to prevent concurrent FiveAM global state mutation."
-  (bt:with-lock-held (*fiveam-run-lock*)
-    (fiveam:run suite)))
+  (bordeaux-threads:with-lock-held (*fiveam-run-lock*)
+    (let ((it.bese.fiveam:*test-dribble* (make-broadcast-stream)))
+      (it.bese.fiveam:run suite))))
 
 (defun %time-call (thunk)
   "Call THUNK, returning (values result elapsed-seconds).

@@ -1318,49 +1318,66 @@
         (walk-result results))
       (values total passed failed (nreverse failures)))))
 
+(defun %run-tests-format-result (result)
+  "Format run-tests result hash-table as a compact human-readable string.
+All-pass:  \"✓ 42/42 tests passed\"
+Failures:  \"✗ 40/42 passed\nFailures:\n  • test-name: reason\""
+  (let* ((total    (or (gethash "total"    result) 0))
+         (passed   (or (gethash "passed"   result) 0))
+         (failed   (or (gethash "failed"   result) 0))
+         (failures (gethash "failures" result)))
+    (if (zerop failed)
+        (format nil "✓ ~a/~a tests passed" passed total)
+        (with-output-to-string (s)
+          (format s "✗ ~a/~a passed" passed total)
+          (when failures
+            (format s "~%Failures:")
+            (dolist (f failures)
+              (let ((test-name (gethash "test"   f "unknown"))
+                    (reason    (gethash "reason" f "")))
+                (format s "~%  • ~a: ~a" test-name reason))))))))
+
+
 (deftool "run-tests"
-    (:description "Run FiveAM tests programmatically and return structured results."
-     :category :analysis
-     :parameters ((:name "suite" :type "string" :required nil
-                   :description "Suite name (e.g., \"sibyl-tests\"), defaults to all tests")
-                  (:name "test" :type "string" :required nil
-                   :description "Specific test name (e.g., \"read-sexp-basic\")")
-                  (:name "files" :type "string" :required nil
-                   :description "Comma-separated source file paths; runs only their mapped test suites")))
-  (block run-tests
-    (let* ((suite-name (getf args :suite))
-           (test-name (getf args :test))
-           (files-str (getf args :files))
-           (suite-name (or suite-name
-                           (when files-str
-                             (let* ((paths (mapcar (lambda (s) (string-trim '(#\Space #\Tab) s))
-                                                   (uiop:split-string files-str :separator ",")))
-                                    (suites (%suites-for-files paths)))
-                               (when suites (first suites))))))
-           (target (%run-tests-resolve-target suite-name test-name))
-           (fiveam-pkg (find-package "FIVEAM")))
-
-      (unless fiveam-pkg
-        (error "FiveAM package not found. Load FiveAM first."))
-
-      (let ((run-fn (find-symbol "RUN" fiveam-pkg)))
-        (unless run-fn
-          (error "FiveAM:RUN function not found"))
-
-        ;; Suppress output during test execution
-        (let* ((*standard-output* (make-string-output-stream))
-               (*error-output* (make-string-output-stream))
-               (results (funcall run-fn target)))
-
-          ;; Build result structure
-          (multiple-value-bind (total passed failed failures)
-              (%run-tests-count-results results)
-            (let ((result (make-hash-table :test 'equal)))
-              (setf (gethash "total" result) total)
-              (setf (gethash "passed" result) passed)
-              (setf (gethash "failed" result) failed)
-              (setf (gethash "failures" result) failures)
-              result)))))))
+ (:description
+  "Run FiveAM tests programmatically and return structured results." :category
+  :analysis :parameters
+  ((:name "suite" :type "string" :required nil :description
+    "Suite name (e.g., \"sibyl-tests\"), defaults to all tests")
+   (:name "test" :type "string" :required nil :description
+    "Specific test name (e.g., \"read-sexp-basic\")")
+   (:name "files" :type "string" :required nil :description
+    "Comma-separated source file paths; runs only their mapped test suites")))
+ (block run-tests
+   (let* ((suite-name (getf args :suite))
+          (test-name (getf args :test))
+          (files-str (getf args :files))
+          (suite-name
+           (or suite-name
+               (when files-str
+                 (let* ((paths
+                         (mapcar (lambda (s) (string-trim '(#\  #\Tab) s))
+                                 (uiop/utility:split-string files-str
+                                                            :separator ",")))
+                        (suites (%suites-for-files paths)))
+                   (when suites (first suites))))))
+          (target (%run-tests-resolve-target suite-name test-name))
+          (fiveam-pkg (find-package "FIVEAM")))
+     (unless fiveam-pkg (error "FiveAM package not found. Load FiveAM first."))
+     (let ((run-fn (find-symbol "RUN" fiveam-pkg)))
+       (unless run-fn (error "FiveAM:RUN function not found"))
+       (let* ((*standard-output* (make-string-output-stream))
+              (*error-output* (make-string-output-stream))
+              (it.bese.fiveam:*test-dribble* (make-broadcast-stream))
+              (results (funcall run-fn target)))
+         (multiple-value-bind (total passed failed failures)
+             (%run-tests-count-results results)
+           (let ((result (make-hash-table :test 'equal)))
+             (setf (gethash "total" result) total)
+             (setf (gethash "passed" result) passed)
+             (setf (gethash "failed" result) failed)
+             (setf (gethash "failures" result) failures)
+             result)))))))
 
 ;;; ============================================================
 ;;; Programmatic test generation
