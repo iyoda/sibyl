@@ -162,11 +162,83 @@
    #:model-release-date
    #:model-version
    #:model-context-window
-    #:model-capabilities
-    #:call-llm
-    #:make-openai-client
-    #:ollama-client
-    #:make-ollama-client))
+   #:model-capabilities
+   #:call-llm
+   #:lookup-model-pricing
+   #:estimate-cost-usd
+   #:estimate-baseline-cost-usd
+   #:compute-savings-pct
+   #:*model-pricing-table*
+   #:task-cost-record
+   #:make-task-cost-record
+   #:task-cost-record-task-description
+   #:task-cost-record-model-name
+   #:task-cost-record-tier-name
+   #:task-cost-record-timestamp
+   #:task-cost-record-complexity-score
+   #:task-cost-record-input-tokens
+   #:task-cost-record-output-tokens
+   #:task-cost-record-cache-write-tokens
+   #:task-cost-record-cache-read-tokens
+   #:task-cost-record-actual-cost-usd
+   #:task-cost-record-baseline-cost-usd
+   #:task-cost-record-savings-usd
+   #:task-cost-record-savings-pct
+   #:snapshot-tracker
+   #:tracker-delta
+   #:make-task-cost-record-from-delta
+   #:session-cost-report
+   #:make-session-cost-report
+   #:session-cost-report-records
+   #:session-cost-report-total-actual-cost-usd
+   #:session-cost-report-total-baseline-cost-usd
+   #:session-cost-report-total-savings-usd
+   #:session-cost-report-total-savings-pct
+   #:session-cost-report-total-input-tokens
+   #:session-cost-report-total-output-tokens
+   #:session-cost-report-total-cache-write-tokens
+   #:session-cost-report-total-cache-read-tokens
+   #:session-cost-report-tier-distribution
+   #:session-cost-report-cache-hit-rate
+   #:session-cost-report-task-count
+   #:compute-session-report
+   #:format-session-report
+   ;; A/B tier provisioning stats
+   #:provisioning-stats
+   #:make-provisioning-stats
+   #:provisioning-stats-total
+   #:provisioning-stats-correct
+   #:provisioning-stats-over
+   #:provisioning-stats-under
+   #:provisioning-stats-unknown
+   #:provisioning-stats-accuracy
+   #:provisioning-stats-over-rate
+   #:provisioning-stats-under-rate
+   #:ab-test-report
+   #:make-ab-test-report
+   #:ab-test-report-name-a
+   #:ab-test-report-name-b
+   #:ab-test-report-stats-a
+   #:ab-test-report-stats-b
+   #:ab-test-report-delta-accuracy
+   #:ab-test-report-delta-over-rate
+   #:ab-test-report-delta-under-rate
+   #:ab-test-report-results-a
+   #:ab-test-report-results-b
+   #:tier-rank
+   #:classify-provisioning
+   #:compute-provisioning-stats
+   #:evaluate-provisioning
+   #:make-adaptive-tier-predictor
+   #:make-fixed-tier-predictor
+   #:run-tier-ab-test
+   #:run-adaptive-vs-baseline-ab-test
+   #:format-provisioning-stats
+   #:format-ab-test-report
+   #:agent-cost-records
+   #:make-openai-client
+   #:ollama-client
+   #:make-ollama-client))
 
 (defpackage #:sibyl.plan
   (:use #:cl #:sibyl.util)
@@ -259,9 +331,9 @@
    #:memory-context-window
    #:memory-compact
    #:memory-compaction-strategy
-   #:memory-compaction-client
-   #:memory-sanitize
-   ;; Agent
+    #:memory-compaction-client
+    #:memory-sanitize
+    ;; Agent
    #:agent
    #:make-agent
    #:agent-name

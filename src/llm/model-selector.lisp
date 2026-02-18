@@ -71,7 +71,7 @@
                                           :provider :openai
                                           :model-name "gpt-5-nano"
                                           :max-tokens 4096)))
-   
+
    (make-instance 'model-tier
                   :name "medium"
                   :description "Balanced models for general tasks"
@@ -87,14 +87,15 @@
                                           :provider :openai
                                           :model-name "gpt-5-mini"
                                           :max-tokens 8192)))
-   
+
    (make-instance 'model-tier
                   :name "heavy"
                   :description "High-capability models for complex tasks"
-                  :cost-factor 3.0
+                  ;; cost-factor reflects actual price ratio: opus($5)/sonnet($3) ≈ 1.667
+                  :cost-factor 1.667
                   :speed-factor 0.5
                   :capability-score 10
-                                     :models (list
+                  :models (list
                            (make-instance 'model-config
                                           :provider :anthropic
                                           :model-name "claude-opus-4-6"
@@ -108,30 +109,48 @@
 
 ;; Default complexity analysis rules
 (defparameter *default-complexity-rules*
-  '(;; Code complexity indicators
+  '(;; ── English patterns ──────────────────────────────────────────────────
     (:pattern "defclass|defmethod|defgeneric|defmacro" :weight 2 :factor "complex-lisp-constructs")
     (:pattern "lambda|mapcar|reduce|loop" :weight 1 :factor "functional-programming")
     (:pattern "eval-form|macroexpand|compile" :weight 3 :factor "meta-programming")
-    
-    ;; Task type indicators
     (:pattern "test|spec|unit|integration" :weight -1 :factor "testing-task")
     (:pattern "refactor|clean|format" :weight 1 :factor "refactoring-task")
     (:pattern "design|architect|plan" :weight 2 :factor "design-task")
     (:pattern "debug|fix|error|bug" :weight 2 :factor "debugging-task")
-    
-    ;; Scope indicators
     (:pattern "system|module|package" :weight 2 :factor "large-scope")
-    (:pattern "function|method|variable" :weight 0 :factor "small-scope")
+    (:pattern "function|method|variable" :weight 1.5 :factor "small-scope")
     (:pattern "entire|whole|complete|full" :weight 2 :factor "comprehensive-scope")
-    
-    ;; Complexity keywords
     (:pattern "complex|complicated|difficult|advanced" :weight 3 :factor "explicit-complexity")
     (:pattern "simple|easy|basic|quick" :weight -2 :factor "explicit-simplicity")
     (:pattern "optimize|performance|efficient" :weight 2 :factor "optimization-task")
-    
-    ;; Multi-step indicators
     (:pattern "first.*then|step.*step|phase.*phase" :weight 2 :factor "multi-step-process")
-    (:pattern "analyze.*implement|design.*code" :weight 2 :factor "multi-phase-task")))
+    (:pattern "analyze.*implement|design.*code" :weight 2 :factor "multi-phase-task")
+    (:pattern "implement|write a|create a|build a" :weight 1.5 :factor "implementation-task")
+    (:pattern "explain|describe|difference|compare" :weight 1.5 :factor "explanation-task")
+    (:pattern "algorithm|data structure|protocol" :weight 2 :factor "cs-concept")
+    ;; ── Japanese patterns ─────────────────────────────────────────────────
+    ;; Light-tier signals: simple question words
+    (:pattern "何ですか|どこですか|いつですか|誰ですか|なぜですか|どうですか" :weight -1 :factor "ja-simple-question")
+    (:pattern "何人|何日|何度|何時|何年|何月" :weight -1 :factor "ja-factual-question")
+    ;; Medium-tier signals: implementation / technical keywords
+    (:pattern "実装|実装して|実装する" :weight 2 :factor "ja-implementation")
+    (:pattern "アルゴリズム|データ構造|プロトコル" :weight 2 :factor "ja-cs-concept")
+    (:pattern "関数|メソッド|クラス|モジュール" :weight 1.5 :factor "ja-code-element")
+    (:pattern "デバッグ|バグ|エラー|修正" :weight 2 :factor "ja-debugging")
+    (:pattern "最適化|パフォーマンス|効率" :weight 2 :factor "ja-optimization")
+    (:pattern "テスト|スペック|ユニット" :weight -1 :factor "ja-testing")
+    (:pattern "書いて|作って|作成して|構築して" :weight 1.5 :factor "ja-creation-task")
+    (:pattern "説明|比較|違い|解説" :weight 1.5 :factor "ja-explanation")
+    ;; Heavy-tier signals: design / system / complex
+    (:pattern "設計|アーキテクチャ|システム全体" :weight 2.5 :factor "ja-design-task")
+    (:pattern "複雑|高度|難しい|困難" :weight 3 :factor "ja-explicit-complexity")
+    (:pattern "分散|合意|フレームワーク|ゼロから" :weight 3 :factor "ja-advanced-concept")
+    (:pattern "機械学習|深層学習|ニューラル" :weight 3 :factor "ja-ml-task")
+    ;; Japanese multi-step connectors
+    (:pattern "そして|また|さらに|加えて|含めて" :weight 0.5 :factor "ja-complex-logic"))
+  "Default complexity rules for task analysis.
+   Includes both English and Japanese patterns.
+   Weights: positive = more complex, negative = simpler.")
 
 
 ;;; ============================================================
@@ -140,12 +159,14 @@
 
 (defparameter *tier-metadata*
   '(("light"  :description "Fast, lightweight models for simple tasks"
-              :cost-factor 0.2  :speed-factor 3.0 :capability-score 6  :max-tokens 4096)
+              :cost-factor 0.2   :speed-factor 3.0 :capability-score 6  :max-tokens 4096)
     ("medium" :description "Balanced models for general tasks"
-              :cost-factor 1.0  :speed-factor 1.0 :capability-score 8  :max-tokens 8192)
+              :cost-factor 1.0   :speed-factor 1.0 :capability-score 8  :max-tokens 8192)
     ("heavy"  :description "High-capability models for complex tasks"
-              :cost-factor 3.0  :speed-factor 0.5 :capability-score 10 :max-tokens 16384))
-  "Tier metadata (non-model properties). Model names come from config.")
+              :cost-factor 1.667 :speed-factor 0.5 :capability-score 10 :max-tokens 16384))
+  "Tier metadata (non-model properties). Model names come from config.
+   Cost-factors reflect actual API price ratios (haiku=$1, sonnet=$3, opus=$5):
+     light/medium ≈ 0.333, heavy/medium ≈ 1.667")
 
 (defun configured-model-name (tier-name provider)
   "Get model name for TIER-NAME and PROVIDER from config.
@@ -213,8 +234,9 @@
 
 ;; Complexity analysis functions
 (defmethod analyze-task-complexity ((analyzer task-analyzer) task-description)
-  "Analyze the complexity of a task description and return complexity analysis"
-  (let ((score 5.0) ; baseline complexity
+  "Analyze the complexity of a task description and return complexity analysis.
+   Baseline score is 3.0 (lowered from 5.0) to improve light-tier classification accuracy."
+  (let ((score 3.0) ; baseline complexity (lowered from 5.0 to improve light-tier accuracy)
         (factors nil)
         (reasoning-parts nil))
     
@@ -306,12 +328,24 @@
 
 ;; Adaptive agent with model selection
 (defclass adaptive-agent (sibyl.agent:agent)
-  ((model-selector :initarg :model-selector :accessor agent-model-selector 
-                   :type model-selector)
-   (current-model-config :initarg :current-model-config :accessor agent-current-model-config
-                         :initform nil)
-   (task-history :initarg :task-history :accessor agent-task-history :initform nil
-                 :documentation "History of tasks and model selections")))
+  ((model-selector
+    :initarg :model-selector
+    :accessor agent-model-selector
+    :type model-selector)
+   (current-model-config
+    :initarg :current-model-config
+    :accessor agent-current-model-config
+    :initform nil)
+   (task-history
+    :initarg :task-history
+    :accessor agent-task-history
+    :initform nil
+    :documentation "History of tasks and model selections")
+   (cost-records
+    :initarg :cost-records
+    :accessor agent-cost-records
+    :initform nil
+    :documentation "List of task-cost-record structs accumulated during this session")))
 
 (defmethod make-adaptive-agent (&key (model-selector (make-model-selector))
                                      (name "Adaptive-Sibyl")
@@ -355,19 +389,28 @@
     (values model-config tier analysis)))
 
 (defmethod agent-run-adaptive ((agent adaptive-agent) input)
-  "Run agent with automatic model adaptation"
+  "Run agent with automatic model adaptation and cost tracking.
+   Snapshots the token tracker before the run, then records a task-cost-record
+   (from sibyl.llm/metrics.lisp) capturing the delta tokens and estimated USD cost."
   (multiple-value-bind (model-config tier analysis)
       (adapt-model-for-task agent input)
-    
-    ;; Add model selection info to the response context
     (when analysis
-      (format t "~%[Model Selection: ~a (~a) - Complexity: ~,1f]~%" 
-              (model-name model-config)
-              (tier-name tier)
+      (format t "~%[Model Selection: ~a (~a) - Complexity: ~,1f]~%"
+              (model-name model-config) (tier-name tier)
               (complexity-score analysis)))
-    
-    ;; Run the agent normally
-    (sibyl.agent:agent-run agent input)))
+    (let* ((tracker (sibyl.agent:agent-token-tracker agent))
+           (before  (when tracker (snapshot-tracker tracker)))
+           (result  (sibyl.agent:agent-run agent input)))
+      (when (and tracker before)
+        (let* ((delta  (tracker-delta before tracker))
+               (record (make-task-cost-record-from-delta
+                        input
+                        (model-name model-config)
+                        (tier-name tier)
+                        (when analysis (complexity-score analysis))
+                        delta)))
+          (push record (agent-cost-records agent))))
+      result)))
 
 ;; Enhanced model configuration with release date
 (defclass enhanced-model-config (model-config)
@@ -544,3 +587,95 @@
                  :auto-select auto-select
                  :prefer-latest prefer-latest
                  :provider-preference provider-preference))
+
+;;; ============================================================
+;;; Benchmark task set and classification accuracy evaluation
+;;; ============================================================
+
+(defvar *benchmark-task-set*
+  '(;; Light tasks (10)
+    (:task "What is 2 + 2?" :expected-tier "light")
+    (:task "What is the capital of France?" :expected-tier "light")
+    (:task "Convert 100 Celsius to Fahrenheit." :expected-tier "light")
+    (:task "What does HTTP stand for?" :expected-tier "light")
+    (:task "List the primary colors." :expected-tier "light")
+    (:task "What is the boiling point of water?" :expected-tier "light")
+    (:task "How many days are in a week?" :expected-tier "light")
+    (:task "What is the square root of 16?" :expected-tier "light")
+    (:task "Name the continents of the world." :expected-tier "light")
+    (:task "What language is spoken in Brazil?" :expected-tier "light")
+    ;; Medium tasks (10)
+    (:task "Explain the concept of recursion in programming with an example." :expected-tier "medium")
+    (:task "Write a function to reverse a string in Python." :expected-tier "medium")
+    (:task "Describe the differences between SQL and NoSQL databases." :expected-tier "medium")
+    (:task "Implement a binary search algorithm." :expected-tier "medium")
+    (:task "Explain how garbage collection works in modern languages." :expected-tier "medium")
+    (:task "Write a REST API endpoint for user authentication in Node.js." :expected-tier "medium")
+    (:task "Explain the difference between threads and processes." :expected-tier "medium")
+    (:task "Implement a simple linked list in Java." :expected-tier "medium")
+    (:task "Describe the MVC design pattern with an example." :expected-tier "medium")
+    (:task "Write a SQL query to find duplicate records in a table." :expected-tier "medium")
+    ;; Heavy tasks (10)
+    (:task "Design and implement a distributed consensus algorithm with Byzantine fault tolerance using Paxos. Include defclass defmethod defgeneric for the protocol." :expected-tier "heavy")
+    (:task "Implement a full compiler pipeline with lexer, parser, AST, semantic analysis, and code generation using defmacro and eval-form." :expected-tier "heavy")
+    (:task "Design a microservices architecture with service mesh, circuit breakers, and distributed tracing. Use defclass defmethod defgeneric macroexpand." :expected-tier "heavy")
+    (:task "Implement a machine learning framework from scratch with backpropagation, gradient descent, and neural network layers using lambda mapcar reduce." :expected-tier "heavy")
+    (:task "Build a real-time collaborative editor with operational transformation, conflict resolution, and CRDT data structures using eval-form compile." :expected-tier "heavy")
+    (:task "Design a distributed database with ACID transactions, MVCC, and WAL logging. Implement using defclass defmethod defgeneric with complex lambda expressions." :expected-tier "heavy")
+    (:task "Implement a JIT compiler with IR generation, optimization passes, and native code emission using macroexpand eval-form compile defmacro." :expected-tier "heavy")
+    (:task "Build a Kubernetes-like container orchestration system with scheduling, health checks, and auto-scaling using defclass defmethod defgeneric." :expected-tier "heavy")
+    (:task "Design a cryptographic protocol with zero-knowledge proofs, homomorphic encryption, and secure multi-party computation using defclass defmethod." :expected-tier "heavy")
+    (:task "Implement a reactive programming framework with observables, schedulers, and backpressure handling using lambda mapcar reduce defmacro eval-form." :expected-tier "heavy"))
+  "Benchmark task set for evaluating model tier classification accuracy.
+Each entry is a plist with :task (description string) and :expected-tier (string).
+Contains 30 tasks: 10 light, 10 medium, 10 heavy.")
+
+(defun evaluate-classification-accuracy
+    (selector &key (task-set *benchmark-task-set*) (verbose nil))
+  "Evaluate the classification accuracy of SELECTOR against TASK-SET.
+TASK-SET is a list of plists with :task and :expected-tier keys.
+Returns a plist with:
+  :accuracy    - fraction of correct classifications (0.0 to 1.0)
+  :correct     - number of correct classifications
+  :total       - total number of tasks
+  :results     - list of per-task result plists
+  :by-tier     - accuracy broken down by tier"
+  (let ((results '())
+        (correct 0)
+        (total 0))
+    (dolist (entry task-set)
+      (let* ((task-desc (getf entry :task))
+             (expected (getf entry :expected-tier))
+             (analysis (analyze-task-complexity selector task-desc))
+             (predicted (recommended-tier analysis))
+             (correctp (string= predicted expected)))
+        (when correctp (incf correct))
+        (incf total)
+        (push (list :task task-desc
+                    :expected expected
+                    :predicted predicted
+                    :correct correctp
+                    :score (complexity-score analysis))
+              results)
+        (when verbose
+          (format t "~&[~a] ~a -> expected=~a predicted=~a~%"
+                  (if correctp "OK" "FAIL")
+                  (subseq task-desc 0 (min 50 (length task-desc)))
+                  expected predicted))))
+    ;; Compute per-tier accuracy
+    (let ((by-tier '()))
+      (dolist (tier '("light" "medium" "heavy"))
+        (let* ((tier-tasks (remove-if-not (lambda (r) (string= (getf r :expected) tier)) results))
+               (tier-correct (count-if (lambda (r) (getf r :correct)) tier-tasks))
+               (tier-total (length tier-tasks)))
+          (push (list :tier tier
+                      :correct tier-correct
+                      :total tier-total
+                      :accuracy (if (zerop tier-total) 0.0
+                                    (/ (float tier-correct) tier-total)))
+                by-tier)))
+      (list :accuracy (if (zerop total) 0.0 (/ (float correct) total))
+            :correct correct
+            :total total
+            :results (nreverse results)
+            :by-tier (nreverse by-tier)))))

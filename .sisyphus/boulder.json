@@ -1,9 +1,9 @@
 {
-  "active_plan": "/Users/iyoda/Projects/atikoro/sibyl/.sisyphus/plans/test-speedup.md",
-  "started_at": "2026-02-18T05:28:02.113Z",
+  "active_plan": "/Users/iyoda/Projects/atikoro/sibyl/.sisyphus/plans/ollama-integration.md",
+  "started_at": "2026-02-18T09:04:31.552Z",
   "session_ids": [
-    "ses_391b42115ffepcYw1aMu8CHN05"
+    "ses_390b7d225ffeq3AjNmPIUJQpsp"
   ],
-  "plan_name": "test-speedup",
+  "plan_name": "ollama-integration",
   "agent": "atlas"
 }

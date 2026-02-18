@@ -274,3 +274,27 @@
   "Default max-messages for new memory is 50"
   (let ((mem (sibyl.agent::make-memory)))
     (is (= 50 (sibyl.agent::memory-max-messages mem)))))
+
+(test benchmark-task-set-defined
+  "Auto-generated test"
+  
+(is (not (null sibyl.llm::*benchmark-task-set*)))
+(is (listp sibyl.llm::*benchmark-task-set*))
+(is (>= (length sibyl.llm::*benchmark-task-set*) 30))
+(let ((tiers (mapcar (lambda (entry) (getf entry :expected-tier)) sibyl.llm::*benchmark-task-set*)))
+  (is (member "light"  tiers :test #'string=))
+  (is (member "medium" tiers :test #'string=))
+  (is (member "heavy"  tiers :test #'string=)))
+)
+
+(test classify-accuracy-function-exists
+  "Auto-generated test"
+  
+(is (fboundp 'sibyl.llm::evaluate-classification-accuracy))
+(let* ((selector (sibyl.llm::make-default-model-selector))
+       (result (sibyl.llm::evaluate-classification-accuracy selector)))
+  (is (listp result))
+  (is (getf result :accuracy))
+  (is (getf result :total))
+  (is (numberp (getf result :accuracy))))
+)

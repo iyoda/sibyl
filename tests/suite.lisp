@@ -56,6 +56,7 @@
     package-symbols-tests
     codebase-map-tests
     sync-to-file-tests
+    provisioning-tests
     evolve-tests
     ollama-tests)
   "Test suites in sibyl.tests package safe for parallel execution.

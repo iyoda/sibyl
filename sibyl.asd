@@ -25,14 +25,16 @@
      (:file "config")
      (:file "util")
      (:file "logging")
-      (:module "llm"
-       :components
-       ((:file "message")
-        (:file "client")
-        (:file "token-tracker")
-         (:file "providers")
-         (:file "ollama")
-         ))
+     (:module "llm"
+      :components
+      ((:file "message")
+       (:file "client")
+       (:file "token-tracker")
+       (:file "pricing")
+       (:file "metrics")
+       (:file "providers")
+       (:file "model-selector")
+       (:file "ollama")))
      (:module "plan"
        :components
        ((:file "core")))
@@ -93,8 +95,10 @@
      (:file "evolution-state-test")
      (:file "parallel-runner-test")
      (:file "parallel-agent-test")
-      (:file "mcp-test")
-      (:file "token-tracking-test")
-      (:file "ollama-test"))))
+     (:file "mcp-test")
+     (:file "token-tracking-test")
+     (:file "ollama-test")
+     (:file "provisioning-test")
+     (:file "phase6-test"))))
   :perform (test-op (o c)
              (uiop:symbol-call '#:sibyl.tests '#:run-sibyl-tests)))

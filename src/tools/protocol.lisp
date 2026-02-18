@@ -5,6 +5,9 @@
 
 (in-package #:sibyl.tools)
 
+;;; Ensure dynamic binding is recognized across compilation units.
+(declaim (special sibyl.agent:*current-agent*))
+
 ;;; ============================================================
 ;;; Tool struct
 ;;; ============================================================
@@ -122,6 +125,13 @@
           :parameters `(("type" . "object")
                         ("properties" . ,properties)
                         ("required" . ,required)))))
+
+(defun tool-spec (tool)
+  "Return a tool spec plist using raw parameter specs."
+  (list :name (tool-name tool)
+        :description (tool-description tool)
+        :parameters (tool-parameters tool)
+        :category (tool-category tool)))
 
 (defun tools-as-schema (&key categories)
   "Return registered tools as a list of schema plists.

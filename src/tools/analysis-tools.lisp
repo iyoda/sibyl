@@ -1234,7 +1234,7 @@
             "create-module-tests" "asdf-registration-tests"))
     (setf (gethash "src/tools/planning-tools.lisp" m) "planning-tests")
     (setf (gethash "src/tools/tools.lisp" m) "tools-tests")
-    (setf (gethash "src/agent/core.lisp" m) "core-tests")
+    (setf (gethash "src/agent/core.lisp" m) "agent-tests")
     (setf (gethash "src/agent/message.lisp" m) "message-tests")
     (setf (gethash "src/agent/client.lisp" m) "client-tests")
     (setf (gethash "src/agent/token-tracking.lisp" m)
@@ -1476,5 +1476,4 @@
         
         (format nil "Success: Test ~a created and registered in ~a"
                 name (file-namestring file))))))
-
 

@@ -612,8 +612,10 @@
   "Auto-generated test"
   (let ((mapping (sibyl.tools::%file-to-suite-mapping)))
   (is (hash-table-p mapping))
-  (is (string= (gethash "src/tools/lisp-tools.lisp" mapping) "sexp-tools-test"))
-  (is (string= (gethash "src/agent/core.lisp" mapping) "agent-test"))))
+  (let ((lisp-suites (gethash "src/tools/lisp-tools.lisp" mapping)))
+    (is (listp lisp-suites))
+    (is (member "read-sexp-tests" lisp-suites :test #'string=)))
+  (is (string= (gethash "src/agent/core.lisp" mapping) "agent-tests"))))
 
 (test test-smart-suite-selection
   "Auto-generated test"
@@ -621,8 +623,8 @@
 (let ((suites (sibyl.tools::%suites-for-files
                '("src/tools/lisp-tools.lisp" "src/agent/core.lisp"))))
   (is (listp suites))
-  (is (member "sexp-tools-test" suites :test #'string=))
-  (is (member "agent-test" suites :test #'string=)))
+  (is (member "read-sexp-tests" suites :test #'string=))
+  (is (member "agent-tests" suites :test #'string=)))
 
 ;; 未知のファイルは無視される
 (let ((suites (sibyl.tools::%suites-for-files '("src/unknown/file.lisp"))))
