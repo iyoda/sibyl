@@ -17,7 +17,7 @@
 
 (defvar *modified-files-lock* (bt:make-recursive-lock "modified-files-lock")
   "Recursive lock protecting *modified-files*.
-   Lock order: tool-registry (1st) < evolution-state (2nd) < modified-files (3rd) < command-handlers (4th)")
+   Lock order: tool-registry (1st) < modified-files (2nd) < command-handlers (3rd)")
 
 (defun protect-file (path)
   "Mark PATH as modified, preventing ASDF reload.

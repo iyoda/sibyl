@@ -440,128 +440,6 @@
                   (sibyl.repl::handle-repl-command :help nil))))
     (is (search "/tokens" output :test #'string-equal))))
 
-;;; ============================================================
-;;; /evolve command tests
-;;; ============================================================
-
-(def-suite evolve-tests
-  :description "Tests for /evolve command."
-  :in sibyl-tests)
-
-(in-suite evolve-tests)
-
-(defun %evolve-test-suggestions-json (suggestions)
-  (let ((payload (make-hash-table :test 'equal)))
-    (setf (gethash "suggestions" payload)
-          (if suggestions
-              (coerce suggestions 'vector)
-              #()))
-    (with-output-to-string (stream)
-      (yason:encode payload stream))))
-
-(defun %evolve-test-run-results-json (total passed failed)
-  (let ((payload (make-hash-table :test 'equal)))
-    (setf (gethash "total" payload) total)
-    (setf (gethash "passed" payload) passed)
-    (setf (gethash "failed" payload) failed)
-    (setf (gethash "failures" payload) #())
-    (with-output-to-string (stream)
-      (yason:encode payload stream))))
-
-(test evolve-command-registered
-  "Test that /evolve command is registered in *command-handlers*."
-  (let ((entry (assoc :evolve sibyl.repl::*command-handlers*)))
-    (is (not (null entry)))
-    (is (functionp (cdr entry)))))
-
-(test evolve-stops-when-max-cycles-zero
-  "Loop stops immediately when max-cycles=0."
-  (let ((original-execute (symbol-function 'sibyl.tools:execute-tool))
-        (execute-called nil))
-    (unwind-protect
-         (progn
-           (setf (symbol-function 'sibyl.tools:execute-tool)
-                 (lambda (&rest args)
-                   (declare (ignore args))
-                   (setf execute-called t)
-                   (error "execute-tool should not be called")))
-           (with-output-to-string (*standard-output*)
-             (sibyl.repl::handle-evolve-command nil "/evolve 0"))
-           (is (null execute-called)))
-      (setf (symbol-function 'sibyl.tools:execute-tool) original-execute))))
-
-(test evolve-stops-when-no-suggestions
-  "Loop stops when suggest-improvements returns no suggestions."
-  (let ((original-execute (symbol-function 'sibyl.tools:execute-tool))
-        (original-agent-run (symbol-function 'sibyl.agent:agent-run))
-        (run-tests-called nil)
-        (agent-called nil))
-    (unwind-protect
-         (progn
-           (setf (symbol-function 'sibyl.tools:execute-tool)
-                 (lambda (name args)
-                   (declare (ignore args))
-                   (cond
-                     ((string= name "suggest-improvements")
-                      (%evolve-test-suggestions-json nil))
-                     ((string= name "run-tests")
-                      (setf run-tests-called t)
-                      (%evolve-test-run-results-json 10 10 0))
-                     (t
-                      (error "Unexpected tool call: ~a" name)))))
-           (setf (symbol-function 'sibyl.agent:agent-run)
-                 (lambda (&rest args)
-                   (declare (ignore args))
-                   (setf agent-called t)
-                   "ok"))
-           (let ((output (with-output-to-string (*standard-output*)
-                           (sibyl.repl::handle-evolve-command nil "/evolve 1"))))
-             (is (search "No new suggestions. Stopping." output :test #'string-equal))
-             (is (null run-tests-called))
-             (is (null agent-called))))
-      (setf (symbol-function 'sibyl.tools:execute-tool) original-execute)
-      (setf (symbol-function 'sibyl.agent:agent-run) original-agent-run))))
-
-(test evolve-stops-on-test-failure
-  "Loop stops when run-tests reports failures."
-  (let ((original-execute (symbol-function 'sibyl.tools:execute-tool))
-        (original-agent-run (symbol-function 'sibyl.agent:agent-run))
-        (run-tests-called nil)
-        (agent-called nil))
-    (unwind-protect
-         (progn
-           (setf (symbol-function 'sibyl.tools:execute-tool)
-                 (lambda (name args)
-                   (declare (ignore args))
-                   (cond
-                     ((string= name "suggest-improvements")
-                      (let ((suggestion (make-hash-table :test 'equal)))
-                        (setf (gethash "description" suggestion) "Add regression test")
-                        (setf (gethash "rationale" suggestion) "Ensure safety")
-                        (setf (gethash "priority" suggestion) "high")
-                        (setf (gethash "category" suggestion) "tests")
-                        (setf (gethash "file" suggestion) "src/repl.lisp")
-                        (setf (gethash "line" suggestion) 1)
-                        (%evolve-test-suggestions-json (list suggestion))))
-                     ((string= name "run-tests")
-                      (setf run-tests-called t)
-                      (%evolve-test-run-results-json 10 9 1))
-                     (t
-                      (error "Unexpected tool call: ~a" name)))))
-           (setf (symbol-function 'sibyl.agent:agent-run)
-                 (lambda (&rest args)
-                   (declare (ignore args))
-                   (setf agent-called t)
-                   "ok"))
-           (let ((output (with-output-to-string (*standard-output*)
-                           (sibyl.repl::handle-evolve-command nil "/evolve 1"))))
-             (is (search "Test regression detected. Stopping." output
-                         :test #'string-equal))
-             (is (eq t run-tests-called))
-             (is (eq t agent-called))))
-      (setf (symbol-function 'sibyl.tools:execute-tool) original-execute)
-      (setf (symbol-function 'sibyl.agent:agent-run) original-agent-run))))
-
 (test format-elapsed-time-with-tokens
   "Auto-generated test"
   
@@ -642,9 +520,9 @@
   "Auto-generated test"
   
 ;; 引数なしのツールは空文字列を返す
-(let ((tc (sibyl.llm:make-tool-call
-           :name "evolution-status"
-           :arguments nil)))
+ (let ((tc (sibyl.llm:make-tool-call
+            :name "shell"
+            :arguments nil)))
   (is (string= "" (sibyl.repl::format-tool-call-summary tc))))
 )
 
@@ -682,4 +560,3 @@
       "tool name must appear in output immediately")
   (is (search "を実行中" output)
       "execution message must appear immediately")))
-
