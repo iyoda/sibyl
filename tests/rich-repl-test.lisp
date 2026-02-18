@@ -122,29 +122,43 @@
 
 (test tool-hook-displays-tool-name
   "make-tool-call-hook prints the tool name when *use-colors* is nil"
-  (let ((sibyl.repl::*use-colors* nil))
+  (let ((sibyl.repl::*use-colors* nil)
+        (sibyl.repl::*current-spinner* nil))
     (let ((output (with-output-to-string (*standard-output*)
                     (let ((hook (sibyl.repl::make-tool-call-hook)))
                       (let ((tc (sibyl.llm:make-tool-call
                                  :name "read-file"
                                  :id "tc_test"
                                  :arguments nil)))
-                        (funcall hook tc))))))
+                        (funcall hook tc)))
+                    ;; Stop the restarted spinner before capturing output
+                    (when sibyl.repl::*current-spinner*
+                      (sibyl.repl.spinner:stop-spinner sibyl.repl::*current-spinner*)
+                      (setf sibyl.repl::*current-spinner* nil)))))
       (is (search "read-file" output)))))
 
 (test tool-hook-no-colors-plain-text
   "make-tool-call-hook uses plain format when *use-colors* is nil (no ANSI codes)"
-  (let ((sibyl.repl::*use-colors* nil))
+  (let ((sibyl.repl::*use-colors* nil)
+        (sibyl.repl::*current-spinner* nil))
     (let ((output (with-output-to-string (*standard-output*)
                     (let ((hook (sibyl.repl::make-tool-call-hook)))
                       (let ((tc (sibyl.llm:make-tool-call
                                  :name "write-file"
                                  :id "tc_test2"
                                  :arguments nil)))
-                        (funcall hook tc))))))
-      ;; Plain text: no escape sequences
-      (is (not (search (string #\Escape) output)))
-      (is (search "write-file" output)))))
+                        (funcall hook tc)))
+                    ;; Stop the restarted spinner before output is finalized
+                    (when sibyl.repl::*current-spinner*
+                      (sibyl.repl.spinner:stop-spinner sibyl.repl::*current-spinner*)
+                      (setf sibyl.repl::*current-spinner* nil)))))
+      ;; Check the hook's display line only (before newline).
+      ;; Spinner cleanup writes ANSI (\r\e[2K) to the same stream — ignore that.
+      (let ((first-line (subseq output 0 (position #\Newline output))))
+        (is (not (search (string #\Escape) first-line))
+            "hook display line should have no ANSI escape codes")
+        (is (search "write-file" first-line)
+            "hook display line should contain tool name")))))
 
 ;;; ============================================================
 ;;; Elapsed time utilities
@@ -238,3 +252,81 @@
       (funcall sibyl.llm:*streaming-text-callback* " world"))
     (is (null sibyl.llm:*streaming-text-callback*))
     (is (equal '(" world" "hello") collected))))
+
+;;; ============================================================
+;;; Tool-call hook: spinner restart after tool display
+;;; ============================================================
+
+(test tool-hook-restarts-spinner-after-display
+  "make-tool-call-hook should restart spinner after displaying tool name"
+  (let ((sibyl.repl::*use-colors* nil)
+        (sibyl.repl::*current-spinner* nil))
+    (let* ((out (make-string-output-stream))
+           (*standard-output* out)
+           (hook (sibyl.repl::make-tool-call-hook))
+           (tc (sibyl.llm:make-tool-call
+                :id "test-id"
+                :name "shell"
+                :arguments (list (cons "command" "ls")))))
+      (unwind-protect
+           (progn
+             (funcall hook tc)
+             ;; フック呼び出し後、*current-spinner* が再起動されているか確認
+             (is (not (null sibyl.repl::*current-spinner*))
+                 "spinner should be restarted after tool call display")
+             (is (sibyl.repl.spinner:spinner-active-p sibyl.repl::*current-spinner*)
+                 "restarted spinner should be active"))
+        ;; クリーンアップ
+        (when sibyl.repl::*current-spinner*
+          (sibyl.repl.spinner:stop-spinner sibyl.repl::*current-spinner*)
+          (setf sibyl.repl::*current-spinner* nil))))))
+
+(test tool-hook-spinner-message-shows-tool-name
+  "restarted spinner message should contain the tool name"
+  (let ((sibyl.repl::*use-colors* nil)
+        (sibyl.repl::*current-spinner* nil))
+    (let* ((out (make-string-output-stream))
+           (*standard-output* out)
+           (hook (sibyl.repl::make-tool-call-hook))
+           (tc (sibyl.llm:make-tool-call
+                :id "test-id-2"
+                :name "read-file"
+                :arguments (list (cons "path" "src/repl.lisp")))))
+      (unwind-protect
+           (progn
+             (funcall hook tc)
+             (when sibyl.repl::*current-spinner*
+               (let ((msg (sibyl.repl.spinner::spinner-message
+                           sibyl.repl::*current-spinner*)))
+                 (is (search "考え中" msg)
+                     "restarted spinner message should say 考え中..."))))
+        (when sibyl.repl::*current-spinner*
+          (sibyl.repl.spinner:stop-spinner sibyl.repl::*current-spinner*)
+          (setf sibyl.repl::*current-spinner* nil))))))
+
+(test tool-hook-multiple-calls-each-restart-spinner
+  "consecutive tool call hooks each restart the spinner"
+  (let ((sibyl.repl::*use-colors* nil)
+        (sibyl.repl::*current-spinner* nil))
+    (let* ((out (make-string-output-stream))
+           (*standard-output* out)
+           (hook (sibyl.repl::make-tool-call-hook)))
+      (unwind-protect
+           (progn
+             ;; 1回目のツール呼び出し
+             (funcall hook (sibyl.llm:make-tool-call
+                            :id "tc-1" :name "shell"
+                            :arguments (list (cons "command" "ls"))))
+             (is (not (null sibyl.repl::*current-spinner*))
+                 "spinner should exist after first tool call")
+             ;; 2回目のツール呼び出し（スピナーが既にある状態）
+             (funcall hook (sibyl.llm:make-tool-call
+                            :id "tc-2" :name "read-file"
+                            :arguments (list (cons "path" "src/"))))
+             (is (not (null sibyl.repl::*current-spinner*))
+                 "spinner should still exist after second tool call")
+             (is (sibyl.repl.spinner:spinner-active-p sibyl.repl::*current-spinner*)
+                 "spinner should be active after second tool call"))
+        (when sibyl.repl::*current-spinner*
+          (sibyl.repl.spinner:stop-spinner sibyl.repl::*current-spinner*)
+          (setf sibyl.repl::*current-spinner* nil))))))
