@@ -1,0 +1,38 @@
+## Sibyl Test Speedup - Baseline Measurements
+Date: 2026-02-18
+
+### run-tests-parallel (BEFORE any changes)
+
+Wall-clock time: 8.022 seconds
+Total checks: 1001
+Pass: 996 (99.5%)
+Skip: 0
+Fail: 5
+
+Pre-existing failures (unrelated to our changes):
+  - ASDF-REGISTRATION-TESTS / PARALLEL-TOOL-CALLS-ALL-RESULTS-RETURNED
+  - ASDF-REGISTRATION-TESTS / PARALLEL-TOOL-CALLS-ERROR-ISOLATION
+  - ASDF-REGISTRATION-TESTS / PARALLEL-TOOL-CALLS-SERIAL-EQUIVALENCE
+  - ASDF-REGISTRATION-TESTS / PARALLEL-TOOL-CALLS-SINGLE-FALLS-BACK
+  - EVOLVE-TESTS / MAKE-TOOL-CALL-HOOK-FORCE-OUTPUT
+
+### Duplicate suite execution CONFIRMED
+
+These suites ran TWICE each (once in SAFE parallel phase, once in %safe-suites-resolved):
+  - AGENT-TESTS (sibyl.agent.tests)
+  - EVOLUTION-STATE-TESTS (sibyl.evolution.tests)
+  - EVOLUTION-REPORT-TESTS (sibyl.evolution.tests)
+  - RUN-HOOK-TESTS (sibyl.agent.tests)
+  - TDD-ORCHESTRATION-TESTS (sibyl.agent.tests)
+
+### IMPORTANT: Ghost suite finding corrected
+
+ALL 17 UNSAFE suites loaded and ran successfully.
+sexp-tools-test.lisp (in sibyl.asd) contains the suites previously thought to be
+in the unloaded creation-tools-test.lisp / analysis-tools-test.lisp files.
+Ghost suite validation (Task 3) is still useful as a guard, but less critical.
+
+### Target
+
+Post-fix target: 8.022 * 0.7 = 5.62 seconds or less
+Expected check count after dedup fix: approximately 1001 - (duplicate suite checks) checks

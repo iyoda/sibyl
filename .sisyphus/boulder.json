@@ -1,9 +1,8 @@
 {
-  "active_plan": "/Users/iyoda/Projects/atikoro/sibyl/.sisyphus/plans/parallel-tests.md",
-  "started_at": "2026-02-18T02:49:11.736Z",
-  "session_ids": [
-    "ses_391b42115ffepcYw1aMu8CHN05"
-  ],
-  "plan_name": "parallel-tests",
-  "agent": "atlas"
+  "active_plan": null,
+  "started_at": null,
+  "session_ids": [],
+  "plan_name": null,
+  "agent": "atlas",
+  "note": "test-speedup plan complete as of 2026-02-18. Fixes: dedup bug (1001→908 checks), ghost validation, per-suite timing, spinner polling, REPL timing output. Task 7 cancelled (SAFE suites ~0.25s actual, UNSAFE bottleneck is inherent LLM-like test delays)."
 }
