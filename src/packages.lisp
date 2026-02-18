@@ -117,6 +117,16 @@
    #:complete-with-tools
    #:count-tokens
    #:*streaming-text-callback*
+   ;; Token tracking
+   #:token-tracker
+   #:make-token-tracker
+   #:token-tracker-input-tokens
+   #:token-tracker-output-tokens
+   #:token-tracker-cache-read-tokens
+   #:token-tracker-cache-write-tokens
+   #:token-tracker-request-count
+   #:tracker-add-usage
+   #:tracker-cache-hit-rate
    ;; Provider construction
    #:make-anthropic-client
    #:model-tier
@@ -246,6 +256,7 @@
    #:agent-memory
    #:agent-system-prompt
    #:agent-hooks
+   #:agent-token-tracker
    #:agent-step
    #:agent-run
    #:agent-role
