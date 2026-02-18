@@ -163,6 +163,7 @@
    #:model-version
    #:model-context-window
    #:model-capabilities
+   #:call-llm
    #:make-openai-client))
 
 (defpackage #:sibyl.plan
@@ -238,6 +239,8 @@
         #:*self-assess-running*
         ;; Codebase-map cache (exported for test runner use)
         #:*codebase-map-cache*
+     #:execute-tool-calls-parallel
+     #:*parallel-tool-threshold*
         #:with-codebase-map-cache))
 
 (defpackage #:sibyl.agent
@@ -315,6 +318,7 @@
    #:msg-type
    #:generate-task-id
    #:generate-agent-id
+   #:*current-agent*
    #:agent-reset))
 
 (defpackage #:sibyl.mcp

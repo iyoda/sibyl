@@ -100,6 +100,15 @@ Think step by step. Be precise and concise.
 If you are unsure, ask for clarification."
   "Default system prompt for the agent.")
 
+
+;;; ============================================================
+;;; Dynamic agent context
+;;; ============================================================
+
+(defvar *current-agent* nil
+  "Dynamically bound to the currently-executing agent during agent-step.
+   Tools can read this to access the agent's client, memory, etc.")
+
 ;;; ============================================================
 ;;; Agent construction
 ;;; ============================================================
@@ -167,54 +176,61 @@ Adds :code if input has code-related keywords. Adds :analysis for analysis keywo
 
 (defmethod agent-step ((agent agent) user-input)
   "One iteration of the agent loop."
-  (incf (agent-step-count agent))
-  (run-hook agent :before-step (agent-step-count agent))
-
-  ;; Add user message to memory
-  (when user-input
-    (memory-push (agent-memory agent) (user-message user-input)))
-
-  ;; Build context and call LLM
-  (let* ((context (memory-context-window
-                   (agent-memory agent)
-                   :system-prompt (agent-system-prompt agent)))
-         (inferred-cats (when user-input (infer-tool-categories user-input)))
-         (tools-schema (if inferred-cats
-                           (tools-as-schema :categories inferred-cats)
-                           (tools-as-schema))))
-    (multiple-value-bind (response usage)
-        (if tools-schema
-            (complete-with-tools
-             (agent-client agent) context tools-schema)
-            (complete (agent-client agent) context))
-      (sibyl.llm::tracker-add-usage (agent-token-tracker agent) usage)
-
-      ;; Process response
-      (memory-push (agent-memory agent) response)
-
-      (cond
-        ;; Response has tool calls → execute them and recurse
-        ((message-tool-calls response)
-         (dolist (tc (message-tool-calls response))
-           (run-hook agent :on-tool-call tc)
-           (let ((result
-                   (handler-case
-                       (execute-tool-call tc)
-                     (tool-error (e)
-                       (run-hook agent :on-error e)
-                       (format nil "Error: ~a" e)))))
-             (memory-push (agent-memory agent)
-                          (tool-result-message (tool-call-id tc) result))))
-         ;; Recurse to let LLM process tool results (no new user input)
-         (if (< (agent-step-count agent) (agent-max-steps agent))
-             (agent-step agent nil)
-             (format nil "[Sibyl: max steps (~a) reached]"
-                     (agent-max-steps agent))))
-
-        ;; Plain text response → return it
-        (t
-         (run-hook agent :after-step response)
-         (message-content response))))))
+  (let ((*current-agent* agent))
+    (incf (agent-step-count agent))
+    (run-hook agent :before-step (agent-step-count agent))
+    (when user-input
+      (memory-push (agent-memory agent) (user-message user-input)))
+    (let* ((context
+            (memory-context-window (agent-memory agent) :system-prompt
+             (agent-system-prompt agent)))
+           (inferred-cats (when user-input (infer-tool-categories user-input)))
+           (tools-schema
+            (if inferred-cats
+                (tools-as-schema :categories inferred-cats)
+                (tools-as-schema))))
+      (multiple-value-bind (response usage)
+          (if tools-schema
+              (complete-with-tools (agent-client agent) context tools-schema)
+              (complete (agent-client agent) context))
+        (sibyl.llm:tracker-add-usage (agent-token-tracker agent) usage)
+        (memory-push (agent-memory agent) response)
+        (cond
+         ((message-tool-calls response)
+          (let* ((tc-list (message-tool-calls response))
+                 (use-parallel (>= (length tc-list)
+                                   sibyl.tools:*parallel-tool-threshold*)))
+            (if use-parallel
+                ;; --- 並列実行パス ---
+                (let ((results
+                       (sibyl.tools:execute-tool-calls-parallel
+                        tc-list
+                        (lambda (tc)
+                          (run-hook agent :on-tool-call tc)
+                          (handler-case (execute-tool-call tc)
+                            (tool-error (e)
+                              (run-hook agent :on-error e)
+                              (format nil "Error: ~a" e)))))))
+                  (loop for tc in tc-list
+                        for result in results
+                        do (memory-push (agent-memory agent)
+                                        (tool-result-message (tool-call-id tc) result))))
+                ;; --- シリアル実行パス (threshold 未満) ---
+                (dolist (tc tc-list)
+                  (run-hook agent :on-tool-call tc)
+                  (let ((result
+                         (handler-case (execute-tool-call tc)
+                           (tool-error (e)
+                             (run-hook agent :on-error e)
+                             (format nil "Error: ~a" e)))))
+                    (memory-push (agent-memory agent)
+                                 (tool-result-message (tool-call-id tc) result))))))
+          (if (< (agent-step-count agent) (agent-max-steps agent))
+              (agent-step agent nil)
+              (format nil "[Sibyl: max steps (~a) reached]"
+                      (agent-max-steps agent))))
+         (t (run-hook agent :after-step response)
+          (message-content response)))))))
 
 ;;; ============================================================
 ;;; Multi-turn run: process input until final text response

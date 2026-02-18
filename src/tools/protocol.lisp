@@ -234,3 +234,41 @@
                                       :inner-error e)))
         (log-warn "tools" "Tool call failed for ~a: ~a" tool-name e)
         (format nil "Error: ~a" wrapped)))))
+
+;;; ============================================================
+;;; Parallel tool execution
+;;; ============================================================
+
+(defparameter *parallel-tool-threshold* 2
+  "Minimum number of tool calls to trigger parallel execution.
+   When the number of tool calls is below this threshold, sequential
+   execution may be preferred.")
+
+(defun execute-tool-calls-parallel (tc-list executor)
+  "Execute a list of tool-call structs in parallel using EXECUTOR.
+
+EXECUTOR is a function (tool-call) => result-string.
+Returns a list of results in the same order as TC-LIST.
+Errors in individual calls are caught and returned as error strings.
+The dynamic value of SIBYL.AGENT:*CURRENT-AGENT* is propagated to each thread."
+  (let* ((n (length tc-list))
+         (results (make-array n :initial-element nil))
+         (current-agent sibyl.agent:*current-agent*)
+         (threads
+           (loop for tc in tc-list
+                 for i from 0
+                 collect
+                 (let ((tc tc) (i i))
+                   (bt:make-thread
+                    (lambda ()
+                      (let ((sibyl.agent:*current-agent* current-agent))
+                        (setf (aref results i)
+                              (handler-case (funcall executor tc)
+                                (error (e)
+                                  (format nil "Error: ~a" e))))))
+                    :name (format nil "tool-call-~a" i))))))
+    ;; Wait for all threads to finish
+    (dolist (thread threads)
+      (bt:join-thread thread))
+    ;; Return results as a list in original order
+    (coerce results 'list)))
