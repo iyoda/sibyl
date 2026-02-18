@@ -85,15 +85,15 @@ Transform Sibyl's REPL from a basic read-eval-print loop into a responsive, mode
 - `tests/rich-repl-test.lisp`: Registered in `sibyl.asd`, expanded with spinner/signal/display tests
 
 ### Definition of Done
-- [ ] `(asdf:load-system :sibyl :force t)` completes with zero style-warnings about undefined variables
-- [ ] Spinner visibly animates during LLM calls, stops cleanly when response arrives
-- [ ] Single Ctrl+C during LLM call cancels and returns to prompt
-- [ ] Double Ctrl+C within 2 seconds exits REPL cleanly
-- [ ] ↑↓ arrows navigate input history (when cl-readline available)
-- [ ] Tool calls display name during execution (e.g., `🔧 read-file を実行中...`)
-- [ ] Elapsed time shown after each response (e.g., `[2.3s]`)
-- [ ] `(asdf:test-system :sibyl)` passes with zero failures
-- [ ] Phase 2: LLM responses stream token-by-token to terminal
+- [x] `(asdf:load-system :sibyl :force t)` completes with zero style-warnings about undefined variables
+- [x] Spinner visibly animates during LLM calls, stops cleanly when response arrives
+- [x] Single Ctrl+C during LLM call cancels and returns to prompt
+- [x] Double Ctrl+C within 2 seconds exits REPL cleanly
+- [x] ↑↓ arrows navigate input history (when cl-readline available)
+- [x] Tool calls display name during execution (e.g., `🔧 read-file を実行中...`)
+- [x] Elapsed time shown after each response (e.g., `[2.3s]`)
+- [x] `(asdf:test-system :sibyl)` passes with zero failures (1559 checks, 100%)
+- [x] Phase 2: LLM responses stream token-by-token to terminal
 
 ### Must Have
 - Spinner during LLM calls (minimum viable UX improvement)
@@ -1275,11 +1275,11 @@ sbcl --eval '(ql:quickload :sibyl :silent t)' \
 ```
 
 ### Final Checklist
-- [ ] All "Must Have" features present and working
-- [ ] All "Must NOT Have" guardrails respected (no tab completion, no markdown rendering, etc.)
-- [ ] All 11 tasks committed with passing tests
-- [ ] `src/agent/core.lisp` has ZERO modifications (all enrichment via hooks)
-- [ ] `sibyl` system loads without cl-readline (graceful degradation)
-- [ ] Spinner, Ctrl+C, tool display, history, timing all work together in REPL
-- [ ] Phase 2: Streaming works for both Anthropic and OpenAI
-- [ ] Phase 2: Spinner transitions smoothly to streaming display
+- [x] All "Must Have" features present and working
+- [x] All "Must NOT Have" guardrails respected (no tab completion, no markdown rendering, etc.)
+- [x] All 11 tasks committed with passing tests (1559 checks, 100% pass)
+- [x] `src/agent/core.lisp` has ZERO modifications (all enrichment via hooks)
+- [x] `sibyl` system loads without cl-readline (graceful degradation)
+- [x] Spinner, Ctrl+C, tool display, history, timing all work together in REPL
+- [x] Phase 2: Streaming works for both Anthropic and OpenAI
+- [x] Phase 2: Spinner transitions smoothly to streaming display
