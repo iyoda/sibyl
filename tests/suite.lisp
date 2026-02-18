@@ -58,7 +58,9 @@
     sync-to-file-tests
     provisioning-tests
     evolve-tests
-    ollama-tests)
+    ollama-tests
+    cache-key-tests
+    cache-adapter-tests)
   "Test suites in sibyl.tests package safe for parallel execution.
 Cross-package suites are resolved at runtime via %safe-suites-resolved.")
 
@@ -96,7 +98,10 @@ Called at run-tests-parallel invocation time, after all packages are loaded."
     add-definition-tests
     add-export-tests
     create-module-tests
-    parallel-runner-tests)
+    parallel-runner-tests
+    cache-lru-tests
+    cache-telemetry-tests
+    cache-integration-tests)
   "Test suites that must run sequentially (file I/O, global state, or FiveAM side effects).")
 
 ;;; Lock for serializing FiveAM calls (FiveAM is not thread-safe)

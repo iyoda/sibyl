@@ -105,6 +105,9 @@ Convenience function equivalent to (setf (config-value KEY) VALUE)."
                      ;; Optimization defaults
                     ("optimization.cache-enabled" . t)
                      ("optimization.auto-model-routing" . nil)
+                     ;; Ollama performance defaults
+                     ("ollama.num-predict" . 8192)
+                     ("ollama.keep-alive"  . "30m")
                      ;; REPL defaults
                      ("repl.ignore-ctrl-j" . nil))))
     (dolist (pair defaults)

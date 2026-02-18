@@ -100,6 +100,27 @@ Think step by step. Be precise and concise.
 If you are unsure, ask for clarification."
   "Default system prompt for the agent.")
 
+(defparameter *compact-system-prompt*
+  "You are Sibyl, a Common Lisp coding agent running in SBCL.
+You read, write, and modify code using tools.
+
+Key tools: read-file, write-file, shell, grep, eval-form, describe-symbol,
+read-sexp, who-calls, safe-redefine, run-tests, write-test, sync-to-file.
+
+When modifying code: write test first, implement, verify tests pass, persist.
+Be precise and concise. Use tools for actions."
+  "Compact system prompt for local/smaller models to reduce input token count.")
+
+(defun select-ollama-system-prompt (model-name)
+  "Select an optimized system prompt for an Ollama model.
+Prepends the model profile's system-prompt-hint (if any) to the compact prompt."
+  (let ((profile (sibyl.llm::lookup-model-profile model-name)))
+    (if (and profile (getf profile :system-prompt-hint))
+        (format nil "~a~%~%~a"
+                (getf profile :system-prompt-hint)
+                *compact-system-prompt*)
+        *compact-system-prompt*)))
+
 
 ;;; ============================================================
 ;;; Dynamic agent context

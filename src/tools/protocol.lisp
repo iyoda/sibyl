@@ -33,10 +33,20 @@
   "Recursive lock protecting *tool-registry*. Acquire before accessing registry.
    Lock order: tool-registry (1st) < evolution-state (2nd) < modified-files (3rd) < command-handlers (4th)")
 
+(defvar *tool-schema-generation* 0
+  "Monotonically increasing counter bumped on every tool registration/removal.
+   Used to invalidate the cached schema list.")
+
+(defvar *tool-schema-cache* nil
+  "Cached result of (tools-as-schema). Plist (:generation N :all <list> :by-cats <alist>).
+   Invalidated when *tool-schema-generation* advances.")
+
 (defun register-tool (tool)
-  "Register a TOOL in the global registry. Overwrites if exists."
+  "Register a TOOL in the global registry. Overwrites if exists.
+Bumps the schema generation counter to invalidate cached schemas."
   (bt:with-recursive-lock-held (*tool-registry-lock*)
-    (setf (gethash (tool-name tool) *tool-registry*) tool))
+    (setf (gethash (tool-name tool) *tool-registry*) tool)
+    (incf *tool-schema-generation*))
   (log-debug "tools" "Registered tool ~a" (tool-name tool)))
 
 (defun find-tool (name)
@@ -59,9 +69,11 @@
       (sort tools #'string< :key #'tool-name))))
 
 (defun unregister-tool (name)
-  "Remove a tool from the registry."
+  "Remove a tool from the registry.
+Bumps the schema generation counter to invalidate cached schemas."
   (bt:with-recursive-lock-held (*tool-registry-lock*)
-    (remhash name *tool-registry*)))
+    (remhash name *tool-registry*)
+    (incf *tool-schema-generation*)))
 
 ;;; ============================================================
 ;;; DEFTOOL macro — Lisp-idiomatic tool definition
@@ -133,11 +145,50 @@
         :parameters (tool-parameters tool)
         :category (tool-category tool)))
 
+(defun %ensure-schema-cache ()
+  "Return the current schema cache, rebuilding it if the generation has advanced."
+  (let ((cache *tool-schema-cache*)
+        (gen *tool-schema-generation*)
+        (registry *tool-registry*))
+    (when (or (null cache)
+              (/= (getf cache :generation) gen)
+              (not (eq (getf cache :registry) registry)))
+      ;; Rebuild: compute the full schema and a per-category index
+      (let* ((all-schemas (mapcar #'tool-to-schema (list-tools)))
+             (all-tools (list-tools))
+             (cat-index (make-hash-table :test 'eq)))
+        ;; Build category→schemas mapping
+        (loop for tool in all-tools
+              for schema in all-schemas
+              do (push schema (gethash (tool-category tool) cat-index)))
+        ;; Reverse each bucket to preserve registration order
+        (maphash (lambda (k v)
+                   (setf (gethash k cat-index) (nreverse v)))
+                 cat-index)
+        (setf cache (list :generation gen
+                          :registry registry
+                          :all all-schemas
+                          :by-cats cat-index)
+              *tool-schema-cache* cache)))
+    cache))
+
 (defun tools-as-schema (&key categories)
   "Return registered tools as a list of schema plists.
    If CATEGORIES (a list of keywords) is specified, only include tools
-   whose category is a member of CATEGORIES. Without CATEGORIES, returns all."
-  (mapcar #'tool-to-schema (list-tools :categories categories)))
+   whose category is a member of CATEGORIES. Without CATEGORIES, returns all.
+   Results are cached and rebuilt only when the tool registry changes."
+  (let ((cache (%ensure-schema-cache)))
+    (if categories
+        ;; Gather schemas for requested categories from the index
+        (let ((index (getf cache :by-cats))
+              (result nil))
+          (dolist (cat categories)
+            (let ((bucket (gethash cat index)))
+              (when bucket
+                (setf result (append result bucket)))))
+          result)
+        ;; All tools
+        (getf cache :all))))
 
 ;;; ============================================================
 ;;; Tool execution with condition-based error handling

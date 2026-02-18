@@ -58,6 +58,75 @@
 (defvar *command-count* 0
   "Counter tracking the number of commands executed in the current REPL session.")
 
+;;; ============================================================
+;;; Output post-processing
+;;; ============================================================
+
+(defparameter *function-block-start* "<function"
+  "Start tag prefix for tool-call style blocks emitted by some models.")
+
+(defparameter *function-block-end* "</function>"
+  "End tag for tool-call style blocks emitted by some models.")
+
+(defun strip-function-blocks (text)
+  "Strip <function ...>...</function> blocks from TEXT.
+Returns TEXT unchanged when it is not a string."
+  (if (not (stringp text))
+      text
+      (let ((pos 0)
+            (out (make-string-output-stream)))
+        (loop
+          (let ((start (search *function-block-start* text :start2 pos)))
+            (if start
+                (progn
+                  (write-string text out :start pos :end start)
+                  (let ((end (search *function-block-end* text :start2 start)))
+                    (if end
+                        (setf pos (+ end (length *function-block-end*)))
+                        (return))))
+                (progn
+                  (write-string text out :start pos)
+                  (return)))))
+        (get-output-stream-string out))))
+
+(defun make-function-block-stripper ()
+  "Return a stateful function that strips <function> blocks from streamed chunks."
+  (let ((in-block nil)
+        (carry ""))
+    (lambda (chunk)
+      (let* ((data (if (string= carry "")
+                       chunk
+                       (concatenate 'string carry chunk)))
+             (pos 0)
+             (out (make-string-output-stream)))
+        (setf carry "")
+        (loop
+          (cond
+            (in-block
+             (let ((end (search *function-block-end* data :start2 pos)))
+               (if end
+                   (setf in-block nil
+                         pos (+ end (length *function-block-end*)))
+                   (progn
+                     (setf carry (subseq data pos))
+                     (return)))))
+            (t
+             (let ((start (search *function-block-start* data :start2 pos)))
+               (if start
+                   (progn
+                     (write-string data out :start pos :end start)
+                     (let ((end (search *function-block-end* data :start2 start)))
+                       (if end
+                           (setf pos (+ end (length *function-block-end*)))
+                           (progn
+                             (setf in-block t
+                                   carry (subseq data start))
+                             (return)))))
+                   (progn
+                     (write-string data out :start pos)
+                     (return)))))))
+        (get-output-stream-string out)))))
+
 (defvar *command-history* nil
   "List of command strings entered in the current REPL session, in reverse chronological order.")
 
@@ -512,9 +581,20 @@
          (cache-read (sibyl.llm::token-tracker-cache-read-tokens tracker))
          (cache-write (sibyl.llm::token-tracker-cache-write-tokens tracker))
          (requests   (sibyl.llm::token-tracker-request-count tracker))
-         (hit-rate   (sibyl.llm::tracker-cache-hit-rate tracker)))
-    (format nil "~%Token Usage (this session):~%  Input:       ~:d tokens~%  Output:      ~:d tokens~%  Cache Read:  ~:d tokens (~,1f% hit rate)~%  Cache Write: ~:d tokens~%  Requests:    ~:d~%"
-            input output cache-read (* hit-rate 100.0) cache-write requests)))
+         (hit-rate   (sibyl.llm::tracker-cache-hit-rate tracker))
+         ;; Response cache (client-side) telemetry
+         (cache-stats (sibyl.cache:get-cache-telemetry))
+         (cache-hits   (getf cache-stats :client-hits))
+         (cache-misses (getf cache-stats :client-misses))
+         (cache-total  (getf cache-stats :total-requests))
+         (cache-hit-rate (getf cache-stats :hit-rate))
+         (rcache-stats (sibyl.cache:response-cache-stats))
+         (cache-entries (if rcache-stats (getf rcache-stats :size) 0))
+         (cache-max     (if rcache-stats (getf rcache-stats :max-size) 0)))
+    (format nil "~%Token Usage (this session):~%  Input:       ~:d tokens~%  Output:      ~:d tokens~%  Cache Read:  ~:d tokens (~,1f% server hit rate)~%  Cache Write: ~:d tokens~%  Requests:    ~:d~%~%Response Cache:~%  Hits:        ~:d~%  Misses:      ~:d~%  Hit Rate:    ~,1f%  (~:d / ~:d requests)~%  Entries:     ~:d / ~:d~%"
+            input output cache-read (* hit-rate 100.0) cache-write requests
+            cache-hits cache-misses (* cache-hit-rate 100.0) cache-hits cache-total
+            cache-entries cache-max)))
 
 (defun handle-tokens-command (agent input)
   "Handler for :tokens command. Displays cumulative token usage statistics."
@@ -1357,11 +1437,13 @@
   (/ (- (get-internal-real-time) start-time) 
      (float internal-time-units-per-second)))
 
-(defun format-elapsed-time (seconds &key (stream *standard-output*) model tokens input-tokens output-tokens)
-  "Format elapsed time as [model · elapsed: X.Xs · In X / Out Y] with optional dim styling.
+(defun format-elapsed-time (seconds &key (stream *standard-output*) model tokens input-tokens output-tokens
+                                      cache-hits cache-total)
+  "Format elapsed time as [model · elapsed: X.Xs · In X / Out Y · Cache N/M] with optional dim styling.
    When MODEL is non-NIL, includes the model name before the elapsed time.
    When INPUT-TOKENS and OUTPUT-TOKENS are non-NIL, appends 'In X / Out Y'.
    TOKENS (legacy scalar) is still accepted as fallback.
+   When CACHE-HITS and CACHE-TOTAL are non-NIL, appends 'Cache N/M'.
    When *use-colors* is nil, outputs plain text. Otherwise uses ANSI dim code."
   (let ((label
          (with-output-to-string (s)
@@ -1371,7 +1453,9 @@
              ((and input-tokens output-tokens)
               (format s " · In ~:d / Out ~:d" input-tokens output-tokens))
              (tokens
-              (format s " · ~:d tok" tokens))))))
+              (format s " · ~:d tok" tokens)))
+           (when (and cache-total (plusp cache-total))
+             (format s " · Cache ~d/~d" cache-hits cache-total)))))
     (if *use-colors*
         (format stream "~C[2m[~a]~C[0m" #\Escape label #\Escape)
         (format stream "[~a]" label))))
@@ -1491,6 +1575,16 @@
             (invoke-restart 'continue))))
       (funcall body-thunk))))
 
+(defun %select-system-prompt (client explicit-prompt)
+  "Choose the system prompt based on the client type and user preference.
+When EXPLICIT-PROMPT is supplied and differs from the default, respect it.
+Otherwise, use model-specific optimized prompt for Ollama models."
+  (if (and (string= explicit-prompt sibyl.agent::*default-system-prompt*)
+           (typep client 'sibyl.llm:ollama-client))
+      (sibyl.agent::select-ollama-system-prompt
+       (sibyl.llm:client-model client))
+      explicit-prompt))
+
 (defun start-repl (&key client
                      (system-prompt sibyl.agent::*default-system-prompt*)
                      (name "Sibyl")
@@ -1506,17 +1600,18 @@
 
    Or with an existing agent:
      (start-repl :client my-client)"
-  (let ((agent (if (or use-model-selector
-                       (sibyl.config:config-value "optimization.auto-model-routing"))
-                   (make-instance 'sibyl.llm::adaptive-agent
-                                  :client client
-                                  :name name
-                                  :system-prompt system-prompt
-                                  :model-selector (sibyl.llm::make-default-model-selector))
-                   (sibyl.agent:make-agent
-                    :client client
-                    :name name
-                    :system-prompt system-prompt))))
+  (let* ((effective-prompt (%select-system-prompt client system-prompt))
+         (agent (if (or use-model-selector
+                        (sibyl.config:config-value "optimization.auto-model-routing"))
+                    (make-instance 'sibyl.llm::adaptive-agent
+                                   :client client
+                                   :name name
+                                   :system-prompt effective-prompt
+                                   :model-selector (sibyl.llm::make-default-model-selector))
+                    (sibyl.agent:make-agent
+                     :client client
+                     :name name
+                     :system-prompt effective-prompt))))
     (let ((model (and client (ignore-errors (sibyl.llm::client-model client)))))
       (if model
           (log-info "repl" "Starting REPL (model: ~a)" model)
@@ -1539,6 +1634,15 @@
     ;; so that mbrtowc/wcwidth correctly handle multibyte characters.
     (%ensure-utf8-locale)
     (print-banner)
+    ;; Pre-warm Ollama model in background to avoid cold-start latency
+    (when (typep client 'sibyl.llm:ollama-client)
+      (let ((ollama-client client))
+        (bt:make-thread
+         (lambda ()
+           (log-info "repl" "Pre-warming Ollama model ~a..."
+                     (sibyl.llm:client-model ollama-client))
+           (sibyl.llm::ollama-pre-warm ollama-client))
+         :name "ollama-pre-warm")))
     ;; Connect to configured MCP servers
     (handler-case
         (let ((count (sibyl.mcp:connect-configured-mcp-servers)))
@@ -1617,6 +1721,10 @@
                                                          spinner (sibyl.repl.spinner:start-spinner "考え中...")
                                                          *current-spinner* spinner)
                             (let* ((first-chunk-p t)
+                                   (ollama-client-p (typep (sibyl.agent:agent-client agent)
+                                                            'sibyl.llm:ollama-client))
+                                   (stripper (when ollama-client-p
+                                                (make-function-block-stripper)))
                                    (sibyl.llm:*streaming-text-callback*
                                      (when *stream-enabled*
                                       (lambda (text)
@@ -1628,19 +1736,34 @@
                                             (stop-current-spinner)
                                             (format t "~%"))
                                           (setf first-chunk-p nil)
-                                          (write-string text *standard-output*)
-                                          (force-output *standard-output*))))
+                                          (let ((clean (if stripper
+                                                           (funcall stripper text)
+                                                           text)))
+                                            (when (and clean (plusp (length clean)))
+                                              (write-string clean *standard-output*)
+                                              (force-output *standard-output*))))))
                                    (tracker (sibyl.agent:agent-token-tracker agent))
                                    (in-before (sibyl.llm::token-tracker-input-tokens tracker))
                                    (out-before (sibyl.llm::token-tracker-output-tokens tracker))
+                                   ;; Cache telemetry snapshot before agent-run
+                                   (cache-stats-before (sibyl.cache:get-cache-telemetry))
+                                   (cache-hits-before (getf cache-stats-before :client-hits))
+                                   (cache-total-before (getf cache-stats-before :total-requests))
                                    (response (sibyl.agent:agent-run agent input))
                                    (in-delta (- (sibyl.llm::token-tracker-input-tokens tracker) in-before))
-                                   (out-delta (- (sibyl.llm::token-tracker-output-tokens tracker) out-before)))
+                                   (out-delta (- (sibyl.llm::token-tracker-output-tokens tracker) out-before))
+                                   ;; Cache telemetry delta
+                                   (cache-stats-after (sibyl.cache:get-cache-telemetry))
+                                   (cache-hits-delta (- (getf cache-stats-after :client-hits) cache-hits-before))
+                                   (cache-total-delta (- (getf cache-stats-after :total-requests) cache-total-before)))
                               (stop-current-spinner)
                               (when (or (not *stream-enabled*)
                                         (not sibyl.llm:*streaming-text-callback*)
                                         first-chunk-p)
-                                (format t "~%~a~%" response))
+                                (format t "~%~a~%"
+                                        (if ollama-client-p
+                                            (strip-function-blocks response)
+                                            response)))
                               (unless first-chunk-p
                                 (format t "~%"))
                               (format-elapsed-time (elapsed-seconds start-time)
@@ -1648,7 +1771,9 @@
                                                             (sibyl.llm::client-model
                                                              (sibyl.agent:agent-client agent)))
                                                    :input-tokens (when (plusp in-delta) in-delta)
-                                                   :output-tokens (when (plusp out-delta) out-delta))
+                                                   :output-tokens (when (plusp out-delta) out-delta)
+                                                   :cache-hits cache-hits-delta
+                                                   :cache-total cache-total-delta)
                               (format t "~%")))
                                                 #+sbcl (sb-sys:interactive-interrupt (e)
                                                         (declare (ignore e))

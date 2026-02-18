@@ -115,6 +115,11 @@
    #:conversation-length
    ;; Client protocol
    #:llm-client
+   #:client-api-key
+   #:client-model
+   #:client-max-tokens
+   #:client-temperature
+   #:client-base-url
    #:complete
    #:complete-with-tools
    #:count-tokens
@@ -236,9 +241,15 @@
    #:format-provisioning-stats
    #:format-ab-test-report
    #:agent-cost-records
-   #:make-openai-client
-   #:ollama-client
-   #:make-ollama-client))
+    #:make-openai-client
+    #:ollama-client
+   #:make-ollama-client
+   #:*ollama-model-profiles*
+   #:lookup-model-profile
+   #:extract-thinking-blocks
+   #:ollama-model-info
+   #:detect-model-capabilities
+    #:ollama-pre-warm))
 
 (defpackage #:sibyl.plan
   (:use #:cl #:sibyl.util)
@@ -336,6 +347,7 @@
     ;; Agent
    #:agent
    #:make-agent
+   #:select-ollama-system-prompt
    #:agent-name
    #:agent-client
    #:agent-memory
@@ -448,6 +460,65 @@
    #:repl-command-p
    #:handle-repl-command
    #:readline-available-p))
+
+(defpackage #:sibyl.cache
+  (:use #:cl #:sibyl.util #:sibyl.logging)
+  (:import-from #:sibyl.llm
+                #:llm-client
+                #:complete
+                #:complete-with-tools
+                #:*streaming-text-callback*
+                #:client-model
+                #:client-max-tokens
+                #:client-temperature
+                #:message
+                #:message-role
+                #:message-content
+                #:message-tool-calls
+                #:message-tool-call-id
+                #:message-thinking
+                #:tool-call
+                #:tool-call-id
+                #:tool-call-name
+                #:tool-call-arguments
+                #:assistant-message)
+  (:export
+   ;; Config
+   #:*cache-enabled*
+   #:*cache-max-entries*
+   #:*cache-ttl-seconds*
+   ;; Key generation
+   #:make-cache-key
+   ;; Store protocol
+   #:cache-get
+   #:cache-put
+   #:cache-evict-expired
+   #:cache-flush
+   #:cache-stats
+   ;; LRU store
+   #:lru-cache
+   #:make-lru-cache
+   ;; Telemetry
+   #:record-cache-hit
+   #:record-cache-miss
+   #:record-server-cache-tokens
+   #:get-cache-telemetry
+   #:reset-cache-telemetry
+   ;; Anthropic adapter
+   #:anthropic-normalize-request
+   #:anthropic-wrap-response
+   #:anthropic-no-cache-p
+   #:anthropic-extract-server-cache-tokens
+   ;; OpenAI adapter
+   #:openai-normalize-request
+   #:openai-wrap-response
+   #:openai-no-cache-p
+   #:openai-extract-server-cache-tokens
+   ;; Integration
+   #:*response-cache*
+   #:ensure-cache
+   #:flush-response-cache
+   #:response-cache-stats))
 
 (defpackage #:sibyl
   (:use #:cl)

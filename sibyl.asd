@@ -12,7 +12,8 @@
                #:cl-ppcre
                #:bordeaux-threads
                #:uiop
-               #:local-time)
+               #:local-time
+               #:ironclad)
   :serial t
   :components
   ((:module "src"
@@ -57,6 +58,16 @@
        ((:file "memory")
         (:file "multi-agent")
         (:file "core")))
+     (:module "cache"
+       :components
+       ((:file "config")
+        (:file "key")
+        (:file "protocol")
+        (:file "lru")
+        (:file "telemetry")
+        (:file "anthropic")
+        (:file "openai")
+        (:file "integration")))
      (:module "repl-module"
       :pathname "repl"
       :components
@@ -99,6 +110,7 @@
      (:file "token-tracking-test")
      (:file "ollama-test")
      (:file "provisioning-test")
-     (:file "phase6-test"))))
+      (:file "phase6-test")
+     (:file "cache-test"))))
   :perform (test-op (o c)
              (uiop:symbol-call '#:sibyl.tests '#:run-sibyl-tests)))

@@ -102,6 +102,17 @@
     (is (string= "user"  (cdr (assoc "role"    m :test #'string=))))
     (is (string= "Hello" (cdr (assoc "content" m :test #'string=))))))
 
+(test messages-to-ollama-format-content-blocks
+  "messages-to-ollama-format normalizes content blocks to a string"
+  (let* ((blocks (list '(("type" . "text") ("text" . "Hello "))
+                       '(("type" . "text") ("text" . "world"))))
+         (result (sibyl.llm::messages-to-ollama-format
+                  (list (sibyl.llm::system-message blocks))))
+         (m (first result)))
+    (is (= 1 (length result)))
+    (is (string= "system" (cdr (assoc "role"    m :test #'string=))))
+    (is (string= "Hello world" (cdr (assoc "content" m :test #'string=))))))
+
 (test messages-to-ollama-format-assistant-plain
   "messages-to-ollama-format converts a plain assistant message"
   (let* ((result (sibyl.llm::messages-to-ollama-format
@@ -326,3 +337,184 @@
     (is (= 4 (sibyl.llm::count-tokens c "1234567890123456")))
     ;; 17 chars → ceil(17/4) = 5
     (is (= 5 (sibyl.llm::count-tokens c "12345678901234567")))))
+
+;;; ============================================================
+;;; Model profile tests
+;;; ============================================================
+
+(test lookup-model-profile-qwen3-coder
+  "lookup-model-profile returns qwen3-coder profile for 'qwen3-coder:30b'"
+  (let ((profile (sibyl.llm::lookup-model-profile "qwen3-coder:30b")))
+    (is (not (null profile)))
+    (is (= 0.6 (getf profile :temperature)))
+    (is (eq t (getf profile :thinking)))))
+
+(test lookup-model-profile-glm4
+  "lookup-model-profile returns glm-4 profile for 'glm-4.7-flash:q8_0'"
+  (let ((profile (sibyl.llm::lookup-model-profile "glm-4.7-flash:q8_0")))
+    (is (not (null profile)))
+    (is (= 0.1 (getf profile :temperature)))
+    (is (null (getf profile :thinking)))))
+
+(test lookup-model-profile-deepseek-r1
+  "lookup-model-profile matches deepseek-r1 prefix"
+  (let ((profile (sibyl.llm::lookup-model-profile "deepseek-r1:70b")))
+    (is (not (null profile)))
+    (is (eq t (getf profile :thinking)))))
+
+(test lookup-model-profile-unknown-falls-back-to-default
+  "lookup-model-profile returns *default* for unknown model"
+  (let ((profile (sibyl.llm::lookup-model-profile "some-unknown-model:latest")))
+    (is (not (null profile)))
+    (is (= 0.0 (getf profile :temperature)))
+    (is (null (getf profile :thinking)))))
+
+;;; ============================================================
+;;; Thinking block extraction tests
+;;; ============================================================
+
+(test extract-thinking-blocks-no-thinking
+  "extract-thinking-blocks passes through text without think tags"
+  (multiple-value-bind (clean thinking)
+      (sibyl.llm::extract-thinking-blocks "Hello world")
+    (is (string= "Hello world" clean))
+    (is (null thinking))))
+
+(test extract-thinking-blocks-single-block
+  "extract-thinking-blocks separates a single thinking block"
+  (multiple-value-bind (clean thinking)
+      (sibyl.llm::extract-thinking-blocks
+       "<think>Let me analyze this</think>The answer is 42.")
+    (is (string= "The answer is 42." clean))
+    (is (string= "Let me analyze this" thinking))))
+
+(test extract-thinking-blocks-multiple-blocks
+  "extract-thinking-blocks handles multiple thinking blocks"
+  (multiple-value-bind (clean thinking)
+      (sibyl.llm::extract-thinking-blocks
+       "<think>step 1</think>First part.<think>step 2</think>Second part.")
+    (is (string= "First part.Second part." clean))
+    (is (string= "step 1step 2" thinking))))
+
+(test extract-thinking-blocks-empty-content
+  "extract-thinking-blocks handles empty/nil content"
+  (multiple-value-bind (clean thinking)
+      (sibyl.llm::extract-thinking-blocks "")
+    (is (string= "" clean))
+    (is (null thinking)))
+  (multiple-value-bind (clean thinking)
+      (sibyl.llm::extract-thinking-blocks nil)
+    (is (null clean))
+    (is (null thinking))))
+
+(test extract-thinking-blocks-unclosed-tag
+  "extract-thinking-blocks handles unclosed think tag gracefully"
+  (multiple-value-bind (clean thinking)
+      (sibyl.llm::extract-thinking-blocks
+       "Prefix <think>reasoning without closing tag")
+    (is (string= "Prefix" clean))
+    (is (string= "reasoning without closing tag" thinking))))
+
+;;; ============================================================
+;;; Profile-aware client construction tests
+;;; ============================================================
+
+(test make-ollama-client-profile-temperature
+  "make-ollama-client uses profile temperature when not explicitly provided"
+  (let ((c (sibyl:make-ollama-client :model "qwen3-coder:30b")))
+    (is (= 0.6 (sibyl.llm::client-temperature c)))))
+
+(test make-ollama-client-explicit-temperature-overrides
+  "make-ollama-client :temperature overrides profile default"
+  (let ((c (sibyl:make-ollama-client :model "qwen3-coder:30b" :temperature 0.1)))
+    (is (= 0.1 (sibyl.llm::client-temperature c)))))
+
+(test make-ollama-client-glm-profile
+  "make-ollama-client uses glm-4 profile defaults"
+  (let ((c (sibyl:make-ollama-client :model "glm-4.7-flash:q8_0")))
+    (is (= 0.1 (sibyl.llm::client-temperature c)))))
+
+;;; ============================================================
+;;; Parse response with thinking blocks
+;;; ============================================================
+
+(test parse-ollama-response-with-thinking
+  "parse-ollama-response extracts thinking blocks into message-thinking"
+  (multiple-value-bind (msg usage)
+      (sibyl.llm::parse-ollama-response
+       (%make-ollama-text-response
+        "<think>Let me reason about this</think>The answer is 42."))
+    (declare (ignore usage))
+    (is (string= "The answer is 42." (sibyl.llm::message-content msg)))
+    (is (string= "Let me reason about this" (sibyl.llm::message-thinking msg)))))
+
+(test parse-ollama-response-without-thinking
+  "parse-ollama-response returns nil thinking when no think blocks"
+  (multiple-value-bind (msg usage)
+      (sibyl.llm::parse-ollama-response
+       (%make-ollama-text-response "Just a normal response"))
+    (declare (ignore usage))
+    (is (string= "Just a normal response" (sibyl.llm::message-content msg)))
+    (is (null (sibyl.llm::message-thinking msg)))))
+
+;;; ============================================================
+;;; Native thinking field tests (Ollama think API)
+;;; ============================================================
+
+(test parse-ollama-response-native-thinking
+  "parse-ollama-response extracts native thinking from message.thinking field"
+  (let ((ht  (make-hash-table :test 'equal))
+        (msg (make-hash-table :test 'equal)))
+    (setf (gethash "role"     msg) "assistant")
+    (setf (gethash "content"  msg) "The answer is 42.")
+    (setf (gethash "thinking" msg) "Let me reason about this carefully")
+    (setf (gethash "message"          ht) msg)
+    (setf (gethash "done"             ht) t)
+    (setf (gethash "prompt_eval_count" ht) 10)
+    (setf (gethash "eval_count"        ht) 5)
+    (multiple-value-bind (parsed-msg usage)
+        (sibyl.llm::parse-ollama-response ht)
+      (declare (ignore usage))
+      (is (string= "The answer is 42." (sibyl.llm::message-content parsed-msg)))
+      (is (string= "Let me reason about this carefully"
+                    (sibyl.llm::message-thinking parsed-msg))))))
+
+(test parse-ollama-response-native-thinking-takes-precedence
+  "Native thinking field takes precedence over inline <think> tags"
+  (let ((ht  (make-hash-table :test 'equal))
+        (msg (make-hash-table :test 'equal)))
+    (setf (gethash "role"     msg) "assistant")
+    ;; Content has inline tags but native thinking field is also present
+    (setf (gethash "content"  msg) "<think>inline reasoning</think>The answer.")
+    (setf (gethash "thinking" msg) "Native API reasoning")
+    (setf (gethash "message"          ht) msg)
+    (setf (gethash "done"             ht) t)
+    (setf (gethash "prompt_eval_count" ht) 10)
+    (setf (gethash "eval_count"        ht) 5)
+    (multiple-value-bind (parsed-msg usage)
+        (sibyl.llm::parse-ollama-response ht)
+      (declare (ignore usage))
+      ;; Native thinking wins; content is passed through as-is (including tags)
+      (is (string= "<think>inline reasoning</think>The answer."
+                    (sibyl.llm::message-content parsed-msg)))
+      (is (string= "Native API reasoning"
+                    (sibyl.llm::message-thinking parsed-msg))))))
+
+(test parse-ollama-response-empty-native-thinking-falls-back
+  "Empty native thinking field falls back to inline <think> extraction"
+  (let ((ht  (make-hash-table :test 'equal))
+        (msg (make-hash-table :test 'equal)))
+    (setf (gethash "role"     msg) "assistant")
+    (setf (gethash "content"  msg) "<think>inline reasoning</think>The answer.")
+    (setf (gethash "thinking" msg) "")   ; empty native thinking
+    (setf (gethash "message"          ht) msg)
+    (setf (gethash "done"             ht) t)
+    (setf (gethash "prompt_eval_count" ht) 10)
+    (setf (gethash "eval_count"        ht) 5)
+    (multiple-value-bind (parsed-msg usage)
+        (sibyl.llm::parse-ollama-response ht)
+      (declare (ignore usage))
+      ;; Falls back to inline extraction
+      (is (string= "The answer." (sibyl.llm::message-content parsed-msg)))
+      (is (string= "inline reasoning"
+                    (sibyl.llm::message-thinking parsed-msg))))))

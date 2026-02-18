@@ -116,6 +116,21 @@
                api-msgs))))
     (values system (nreverse api-msgs))))
 
+(defun normalize-tool-parameters (params)
+  "Ensure PARAMS is a JSON Schema object with safe empty defaults."
+  (let* ((base (or params '(("type" . "object")
+                            ("properties" . nil)
+                            ("required" . nil))))
+         (params-ht (if (hash-table-p base)
+                        base
+                        (alist-to-hash base))))
+    (when (null (gethash "properties" params-ht))
+      (setf (gethash "properties" params-ht)
+            (make-hash-table :test 'equal)))
+    (when (null (gethash "required" params-ht))
+      (setf (gethash "required" params-ht) #()))
+    params-ht))
+
 (defun tools-to-anthropic-format (tools)
   "Convert tool schemas to Anthropic format.
 When optimization.cache-enabled is set, adds cache_control ephemeral to the
@@ -124,7 +139,8 @@ last tool so the entire tools prefix is cached by the Anthropic API."
           (mapcar (lambda (tool-schema)
                     `(("name" . ,(getf tool-schema :name))
                       ("description" . ,(getf tool-schema :description))
-                      ("input_schema" . ,(getf tool-schema :parameters))))
+                      ("input_schema" . ,(normalize-tool-parameters
+                                          (getf tool-schema :parameters)))))
                   tools)))
     (when (and formatted-tools
                (config-value "optimization.cache-enabled"))
@@ -386,6 +402,18 @@ Returns (values message usage-plist)."
 ;;; OpenAI (GPT)
 ;;; ============================================================
 
+(defun openai-temperature-pair (client)
+  "Return a (\"temperature\" . value) pair when supported for CLIENT, else NIL."
+  (let* ((temp (client-temperature client))
+         (model (client-model client))
+         (gpt5-p (and model
+                      (<= 5 (length model))
+                      (string= "gpt-5" (subseq model 0 5)))))
+    (cond
+      ((null temp) nil)
+      (gpt5-p (when (= temp 1) `("temperature" . ,temp)))
+      (t `("temperature" . ,temp)))))
+
 (defclass openai-client (llm-client)
   ()
   (:default-initargs
@@ -487,16 +515,20 @@ Returns a reconstructed assistant message."
                          ("function"
                           . (("name" . ,(getf ts :name))
                              ("description" . ,(getf ts :description))
-                             ("parameters" . ,(getf ts :parameters))))))
+                             ("parameters" . ,(normalize-tool-parameters
+                                               (getf ts :parameters)))))))
                      tools)))
          (body `(("model" . ,(client-model client))
-                 ("max_tokens" . ,(client-max-tokens client))
-                 ("temperature" . ,(client-temperature client))
+                 ("max_completion_tokens" . ,(client-max-tokens client))
                  ("messages" . ,(messages-to-openai-format messages))
                  ("stream" . t)))
-         (final-body (if openai-tools
-                         (append body `(("tools" . ,openai-tools)))
-                         body))
+         (temp-pair (openai-temperature-pair client))
+         (final-body (progn
+                       (when temp-pair
+                         (push temp-pair body))
+                       (if openai-tools
+                           (append body `(("tools" . ,openai-tools)))
+                           body)))
          (text-parts nil)
          (tool-call-state (make-hash-table :test 'eql)))
     (labels ((normalize-tool-call-index (value)
@@ -590,15 +622,17 @@ Returns a reconstructed assistant message."
   (if *streaming-text-callback*
       (complete-openai-streaming client messages nil)
       (let* ((body `(("model" . ,(client-model client))
-                     ("max_tokens" . ,(client-max-tokens client))
-                     ("temperature" . ,(client-temperature client))
+                     ("max_completion_tokens" . ,(client-max-tokens client))
                      ("messages" . ,(messages-to-openai-format messages))))
-             (response (http-post-json
-                        (format nil "~a/chat/completions"
-                                (client-base-url client))
-                        (openai-headers client)
-                        (alist-to-hash body))))
-        (parse-openai-response response))))
+             (temp-pair (openai-temperature-pair client)))
+        (when temp-pair
+          (push temp-pair body))
+        (let ((response (http-post-json
+                         (format nil "~a/chat/completions"
+                                 (client-base-url client))
+                         (openai-headers client)
+                         (alist-to-hash body))))
+          (parse-openai-response response)))))
 
 (defmethod complete-with-tools ((client openai-client) messages tools &key)
   "Send messages with tools to OpenAI GPT API."
@@ -614,16 +648,19 @@ Returns a reconstructed assistant message."
                            ("function"
                             . (("name" . ,(getf ts :name))
                                ("description" . ,(getf ts :description))
-                               ("parameters" . ,(getf ts :parameters))))))
+                               ("parameters" . ,(normalize-tool-parameters
+                                                 (getf ts :parameters)))))))
                        tools))
              (body `(("model" . ,(client-model client))
-                     ("max_tokens" . ,(client-max-tokens client))
-                     ("temperature" . ,(client-temperature client))
+                     ("max_completion_tokens" . ,(client-max-tokens client))
                      ("messages" . ,(messages-to-openai-format messages))
                      ("tools" . ,openai-tools)))
-             (response (http-post-json
-                        (format nil "~a/chat/completions"
-                                (client-base-url client))
-                        (openai-headers client)
-                        (alist-to-hash body))))
-        (parse-openai-response response))))
+             (temp-pair (openai-temperature-pair client)))
+        (when temp-pair
+          (push temp-pair body))
+        (let ((response (http-post-json
+                         (format nil "~a/chat/completions"
+                                 (client-base-url client))
+                         (openai-headers client)
+                         (alist-to-hash body))))
+          (parse-openai-response response)))))
