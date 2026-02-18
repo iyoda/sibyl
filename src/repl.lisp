@@ -1185,10 +1185,15 @@
                               (start-time nil))
                           (setf *cancel-requested* nil)
                           (flet ((stop-current-spinner ()
-                                   (when spinner
-                                     (sibyl.repl.spinner:stop-spinner spinner)
-                                     (setf spinner nil
-                                           *current-spinner* nil))))
+                                   ;; Stop the globally-tracked spinner — the tool-call hook
+                                   ;; may have replaced the original with a new instance.
+                                   (when *current-spinner*
+                                     (sibyl.repl.spinner:stop-spinner *current-spinner*))
+                                   ;; Also stop stale local reference if different
+                                   (when (and spinner (not (eq spinner *current-spinner*)))
+                                     (sibyl.repl.spinner:stop-spinner spinner))
+                                   (setf spinner nil
+                                         *current-spinner* nil)))
                             (unwind-protect
                                  (let ((result nil))
                                    (setf result
@@ -1215,13 +1220,17 @@
                             (let* ((first-chunk-p t)
                                    (sibyl.llm:*streaming-text-callback*
                                      (when *stream-enabled*
-                                       (lambda (text)
-                                         (when first-chunk-p
-                                           (stop-current-spinner)
-                                           (format t "~%")
-                                           (setf first-chunk-p nil))
-                                         (write-string text *standard-output*)
-                                         (force-output *standard-output*))))
+                                      (lambda (text)
+                                          ;; Stop any active spinner before writing streaming text.
+                                          ;; Handles both the initial spinner AND spinners restarted
+                                          ;; by the tool-call hook between LLM calls.
+                                          (when (and *current-spinner*
+                                                     (sibyl.repl.spinner:spinner-active-p *current-spinner*))
+                                            (stop-current-spinner)
+                                            (format t "~%"))
+                                          (setf first-chunk-p nil)
+                                          (write-string text *standard-output*)
+                                          (force-output *standard-output*))))
                                    (tracker (sibyl.agent:agent-token-tracker agent))
                                    (tokens-before
                                      (+ (sibyl.llm::token-tracker-input-tokens tracker)
