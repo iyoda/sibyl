@@ -31,10 +31,6 @@
   (is (not (null sibyl.tests::*safe-suites*)))
   (is (> (length sibyl.tests::*safe-suites*) 0)))
 
-(test test-parallel-command-registered
-  "/test-parallel command is registered in *repl-commands*."
-  (is (not (null (assoc "/test-parallel" sibyl.repl::*repl-commands* :test #'string=)))))
-
 (test parallel-safe-suites-defined
   "The *safe-suites* list contains expected suites."
   ;; Note: these suites live in cross-package namespaces (sibyl.agent.tests)

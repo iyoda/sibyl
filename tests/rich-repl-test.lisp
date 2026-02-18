@@ -276,14 +276,21 @@
   (is (eq t sibyl.repl::*stream-enabled*)))
 
 (test streaming-callback-invoked
-  "Test that *streaming-text-callback* is invoked when bound"
+  "Test that *streaming-text-callback* is invoked when bound and
+   reverts to its enclosing binding when the let scope exits.
+   Uses an explicit outer nil binding so the test is independent of
+   whether start-repl is currently running."
   (let ((collected nil))
-    (let ((sibyl.llm:*streaming-text-callback*
-            (lambda (text) (push text collected))))
-      (is (functionp sibyl.llm:*streaming-text-callback*))
-      (funcall sibyl.llm:*streaming-text-callback* "hello")
-      (funcall sibyl.llm:*streaming-text-callback* " world"))
-    (is (null sibyl.llm:*streaming-text-callback*))
+    ;; Outer binding: establish a known baseline of NIL so the test
+    ;; is not affected by start-repl's own let* binding.
+    (let ((sibyl.llm:*streaming-text-callback* nil))
+      (let ((sibyl.llm:*streaming-text-callback*
+              (lambda (text) (push text collected))))
+        (is (functionp sibyl.llm:*streaming-text-callback*))
+        (funcall sibyl.llm:*streaming-text-callback* "hello")
+        (funcall sibyl.llm:*streaming-text-callback* " world"))
+      ;; After inner let exits, should revert to outer binding (NIL).
+      (is (null sibyl.llm:*streaming-text-callback*)))
     (is (equal '(" world" "hello") collected))))
 
 ;;; ============================================================

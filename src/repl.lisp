@@ -18,7 +18,6 @@
     ("/plan"          . :plan)
     ("/improve"       . :improve)
     ("/review"        . :review)
-    ("/test-parallel" . :test-parallel)
     ("/tokens"        . :tokens)
     ("/model"         . :model)
     ("/cost-report"   . :cost-report)
@@ -380,8 +379,6 @@ Returns TEXT unchanged when it is not a string."
         (format t "       — Request self-improvement (TDD cycle)~%")
         (format-colored-text "  /review" :green)
         (format t "        — Review improvement suggestions~%")
-        (format-colored-text "  /test-parallel" :green)
-        (format t "  — Run test suite in parallel mode~%")
         (format-colored-text "  /tokens" :green)
         (format t "         — Show cumulative token usage statistics~%")
         (format-colored-text "  /model" :green)
@@ -402,7 +399,6 @@ Returns TEXT unchanged when it is not a string."
         (format t "  /plan            — Manage development plans~%")
         (format t "  /improve         — Request self-improvement (TDD cycle)~%")
         (format t "  /review          — Review improvement suggestions~%")
-        (format t "  /test-parallel   — Run test suite in parallel mode~%")
         (format t "  /tokens          — Show cumulative token usage statistics~%")
         (format t "  /model           — Manage model tier selection~%")
         (format t "  /colors          — Toggle color output (on/off)~%")
@@ -550,21 +546,6 @@ Returns TEXT unchanged when it is not a string."
            (format t "~%Error: ~a~%" e))))))
   nil)
 
-(defun handle-test-parallel-command (agent input)
-  "Handler for /test-parallel command. Runs test suite using parallel runner.
-   Uses uiop:symbol-call for late binding since sibyl.tests is only available
-   when sibyl/tests system is loaded (not at repl.lisp compile time)."
-  (declare (ignore agent input))
-  (format t "~%Running tests in parallel mode...~%~%")
-  (handler-case
-      (let* ((start (get-internal-real-time))
-             (results (uiop:symbol-call '#:sibyl.tests '#:run-tests-parallel))
-             (elapsed (/ (float (- (get-internal-real-time) start))
-                         internal-time-units-per-second)))
-        (format t "~%Parallel test run complete. ~a total checks in ~,2fs.~%" (length results) elapsed))
-    (error (e)
-      (format t "~%Test run error: ~a~%" e)))
-  nil)
 
 (defun format-token-usage (tracker)
   "Format token usage statistics for display. Returns a string."
@@ -897,7 +878,6 @@ Returns TEXT unchanged when it is not a string."
         (cons :plan    #'handle-plan-command)
         (cons :improve #'handle-improve-command-wrapper)
         (cons :review  #'handle-review-command-wrapper)
-        (cons :test-parallel #'handle-test-parallel-command)
         (cons :tokens        #'handle-tokens-command)
         (cons :model         #'handle-model-command)
         (cons :cost-report   #'handle-cost-report-command)
@@ -1436,8 +1416,8 @@ Otherwise, use model-specific optimized prompt for Ollama models."
                 (cons :before-step (make-before-step-hook))
                 (cons :after-step (make-after-step-hook))
                 (cons :on-error (make-on-error-hook))))
-    (setf *ignore-ctrl-j*
-          (not (null (sibyl.config:config-value "repl.ignore-ctrl-j" nil))))
+    (let ((*ignore-ctrl-j*
+           (not (null (sibyl.config:config-value "repl.ignore-ctrl-j" nil)))))
     ;; Ctrl+J filtering is handled at the application level by %strip-ctrl-j
     ;; in read-user-input.  Kernel-level termios manipulation (INLCR+IGNCR)
     ;; was removed because it also suppresses normal Enter (CR), making the
@@ -1642,4 +1622,4 @@ Otherwise, use model-specific optimized prompt for Ollama models."
         (let ((wrapper (install-interrupt-handler (lambda () (exit-repl)))))
           (funcall wrapper #'repl-body))
         #-sbcl
-        (repl-body)))))
+        (repl-body))))))
