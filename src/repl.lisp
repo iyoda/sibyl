@@ -127,6 +127,30 @@
                       (t 37)))) ; default to white
     (format stream "~C[~Am~A~C[0m" #\Escape color-code text #\Escape)))
 
+#+sbcl
+(defun %ensure-utf8-locale ()
+  "Ensure the C locale is inherited from the user's environment.
+   SBCL starts its process with LC_ALL=\"C\", which prevents GNU readline's
+   internal mbrtowc(3) from decoding multibyte UTF-8 byte sequences.
+   In the C locale, readline cannot determine character boundaries or display
+   widths for CJK / full-width characters, causing the cursor to drift after
+   editing (insert, delete, etc.).
+   Calling setlocale(LC_ALL, \"\") inherits LANG / LC_* from the environment
+   (typically en_US.UTF-8 or ja_JP.UTF-8) so that mbrtowc and wcwidth work
+   correctly.  Must be called once, before any readline interaction."
+  (sb-alien:alien-funcall
+   (sb-alien:extern-alien "setlocale"
+                          (function sb-alien:c-string
+                                    sb-alien:int sb-alien:c-string))
+   ;; LC_ALL: Darwin=0, Linux=6
+   #+darwin 0 #+linux 6 #-(or darwin linux) 0
+   ""))
+
+#-sbcl
+(defun %ensure-utf8-locale ()
+  "No-op on non-SBCL implementations which typically inherit locale."
+  (values))
+
 (defun %rl-escape (ansi-string)
   "Wrap ANSI escape sequences in STRING with readline's invisible markers.
    \\001 (RL_PROMPT_START_IGNORE) and \\002 (RL_PROMPT_END_IGNORE) tell
@@ -1098,10 +1122,12 @@
                     ;; Wrap prompt with %rl-escape so readline knows which bytes
                     ;; are ANSI escapes (invisible) — fixes cursor drift with
                     ;; CJK/full-width characters.
-                    (handler-case
-                        (funcall (find-symbol "READLINE" :cl-readline)
-                                 :prompt (%rl-escape prompt))
-                      (error () (read-line *standard-input* nil nil)))
+                     (handler-case
+                         (funcall (find-symbol "READLINE" :cl-readline)
+                                  :prompt (%rl-escape prompt)
+                                  :add-history t
+                                  :novelty-check #'string/=)
+                       (error () (read-line *standard-input* nil nil)))
                     ;; Fallback: manual prompt + read-line (no rl-escape needed)
                     (progn
                       (format t "~A" prompt)
@@ -1111,8 +1137,9 @@
                         (%strip-ctrl-j input)
                         input)))
     (when sanitized
-      (when (readline-available-p)
-        (funcall (find-symbol "ADD-HISTORY" :cl-readline) sanitized))
+      ;; History is now added by cl-readline:readline via :add-history t
+      ;; (the old separate ADD-HISTORY call used a symbol that was never
+      ;; fbound in cl-readline, causing an undefined-function error).
       (incf *command-count*)
       (push sanitized *command-history*))
     sanitized))
@@ -1189,6 +1216,9 @@
     ;; in read-user-input.  Kernel-level termios manipulation (INLCR+IGNCR)
     ;; was removed because it also suppresses normal Enter (CR), making the
     ;; REPL unusable.
+    ;; SBCL starts with LC_ALL="C" — fix locale before any readline use
+    ;; so that mbrtowc/wcwidth correctly handle multibyte characters.
+    (%ensure-utf8-locale)
     (print-banner)
     ;; Connect to configured MCP servers
     (handler-case
