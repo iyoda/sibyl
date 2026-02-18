@@ -4,5 +4,5 @@
   "session_ids": [],
   "plan_name": null,
   "agent": "atlas",
-  "note": "test-speedup plan complete as of 2026-02-18. Fixes: dedup bug (1001→908 checks), ghost validation, per-suite timing, spinner polling, REPL timing output. Task 7 cancelled (SAFE suites ~0.25s actual, UNSAFE bottleneck is inherent LLM-like test delays)."
+  "note": "test-speedup plan complete as of 2026-02-18. Fixes: dedup bug (1001→908 checks), ghost validation, per-suite timing, spinner polling, REPL timing output. Task 7 cancelled (SAFE suites ~0.25s actual, UNSAFE bottleneck is inherent LLM-like test delays). 70% wall-clock target not met — bottleneck is test semantics not runner structure."
 }
