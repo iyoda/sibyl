@@ -102,8 +102,10 @@ Convenience function equivalent to (setf (config-value KEY) VALUE)."
                      ;; MCP server defaults
                      ("mcp.servers.exa.url"      . "https://mcp.exa.ai/mcp")
                      ;; Optimization defaults
-                     ("optimization.cache-enabled" . t)
-                     ("optimization.auto-model-routing" . nil))))
+                    ("optimization.cache-enabled" . t)
+                     ("optimization.auto-model-routing" . nil)
+                     ;; REPL defaults
+                     ("repl.ignore-ctrl-j" . nil))))
     (dolist (pair defaults)
       (unless (config-value (car pair))
         (setf (config-value (car pair)) (cdr pair))))))

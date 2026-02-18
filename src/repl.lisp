@@ -49,6 +49,9 @@
 (defvar *stream-enabled* t
   "When T, LLM responses are streamed token-by-token to the terminal.")
 
+(defvar *ignore-ctrl-j* nil
+  "When T, strip Ctrl+J (linefeed) characters from REPL input.")
+
 (defvar *command-count* 0
   "Counter tracking the number of commands executed in the current REPL session.")
 
@@ -954,6 +957,11 @@
   "Returns T if cl-readline is loaded and available, NIL otherwise."
   (not (null (find-package :cl-readline))))
 
+(defun %strip-ctrl-j (input)
+  "Remove Ctrl+J (linefeed) characters from INPUT string."
+  (when input
+    (remove-if (lambda (ch) (= (char-code ch) 10)) input)))
+
 (defun read-user-input ()
   "Read a line of input using cl-readline if available, read-line otherwise.
    Returns NIL on EOF."
@@ -970,13 +978,16 @@
                     (progn
                       (format t "~A" prompt)
                       (force-output)
-                      (read-line *standard-input* nil nil)))))
-    (when input
+                      (read-line *standard-input* nil nil))))
+         (sanitized (if *ignore-ctrl-j*
+                        (%strip-ctrl-j input)
+                        input)))
+    (when sanitized
       (when (readline-available-p)
-        (funcall (find-symbol "ADD-HISTORY" :cl-readline) input))
+        (funcall (find-symbol "ADD-HISTORY" :cl-readline) sanitized))
       (incf *command-count*)
-      (push input *command-history*))
-    input))
+      (push sanitized *command-history*))
+    sanitized))
 
 #+sbcl
 (defun install-interrupt-handler (exit-fn)
@@ -1044,6 +1055,8 @@
                 (cons :before-step (make-before-step-hook))
                 (cons :after-step (make-after-step-hook))
                 (cons :on-error (make-on-error-hook))))
+    (setf *ignore-ctrl-j*
+          (not (null (sibyl.config:config-value "repl.ignore-ctrl-j" nil))))
     (print-banner)
     ;; Connect to configured MCP servers
     (handler-case
