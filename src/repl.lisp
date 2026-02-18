@@ -1148,6 +1148,10 @@
                 (cons :on-error (make-on-error-hook))))
     (setf *ignore-ctrl-j*
           (not (null (sibyl.config:config-value "repl.ignore-ctrl-j" nil))))
+    ;; Ctrl+J filtering is handled at the application level by %strip-ctrl-j
+    ;; in read-user-input.  Kernel-level termios manipulation (INLCR+IGNCR)
+    ;; was removed because it also suppresses normal Enter (CR), making the
+    ;; REPL unusable.
     (print-banner)
     ;; Connect to configured MCP servers
     (handler-case
