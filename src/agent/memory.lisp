@@ -13,18 +13,30 @@
                  :initform (make-conversation))
    (max-messages :initarg :max-messages
                  :accessor memory-max-messages
-                 :initform 100
+                 :initform 50
                  :type integer)
    (summary      :initarg :summary
                  :accessor memory-summary
                  :initform nil
                  :type (or string null)
-                 :documentation "Compressed summary of older messages."))
+                 :documentation "Compressed summary of older messages.")
+   (compaction-strategy :initarg :compaction-strategy
+                        :accessor memory-compaction-strategy
+                        :initform :llm
+                        :type keyword
+                        :documentation "Compaction strategy: :simple or :llm")
+   (compaction-client :initarg :compaction-client
+                      :accessor memory-compaction-client
+                      :initform nil
+                      :documentation "LLM client for :llm compaction strategy (optional).
+When nil and strategy is :llm, falls back to :simple text summarization."))
   (:documentation "Manages conversation history with context window limits."))
 
-(defun make-memory (&key (max-messages 100))
+(defun make-memory (&key (max-messages 50) (compaction-strategy :llm))
   "Create a new memory instance."
-  (make-instance 'memory :max-messages max-messages))
+  (make-instance 'memory
+                 :max-messages max-messages
+                 :compaction-strategy compaction-strategy))
 
 (defgeneric memory-push (memory message)
   (:documentation "Add a message to memory, respecting context limits."))
@@ -66,14 +78,32 @@
                             (memory-conversation mem))))
     messages))
 
+;;; ============================================================
+;;; Compaction helpers
+;;; ============================================================
+
+(defun simple-compaction-summary (mem to-summarize)
+  "Create a simple text summary from TO-SUMMARIZE messages, prepending any
+existing summary in MEM."
+  (format nil "~@[Previous summary: ~a~%~]~
+               Compacted ~a messages. Key points:~%~{- [~a] ~a~%~}"
+          (memory-summary mem)
+          (length to-summarize)
+          (loop for msg in to-summarize
+                collect (message-role msg)
+                collect (truncate-string
+                         (or (message-content msg) "(tool call)")
+                         80))))
+
 (defgeneric memory-compact (memory)
   (:documentation "Compact older messages into a summary."))
 
 (defmethod memory-compact ((mem memory))
-  "Simple compaction: keep last N/2 messages, summarize the rest.
-   In a full implementation, this would use the LLM to summarize.
-   Adjusts the split point to avoid orphaning tool_result messages
-   from their corresponding assistant tool_use messages."
+  "Compact older messages into a summary.
+Strategy :simple uses text truncation.
+Strategy :llm uses LLM summarization; falls back to :simple when no
+compaction-client is set.  Adjusts the split point to avoid orphaning
+tool_result messages from their corresponding assistant tool_use messages."
   (let* ((messages (conversation-to-list (memory-conversation mem)))
          (total (length messages))
          (keep-count (ceiling (memory-max-messages mem) 2))
@@ -91,19 +121,33 @@
       (setf split-idx (max 0 (1- total))))
     (let ((to-summarize (subseq messages 0 split-idx))
           (to-keep (subseq messages split-idx)))
-      ;; Simple textual summary (placeholder for LLM-based summarization)
       (let ((summary-text
-              (format nil "~@[Previous summary: ~a~%~]~
-                           Compacted ~a messages. Key points:~%~{- [~a] ~a~%~}"
-                      (memory-summary mem)
-                      (length to-summarize)
-                      (loop for msg in to-summarize
-                            collect (message-role msg)
-                            collect (truncate-string
-                                     (or (message-content msg) "(tool call)")
-                                     80)))))
+              (if (and (eq :llm (memory-compaction-strategy mem))
+                       (memory-compaction-client mem))
+                  ;; LLM-based summarization
+                  (handler-case
+                      (let* ((summary-prompt
+                               (format nil
+                                       "Summarize the following conversation in 200 tokens or less. ~
+Focus on key decisions, facts, and context needed for continuity.~%~%~
+~{~a: ~a~^~%~}"
+                                       (loop for msg in to-summarize
+                                             collect (string (message-role msg))
+                                             collect (or (message-content msg) "(tool call)"))))
+                             (prompt-messages (list (user-message summary-prompt))))
+                        (multiple-value-bind (response usage)
+                            (complete (memory-compaction-client mem) prompt-messages)
+                          (declare (ignore usage))
+                          (or (message-content response)
+                              ;; Fallback if LLM returns empty content
+                              (simple-compaction-summary mem to-summarize))))
+                    (error (e)
+                      (warn "LLM compaction failed (~a), falling back to simple" e)
+                      (simple-compaction-summary mem to-summarize)))
+                  ;; Simple text summarization (:simple strategy or :llm without client)
+                  (simple-compaction-summary mem to-summarize))))
         (setf (memory-summary mem) summary-text)
-        ;; Replace conversation with only recent messages
+        ;; Replace conversation with only the most recent messages
         (conversation-clear (memory-conversation mem))
         (dolist (msg to-keep)
           (conversation-push (memory-conversation mem) msg))))))

@@ -249,9 +249,12 @@
    #:make-memory
    #:memory-conversation
    #:memory-summary
+   #:memory-max-messages
    #:memory-push
    #:memory-context-window
    #:memory-compact
+   #:memory-compaction-strategy
+   #:memory-compaction-client
    ;; Agent
    #:agent
    #:make-agent

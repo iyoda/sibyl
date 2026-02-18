@@ -234,3 +234,43 @@
                     "analyze this complex codebase architecture and refactor the authentication module")))
     (is (or (string= "medium" (sibyl.llm::recommended-tier analysis))
             (string= "heavy" (sibyl.llm::recommended-tier analysis))))))
+
+;;; ============================================================
+;;; Memory Compaction Strategy Tests (Task 5)
+;;; ============================================================
+
+(def-suite memory-compaction-suite
+  :description "Memory compaction strategy tests"
+  :in sibyl-tests)
+
+(in-suite memory-compaction-suite)
+
+;; Test 18: :simple compaction strategy preserves existing behavior
+(test memory-compact-simple-strategy
+  ":simple strategy produces a text summary containing 'Compacted'"
+  (let ((mem (sibyl.agent::make-memory :max-messages 5 :compaction-strategy :simple)))
+    ;; Push 6 messages to trigger compaction
+    (dotimes (i 6)
+      (sibyl.agent::memory-push mem (sibyl.llm:user-message (format nil "Message ~a" i))))
+    ;; Should have compacted
+    (is (not (null (sibyl.agent::memory-summary mem))))
+    ;; Summary should contain "Compacted" (from the simple format)
+    (is (search "Compacted" (sibyl.agent::memory-summary mem)))))
+
+;; Test 19: :llm strategy without a compaction-client falls back to :simple
+(test memory-compact-llm-strategy-falls-back-to-simple
+  ":llm strategy without a compaction-client falls back to simple summarization"
+  (let ((mem (sibyl.agent::make-memory :max-messages 5 :compaction-strategy :llm)))
+    ;; No compaction-client set → should fall back to simple
+    (dotimes (i 6)
+      (sibyl.agent::memory-push mem (sibyl.llm:user-message (format nil "Msg ~a" i))))
+    ;; Should still have compacted (via fallback to simple)
+    (is (not (null (sibyl.agent::memory-summary mem))))
+    ;; Fallback simple summary also contains "Compacted"
+    (is (search "Compacted" (sibyl.agent::memory-summary mem)))))
+
+;; Test 20: default max-messages for new memory is 50
+(test memory-default-max-messages
+  "Default max-messages for new memory is 50"
+  (let ((mem (sibyl.agent::make-memory)))
+    (is (= 50 (sibyl.agent::memory-max-messages mem)))))

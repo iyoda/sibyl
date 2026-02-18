@@ -108,14 +108,18 @@ If you are unsure, ask for clarification."
                      (name "Sibyl")
                      (system-prompt *default-system-prompt*)
                      (max-steps 50)
-                     (max-memory-messages 100))
+                     (max-memory-messages 50))
   "Create a new agent instance."
-  (make-instance 'agent
-                 :client client
-                 :name name
-                 :system-prompt system-prompt
-                 :max-steps max-steps
-                 :memory (make-memory :max-messages max-memory-messages)))
+  (let ((agent (make-instance 'agent
+                              :client client
+                              :name name
+                              :system-prompt system-prompt
+                              :max-steps max-steps
+                              :memory (make-memory :max-messages max-memory-messages))))
+    ;; Propagate the LLM client to memory so :llm compaction strategy works
+    (when client
+      (setf (memory-compaction-client (agent-memory agent)) client))
+    agent))
 
 ;;; ============================================================
 ;;; Hook system
