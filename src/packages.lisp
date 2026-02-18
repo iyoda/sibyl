@@ -93,6 +93,7 @@
    #:message-tool-calls
    #:message-tool-call-id
    #:message-timestamp
+   #:message-thinking
    #:system-message
    #:user-message
    #:assistant-message

@@ -86,3 +86,34 @@
   (let ((tracker (sibyl.llm::make-token-tracker)))
     (sibyl.llm::tracker-add-usage tracker nil)  ; should not error
     (is (= 0 (sibyl.llm::token-tracker-input-tokens tracker)))))
+
+;; Test 7: parse-anthropic-response handles thinking blocks
+(test parse-response-handles-thinking-block
+  "parse-anthropic-response extracts thinking content into message-thinking slot"
+  (let* ((resp (make-hash-table :test 'equal))
+         (thinking-block (make-hash-table :test 'equal))
+         (text-block (make-hash-table :test 'equal)))
+    (setf (gethash "type" thinking-block) "thinking"
+          (gethash "thinking" thinking-block) "Let me reason about this..."
+          (gethash "type" text-block) "text"
+          (gethash "text" text-block) "The answer is 42"
+          (gethash "content" resp) (vector thinking-block text-block))
+    (multiple-value-bind (msg usage)
+        (sibyl.llm::parse-anthropic-response resp)
+      (declare (ignore usage))
+      (is (string= "Let me reason about this..." (sibyl.llm:message-thinking msg)))
+      (is (string= "The answer is 42" (sibyl.llm:message-content msg))))))
+
+;; Test 8: no thinking in regular response → nil
+(test parse-response-thinking-nil-when-absent
+  "message-thinking is nil for responses without thinking blocks"
+  (let* ((resp (make-hash-table :test 'equal))
+         (text-block (make-hash-table :test 'equal)))
+    (setf (gethash "type" text-block) "text"
+          (gethash "text" text-block) "Normal response"
+          (gethash "content" resp) (vector text-block))
+    (multiple-value-bind (msg usage)
+        (sibyl.llm::parse-anthropic-response resp)
+      (declare (ignore usage))
+      (is (null (sibyl.llm:message-thinking msg)))
+      (is (string= "Normal response" (sibyl.llm:message-content msg))))))

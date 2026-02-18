@@ -125,6 +125,7 @@ Returns (values message usage-plist) where usage-plist may be nil."
                              raw-blocks
                              (coerce raw-blocks 'list)))
          (text-parts nil)
+         (thinking-parts nil)
          (tool-calls nil)
          ;; Extract usage
          (usage-ht (gethash "usage" response))
@@ -139,6 +140,8 @@ Returns (values message usage-plist) where usage-plist may be nil."
             do (cond
                  ((string= block-type "text")
                   (push (gethash "text" block) text-parts))
+                 ((string= block-type "thinking")
+                  (push (gethash "thinking" block) thinking-parts))
                  ((string= block-type "tool_use")
                   (push (make-tool-call
                          :id (gethash "id" block)
@@ -150,7 +153,9 @@ Returns (values message usage-plist) where usage-plist may be nil."
      (assistant-message
       (when text-parts
         (string-join "" (nreverse text-parts)))
-      :tool-calls (nreverse tool-calls))
+      :tool-calls (nreverse tool-calls)
+      :thinking (when thinking-parts
+                  (string-join "" (nreverse thinking-parts))))
      usage-plist)))
 
 (defun parse-anthropic-sse-events (event-type data-str)
@@ -171,6 +176,7 @@ Returns NIL when parsing fails."
              (list :event event-type
                    :delta-type delta-type
                    :text (gethash "text" delta)
+                   :thinking (gethash "thinking" delta)
                    :partial-json (gethash "partial_json" delta))))
           ((string= event-type "content_block_stop")
            (list :event event-type))
@@ -206,6 +212,7 @@ Returns a reconstructed assistant message."
                            (append `(("system" . ,system)) body-with-tools)
                            body-with-tools))
            (text-parts nil)
+           (thinking-parts nil)
            (tool-calls nil)
            (current-tool-id nil)
            (current-tool-name nil)
@@ -240,23 +247,31 @@ Returns a reconstructed assistant message."
              (when parsed
                (let ((parsed-event (getf parsed :event)))
                  (cond
-                   ((string= parsed-event "content_block_delta")
-                    (let ((delta-type (getf parsed :delta-type)))
-                      (cond
-                        ((string= delta-type "text_delta")
-                         (let ((text (getf parsed :text)))
-                           (when text
-                             (push text text-parts)
-                             (funcall *streaming-text-callback* text))))
-                        ((string= delta-type "input_json_delta")
-                         (let ((partial (getf parsed :partial-json)))
-                           (when partial
-                             (push partial current-tool-input-parts)))))))
-                   ((string= parsed-event "content_block_start")
-                    (when (string= (getf parsed :content-block-type) "tool_use")
-                      (setf current-tool-id (getf parsed :tool-id)
-                            current-tool-name (getf parsed :tool-name)
-                            current-tool-input-parts nil)))
+                    ((string= parsed-event "content_block_delta")
+                     (let ((delta-type (getf parsed :delta-type)))
+                       (cond
+                         ((string= delta-type "text_delta")
+                          (let ((text (getf parsed :text)))
+                            (when text
+                              (push text text-parts)
+                              (funcall *streaming-text-callback* text))))
+                         ((string= delta-type "thinking_delta")
+                          (let ((thinking (getf parsed :thinking)))
+                            (when thinking
+                              (push thinking thinking-parts))))
+                         ((string= delta-type "input_json_delta")
+                          (let ((partial (getf parsed :partial-json)))
+                            (when partial
+                              (push partial current-tool-input-parts)))))))
+                    ((string= parsed-event "content_block_start")
+                     (let ((block-type (getf parsed :content-block-type)))
+                       (cond
+                         ((string= block-type "tool_use")
+                          (setf current-tool-id (getf parsed :tool-id)
+                                current-tool-name (getf parsed :tool-name)
+                                current-tool-input-parts nil))
+                         ((string= block-type "thinking")
+                          nil))))
                    ((string= parsed-event "content_block_stop")
                     (finalize-tool-call))
                    ((string= parsed-event "message_start")
@@ -273,7 +288,9 @@ Returns a reconstructed assistant message."
            (assistant-message
             (when text-parts
               (string-join "" (nreverse text-parts)))
-            :tool-calls (nreverse tool-calls))
+            :tool-calls (nreverse tool-calls)
+            :thinking (when thinking-parts
+                        (string-join "" (nreverse thinking-parts))))
             usage-plist))))))
 
 (defun anthropic-messages-url (client)

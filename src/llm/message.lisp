@@ -27,15 +27,17 @@
   (content      ""       :type (or string null))
   (tool-calls   nil      :type list)        ; list of tool-call structs
   (tool-call-id nil      :type (or string null))  ; for :tool role
-  (timestamp    ""       :type string))
+  (timestamp    ""       :type string)
+  (thinking     nil      :type (or string null)))  ; extended thinking content
 
-(defun make-message (&key role content tool-calls tool-call-id)
+(defun make-message (&key role content tool-calls tool-call-id thinking)
   "Create a message with automatic timestamp."
   (%make-message :role role
                  :content content
                  :tool-calls tool-calls
                  :tool-call-id tool-call-id
-                 :timestamp (timestamp-now)))
+                 :timestamp (timestamp-now)
+                 :thinking thinking))
 
 ;;; Convenience constructors
 
@@ -47,9 +49,9 @@
   "Create a user message."
   (make-message :role :user :content content))
 
-(defun assistant-message (content &key tool-calls)
-  "Create an assistant message, optionally with tool calls."
-  (make-message :role :assistant :content content :tool-calls tool-calls))
+(defun assistant-message (content &key tool-calls thinking)
+  "Create an assistant message, optionally with tool calls and extended thinking."
+  (make-message :role :assistant :content content :tool-calls tool-calls :thinking thinking))
 
 (defun tool-result-message (tool-call-id content)
   "Create a tool result message."
