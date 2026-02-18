@@ -19,7 +19,8 @@
     ("/improve"       . :improve)
     ("/review"        . :review)
     ("/evolve"        . :evolve)
-    ("/test-parallel" . :test-parallel))
+    ("/test-parallel" . :test-parallel)
+    ("/tokens"        . :tokens))
   "Mapping of REPL commands to actions.")
 
 ;;; ============================================================
@@ -233,6 +234,8 @@
         (format t "        — Autonomous continuous improvement loop~%")
         (format-colored-text "  /test-parallel" :green)
         (format t "  — Run test suite in parallel mode~%")
+        (format-colored-text "  /tokens" :green)
+        (format t "         — Show cumulative token usage statistics~%")
         (format-colored-text "  /colors" :green)
         (format t "        — Toggle color output (on/off)~%")
         (format-colored-text "  /quit" :green)
@@ -251,6 +254,7 @@
         (format t "  /review          — Review improvement suggestions~%")
         (format t "  /evolve          — Autonomous continuous improvement loop~%")
         (format t "  /test-parallel   — Run test suite in parallel mode~%")
+        (format t "  /tokens          — Show cumulative token usage statistics~%")
         (format t "  /colors          — Toggle color output (on/off)~%")
         (format t "  /quit            — Exit REPL~%")
         (format t "~%Type anything else to chat with the agent.~%")))
@@ -413,6 +417,25 @@
       (format t "~%Test run error: ~a~%" e)))
   nil)
 
+(defun format-token-usage (tracker)
+  "Format token usage statistics for display. Returns a string."
+  (let* ((input      (sibyl.llm::token-tracker-input-tokens tracker))
+         (output     (sibyl.llm::token-tracker-output-tokens tracker))
+         (cache-read (sibyl.llm::token-tracker-cache-read-tokens tracker))
+         (cache-write (sibyl.llm::token-tracker-cache-write-tokens tracker))
+         (requests   (sibyl.llm::token-tracker-request-count tracker))
+         (hit-rate   (sibyl.llm::tracker-cache-hit-rate tracker)))
+    (format nil "~%Token Usage (this session):~%  Input:       ~:d tokens~%  Output:      ~:d tokens~%  Cache Read:  ~:d tokens (~,1f% hit rate)~%  Cache Write: ~:d tokens~%  Requests:    ~:d~%"
+            input output cache-read (* hit-rate 100.0) cache-write requests)))
+
+(defun handle-tokens-command (agent input)
+  "Handler for :tokens command. Displays cumulative token usage statistics."
+  (declare (ignore input))
+  (let* ((tracker (sibyl.agent:agent-token-tracker agent))
+         (usage-str (format-token-usage tracker)))
+    (format t "~a" usage-str))
+  nil)
+
 ;;; Command handler registry
 
 (defparameter *command-handlers*
@@ -426,7 +449,8 @@
         (cons :improve #'handle-improve-command-wrapper)
         (cons :review  #'handle-review-command-wrapper)
         (cons :evolve  #'handle-evolve-command-wrapper)
-        (cons :test-parallel #'handle-test-parallel-command))
+        (cons :test-parallel #'handle-test-parallel-command)
+        (cons :tokens        #'handle-tokens-command))
   "Mapping of command keywords to handler functions.")
 
 (defun handle-repl-command (command agent &optional original-input)

@@ -380,6 +380,67 @@
        (setf sibyl.repl::*command-handlers* original-commands))))
 
 ;;; ============================================================
+;;; /tokens command tests
+;;; ============================================================
+
+(def-suite tokens-tests
+  :description "Tests for /tokens command."
+  :in sibyl-tests)
+
+(in-suite tokens-tests)
+
+(test tokens-command-registered
+  "Test that /tokens command is registered in *repl-commands*."
+  (is (assoc "/tokens" sibyl.repl::*repl-commands* :test #'string-equal))
+  (is (eq :tokens (cdr (assoc "/tokens" sibyl.repl::*repl-commands*
+                               :test #'string-equal)))))
+
+(test tokens-command-recognized
+  "Test that /tokens is recognized as a REPL command."
+  (is (eq :tokens (sibyl.repl:repl-command-p "/tokens"))))
+
+(test format-token-usage-contains-labels
+  "Test that format-token-usage output contains expected labels."
+  (let* ((tracker (sibyl.llm::make-token-tracker)))
+    (sibyl.llm::tracker-add-usage tracker '(:input-tokens 1000 :output-tokens 200
+                                             :cache-read-tokens 800 :cache-write-tokens 100))
+    (let ((output (sibyl.repl::format-token-usage tracker)))
+      (is (search "Input:" output :test #'string-equal))
+      (is (search "Output:" output :test #'string-equal))
+      (is (search "Cache Read:" output :test #'string-equal))
+      (is (search "Cache Write:" output :test #'string-equal)))))
+
+(test format-token-usage-shows-counts
+  "Test that format-token-usage displays the correct token counts."
+  (let* ((tracker (sibyl.llm::make-token-tracker)))
+    (sibyl.llm::tracker-add-usage tracker '(:input-tokens 1234 :output-tokens 567
+                                             :cache-read-tokens 8900 :cache-write-tokens 123))
+    (let ((output (sibyl.repl::format-token-usage tracker)))
+      ;; ~:d formats with commas: 1234 -> "1,234", 8900 -> "8,900"
+      (is (search "1,234" output :test #'string-equal))
+      (is (search "567" output :test #'string-equal))
+      (is (search "8,900" output :test #'string-equal))
+      (is (search "123" output :test #'string-equal)))))
+
+(test tokens-command-dispatches
+  "Test that :tokens command dispatches and prints token usage."
+  (let* ((tracker (sibyl.llm::make-token-tracker))
+         (agent (sibyl.agent:make-agent :client nil :name "Test")))
+    (sibyl.llm::tracker-add-usage tracker '(:input-tokens 500 :output-tokens 100
+                                             :cache-read-tokens 0 :cache-write-tokens 0))
+    (setf (sibyl.agent:agent-token-tracker agent) tracker)
+    (let ((output (with-output-to-string (*standard-output*)
+                    (sibyl.repl::handle-repl-command :tokens agent))))
+      (is (search "Input:" output :test #'string-equal))
+      (is (search "Output:" output :test #'string-equal)))))
+
+(test help-includes-tokens
+  "Test that /help output includes /tokens command."
+  (let ((output (with-output-to-string (*standard-output*)
+                  (sibyl.repl::handle-repl-command :help nil))))
+    (is (search "/tokens" output :test #'string-equal))))
+
+;;; ============================================================
 ;;; /evolve command tests
 ;;; ============================================================
 
