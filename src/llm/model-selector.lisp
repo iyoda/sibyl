@@ -197,14 +197,19 @@
 
 
 (defun make-model-selector (&key (tiers nil tiers-supplied-p)
-                                 (analyzer (make-task-analyzer))
-                                 (auto-select t))
+                                  (analyzer (make-task-analyzer))
+                                  (auto-select t))
   "Create a model selector. Tiers are resolved from config by default.
    Config keys: models.light.anthropic, models.medium.openai, etc."
   (make-instance 'model-selector 
                  :tiers (if tiers-supplied-p tiers (build-model-tiers-from-config))
                  :analyzer analyzer 
                  :auto-select auto-select))
+
+(defun make-default-model-selector ()
+  "Create a model selector with default tiers and complexity analyzer.
+   Convenience constructor for use in start-repl and tests."
+  (make-model-selector))
 
 ;; Complexity analysis functions
 (defmethod analyze-task-complexity ((analyzer task-analyzer) task-description)
@@ -251,6 +256,11 @@
                      :reasoning (format nil "Complexity score: ~,1f~%Factors: ~{~a~^, ~}~%Reasoning: ~{~a~^; ~}"
                                         score factors (reverse reasoning-parts))
                      :recommended-tier recommended-tier))))
+
+;; Dispatch analyze-task-complexity on model-selector (delegates to its analyzer)
+(defmethod analyze-task-complexity ((selector model-selector) task-description)
+  "Analyze task complexity using the model selector's built-in task analyzer."
+  (analyze-task-complexity (selector-analyzer selector) task-description))
 
 ;; Model selection functions
 (defmethod find-tier ((selector model-selector) tier-name)

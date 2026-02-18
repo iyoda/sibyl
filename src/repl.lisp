@@ -987,19 +987,30 @@
 
 (defun start-repl (&key client
                      (system-prompt sibyl.agent::*default-system-prompt*)
-                     (name "Sibyl"))
+                     (name "Sibyl")
+                     (use-model-selector nil))
   "Start the interactive REPL.
 
    Usage:
      (sibyl:with-config ()
        (sibyl:start-repl :client (sibyl:make-anthropic-client)))
 
+   With adaptive model selection:
+     (sibyl:start-repl :client (sibyl:make-anthropic-client) :use-model-selector t)
+
    Or with an existing agent:
      (start-repl :client my-client)"
-  (let ((agent (sibyl.agent:make-agent
-                :client client
-                :name name
-                :system-prompt system-prompt)))
+  (let ((agent (if (or use-model-selector
+                       (sibyl.config:config-value "optimization.auto-model-routing"))
+                   (make-instance 'sibyl.llm::adaptive-agent
+                                  :client client
+                                  :name name
+                                  :system-prompt system-prompt
+                                  :model-selector (sibyl.llm::make-default-model-selector))
+                   (sibyl.agent:make-agent
+                    :client client
+                    :name name
+                    :system-prompt system-prompt))))
     (let ((model (and client (ignore-errors (sibyl.llm::client-model client)))))
       (if model
           (log-info "repl" "Starting REPL (model: ~a)" model)

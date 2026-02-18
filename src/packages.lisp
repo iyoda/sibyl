@@ -139,6 +139,7 @@
    #:adaptive-agent
    #:make-task-analyzer
    #:make-model-selector
+   #:make-default-model-selector
    #:make-adaptive-agent
    #:analyze-task-complexity
    #:select-model-for-task
