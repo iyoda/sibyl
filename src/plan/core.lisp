@@ -202,12 +202,10 @@ Returns the plan file pathname."
   (let* ((dir (%plan-directory directory))
          (path (%plan-file-path (getf plan :id) directory)))
     (ensure-directories-exist dir)
-    (with-open-file (stream path
-                            :direction :output
-                            :if-exists :supersede
-                            :if-does-not-exist :create)
-      (let ((*print-case* :downcase)
-            (*print-pretty* t))
+    (with-open-file
+        (stream path :direction :output :if-exists :supersede
+         :if-does-not-exist :create)
+      (let ((*print-case* :downcase) (*print-pretty* nil))
         (prin1 (plan->sexp plan) stream)
         (terpri stream)))
     (%update-index plan directory)
@@ -359,4 +357,5 @@ Returns T on success, NIL if not found."
 ;;; ── deftool registrations ────────────────────────────────────────────────
 ;;; These are defined in sibyl.tools package via the tools protocol.
 ;;; We use a helper macro to stay in sibyl.plan but register into sibyl.tools.
+
 
