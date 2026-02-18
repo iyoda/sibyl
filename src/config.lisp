@@ -84,14 +84,14 @@ Convenience function equivalent to (setf (config-value KEY) VALUE)."
 (defun set-defaults ()
   "Set default configuration values."
   (let ((defaults '(;; LLM defaults
-                    ("llm.model"                . "claude-sonnet-4-5-20250929")
+                    ("llm.model"                . "claude-sonnet-4-6")
                     ("llm.max-tokens"           . 4096)
                     ("llm.temperature"          . 0.0)
                     ;; Model selection defaults
                     ("models.preferred-provider" . "anthropic")
                     ("models.light.anthropic"   . "claude-haiku-4-5-20251015")
                     ("models.light.openai"      . "gpt-5-nano")
-                    ("models.medium.anthropic"  . "claude-sonnet-4-5-20250929")
+                    ("models.medium.anthropic"  . "claude-sonnet-4-6")
                     ("models.medium.openai"     . "gpt-5-mini")
                     ("models.heavy.anthropic"   . "claude-opus-4-6")
                     ("models.heavy.openai"      . "gpt-5.2")

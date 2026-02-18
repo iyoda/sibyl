@@ -81,7 +81,7 @@
                    :models (list
                            (make-instance 'model-config
                                           :provider :anthropic
-                                          :model-name "claude-sonnet-4-5-20250929"
+                                          :model-name "claude-sonnet-4-6"
                                           :max-tokens 8192)
                            (make-instance 'model-config
                                           :provider :openai
@@ -421,7 +421,7 @@
                            ;; Claude Sonnet 4.5 (latest Sonnet)
                            (make-instance 'enhanced-model-config
                                           :provider :anthropic
-                                          :model-name "claude-sonnet-4-5-20250929"
+                                          :model-name "claude-sonnet-4-6"
                                           :release-date "2025-09-29"
                                           :version "4.5"
                                           :max-tokens 16384

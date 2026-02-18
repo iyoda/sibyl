@@ -213,3 +213,21 @@
 (defmethod count-tokens ((client llm-client) text)
   "Rough token estimate: ~4 characters per token."
   (ceiling (length text) 4))
+
+;;; ============================================================
+;;; Convenience: call LLM from within tool execution context
+;;; ============================================================
+
+(defun call-llm (messages &key tools)
+  "Call the LLM using the current agent's client (via *current-agent*).
+   MESSAGES is a list of message plists.
+   TOOLS, if supplied, is a JSON schema list for tool-calling.
+   Returns (values response-message usage-plist).
+   Signals an error if called outside an agent-step context."
+  (let ((agent sibyl.agent::*current-agent*))
+    (unless agent
+      (error "call-llm: no current agent bound. Must be called within agent-step."))
+    (let ((client (sibyl.agent:agent-client agent)))
+      (if tools
+          (complete-with-tools client messages tools)
+          (complete client messages)))))
