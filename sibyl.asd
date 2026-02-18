@@ -29,6 +29,7 @@
       :components
       ((:file "message")
        (:file "client")
+       (:file "token-tracker")
        (:file "providers")
        (:file "model-selector")))
      (:module "plan"
@@ -88,6 +89,7 @@
      (:file "evolution-state-test")
      (:file "parallel-runner-test")
      (:file "parallel-agent-test")
-     (:file "mcp-test"))))
+     (:file "mcp-test")
+     (:file "token-tracking-test"))))
   :perform (test-op (o c)
              (uiop:symbol-call '#:sibyl.tests '#:run-sibyl-tests)))

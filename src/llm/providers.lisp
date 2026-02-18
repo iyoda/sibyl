@@ -118,13 +118,21 @@
           tools))
 
 (defun parse-anthropic-response (response)
-  "Parse Anthropic API response into a message struct."
+  "Parse Anthropic API response into a message struct.
+Returns (values message usage-plist) where usage-plist may be nil."
   (let* ((raw-blocks (gethash "content" response))
          (content-blocks (if (listp raw-blocks)
                              raw-blocks
                              (coerce raw-blocks 'list)))
          (text-parts nil)
-         (tool-calls nil))
+         (tool-calls nil)
+         ;; Extract usage
+         (usage-ht (gethash "usage" response))
+         (usage-plist (when usage-ht
+                        (list :input-tokens (or (gethash "input_tokens" usage-ht) 0)
+                              :output-tokens (or (gethash "output_tokens" usage-ht) 0)
+                              :cache-read-tokens (or (gethash "cache_read_input_tokens" usage-ht) 0)
+                              :cache-write-tokens (or (gethash "cache_creation_input_tokens" usage-ht) 0)))))
     (when content-blocks
       (loop for block in content-blocks
             for block-type = (gethash "type" block)
@@ -138,10 +146,12 @@
                          :arguments (hash-to-alist
                                      (gethash "input" block)))
                         tool-calls)))))
-    (assistant-message
-     (when text-parts
-       (string-join "" (nreverse text-parts)))
-     :tool-calls (nreverse tool-calls))))
+    (values
+     (assistant-message
+      (when text-parts
+        (string-join "" (nreverse text-parts)))
+      :tool-calls (nreverse tool-calls))
+     usage-plist)))
 
 (defun parse-anthropic-sse-events (event-type data-str)
   "Parse an Anthropic SSE event into a normalized plist.
@@ -166,6 +176,15 @@ Returns NIL when parsing fails."
            (list :event event-type))
           ((string= event-type "message_stop")
            (list :event event-type))
+          ((string= event-type "message_start")
+           (let* ((message-obj (gethash "message" data))
+                  (usage-obj (when message-obj (gethash "usage" message-obj))))
+             (list :event event-type
+                   :input-tokens (when usage-obj (gethash "input_tokens" usage-obj)))))
+          ((string= event-type "message_delta")
+           (let ((usage-obj (gethash "usage" data)))
+             (list :event event-type
+                   :output-tokens (when usage-obj (gethash "output_tokens" usage-obj)))))
           (t
            (list :event event-type :data data))))
     (error () nil)))
@@ -190,18 +209,20 @@ Returns a reconstructed assistant message."
            (tool-calls nil)
            (current-tool-id nil)
            (current-tool-name nil)
-           (current-tool-input-parts nil))
+           (current-tool-input-parts nil)
+           (input-tokens-from-start nil)
+           (output-tokens-from-delta nil))
       (labels ((finalize-tool-call ()
                  (when current-tool-name
                    (let* ((json-str (if current-tool-input-parts
-                                        (format nil "~{~a~}" (nreverse current-tool-input-parts))
-                                        "{}"))
+                                         (format nil "~{~a~}" (nreverse current-tool-input-parts))
+                                         "{}"))
                           (args (handler-case
-                                    (let ((parsed-args (yason:parse json-str :object-as :hash-table)))
-                                      (if (hash-table-p parsed-args)
-                                          (hash-to-alist parsed-args)
-                                          parsed-args))
-                                  (error () nil))))
+                                     (let ((parsed-args (yason:parse json-str :object-as :hash-table)))
+                                       (if (hash-table-p parsed-args)
+                                           (hash-to-alist parsed-args)
+                                           parsed-args))
+                                   (error () nil))))
                      (push (make-tool-call
                             :id current-tool-id
                             :name current-tool-name
@@ -237,12 +258,23 @@ Returns a reconstructed assistant message."
                             current-tool-name (getf parsed :tool-name)
                             current-tool-input-parts nil)))
                    ((string= parsed-event "content_block_stop")
-                    (finalize-tool-call)))))))
+                    (finalize-tool-call))
+                   ((string= parsed-event "message_start")
+                    (setf input-tokens-from-start (getf parsed :input-tokens)))
+                   ((string= parsed-event "message_delta")
+                    (setf output-tokens-from-delta (getf parsed :output-tokens))))))))
          (lambda () nil))
-        (assistant-message
-         (when text-parts
-           (string-join "" (nreverse text-parts)))
-         :tool-calls (nreverse tool-calls))))))
+        (let* ((usage-plist (when (or input-tokens-from-start output-tokens-from-delta)
+                              (list :input-tokens (or input-tokens-from-start 0)
+                                    :output-tokens (or output-tokens-from-delta 0)
+                                    :cache-read-tokens 0
+                                    :cache-write-tokens 0))))
+          (values
+           (assistant-message
+            (when text-parts
+              (string-join "" (nreverse text-parts)))
+            :tool-calls (nreverse tool-calls))
+            usage-plist))))))
 
 (defun anthropic-messages-url (client)
   "Build the messages endpoint URL. Appends ?beta=true for OAuth."
@@ -252,7 +284,8 @@ Returns a reconstructed assistant message."
         base)))
 
 (defmethod complete ((client anthropic-client) messages &key)
-  "Send messages to Anthropic Claude API."
+  "Send messages to Anthropic Claude API.
+Returns (values message usage-plist)."
   (log-info "llm" "Anthropic complete (model: ~a, streaming: ~a)"
             (client-model client)
             (if *streaming-text-callback* "yes" "no"))
@@ -273,7 +306,8 @@ Returns a reconstructed assistant message."
             (parse-anthropic-response response))))))
 
 (defmethod complete-with-tools ((client anthropic-client) messages tools &key)
-  "Send messages with tools to Anthropic Claude API."
+  "Send messages with tools to Anthropic Claude API.
+Returns (values message usage-plist)."
   (log-info "llm" "Anthropic complete-with-tools (model: ~a, tools: ~a, streaming: ~a)"
             (client-model client)
             (length tools)

@@ -31,10 +31,13 @@
                   :initform 0
                   :type integer)
    (hooks         :initarg :hooks
-                  :accessor agent-hooks
-                  :initform nil
-                  :documentation "Alist of hook-name → function.
-                   Hooks: :before-step :after-step :on-tool-call :on-error"))
+                   :accessor agent-hooks
+                   :initform nil
+                   :documentation "Alist of hook-name → function.
+                    Hooks: :before-step :after-step :on-tool-call :on-error")
+   (token-tracker :initform (sibyl.llm::make-token-tracker)
+                  :accessor agent-token-tracker
+                  :documentation "Cumulative token usage for this session."))
   (:documentation "The central agent that orchestrates LLM and tools."))
 
 ;;; ============================================================
@@ -149,38 +152,40 @@ If you are unsure, ask for clarification."
   (let* ((context (memory-context-window
                    (agent-memory agent)
                    :system-prompt (agent-system-prompt agent)))
-         (tools-schema (tools-as-schema))
-         (response (if tools-schema
-                       (complete-with-tools
-                        (agent-client agent) context tools-schema)
-                       (complete (agent-client agent) context))))
+         (tools-schema (tools-as-schema)))
+    (multiple-value-bind (response usage)
+        (if tools-schema
+            (complete-with-tools
+             (agent-client agent) context tools-schema)
+            (complete (agent-client agent) context))
+      (sibyl.llm::tracker-add-usage (agent-token-tracker agent) usage)
 
-    ;; Process response
-    (memory-push (agent-memory agent) response)
+      ;; Process response
+      (memory-push (agent-memory agent) response)
 
-    (cond
-      ;; Response has tool calls → execute them and recurse
-      ((message-tool-calls response)
-       (dolist (tc (message-tool-calls response))
-         (run-hook agent :on-tool-call tc)
-         (let ((result
-                 (handler-case
-                     (execute-tool-call tc)
-                   (tool-error (e)
-                     (run-hook agent :on-error e)
-                     (format nil "Error: ~a" e)))))
-           (memory-push (agent-memory agent)
-                        (tool-result-message (tool-call-id tc) result))))
-       ;; Recurse to let LLM process tool results (no new user input)
-       (if (< (agent-step-count agent) (agent-max-steps agent))
-           (agent-step agent nil)
-           (format nil "[Sibyl: max steps (~a) reached]"
-                   (agent-max-steps agent))))
+      (cond
+        ;; Response has tool calls → execute them and recurse
+        ((message-tool-calls response)
+         (dolist (tc (message-tool-calls response))
+           (run-hook agent :on-tool-call tc)
+           (let ((result
+                   (handler-case
+                       (execute-tool-call tc)
+                     (tool-error (e)
+                       (run-hook agent :on-error e)
+                       (format nil "Error: ~a" e)))))
+             (memory-push (agent-memory agent)
+                          (tool-result-message (tool-call-id tc) result))))
+         ;; Recurse to let LLM process tool results (no new user input)
+         (if (< (agent-step-count agent) (agent-max-steps agent))
+             (agent-step agent nil)
+             (format nil "[Sibyl: max steps (~a) reached]"
+                     (agent-max-steps agent))))
 
-      ;; Plain text response → return it
-      (t
-       (run-hook agent :after-step response)
-       (message-content response)))))
+        ;; Plain text response → return it
+        (t
+         (run-hook agent :after-step response)
+         (message-content response))))))
 
 ;;; ============================================================
 ;;; Multi-turn run: process input until final text response
