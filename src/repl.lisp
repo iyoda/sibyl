@@ -1045,17 +1045,21 @@
   (/ (- (get-internal-real-time) start-time) 
      (float internal-time-units-per-second)))
 
-(defun format-elapsed-time (seconds &key (stream *standard-output*) model tokens)
-  "Format elapsed time as [model · elapsed: X.Xs · N tok] with optional dim styling.
+(defun format-elapsed-time (seconds &key (stream *standard-output*) model tokens input-tokens output-tokens)
+  "Format elapsed time as [model · elapsed: X.Xs · In X / Out Y] with optional dim styling.
    When MODEL is non-NIL, includes the model name before the elapsed time.
-   When TOKENS is non-NIL, appends the token count (delta for this request).
+   When INPUT-TOKENS and OUTPUT-TOKENS are non-NIL, appends 'In X / Out Y'.
+   TOKENS (legacy scalar) is still accepted as fallback.
    When *use-colors* is nil, outputs plain text. Otherwise uses ANSI dim code."
-  (let ((label (with-output-to-string (s)
-                 (when model
-                   (format s "~a · " model))
-                 (format s "elapsed: ~,1fs" seconds)
-                 (when tokens
-                   (format s " · ~:d tok" tokens)))))
+  (let ((label
+         (with-output-to-string (s)
+           (when model (format s "~a · " model))
+           (format s "elapsed: ~,1fs" seconds)
+           (cond
+             ((and input-tokens output-tokens)
+              (format s " · In ~:d / Out ~:d" input-tokens output-tokens))
+             (tokens
+              (format s " · ~:d tok" tokens))))))
     (if *use-colors*
         (format stream "~C[2m[~a]~C[0m" #\Escape label #\Escape)
         (format stream "[~a]" label))))
@@ -1312,14 +1316,11 @@
                                           (write-string text *standard-output*)
                                           (force-output *standard-output*))))
                                    (tracker (sibyl.agent:agent-token-tracker agent))
-                                   (tokens-before
-                                     (+ (sibyl.llm::token-tracker-input-tokens tracker)
-                                        (sibyl.llm::token-tracker-output-tokens tracker)))
+                                   (in-before (sibyl.llm::token-tracker-input-tokens tracker))
+                                   (out-before (sibyl.llm::token-tracker-output-tokens tracker))
                                    (response (sibyl.agent:agent-run agent input))
-                                   (tokens-after
-                                     (+ (sibyl.llm::token-tracker-input-tokens tracker)
-                                        (sibyl.llm::token-tracker-output-tokens tracker)))
-                                   (tokens-delta (- tokens-after tokens-before)))
+                                   (in-delta (- (sibyl.llm::token-tracker-input-tokens tracker) in-before))
+                                   (out-delta (- (sibyl.llm::token-tracker-output-tokens tracker) out-before)))
                               (stop-current-spinner)
                               (when (or (not *stream-enabled*)
                                         (not sibyl.llm:*streaming-text-callback*)
@@ -1331,7 +1332,8 @@
                                                    :model (ignore-errors
                                                             (sibyl.llm::client-model
                                                              (sibyl.agent:agent-client agent)))
-                                                   :tokens (when (plusp tokens-delta) tokens-delta))
+                                                   :input-tokens (when (plusp in-delta) in-delta)
+                                                   :output-tokens (when (plusp out-delta) out-delta))
                               (format t "~%")))
                                                #+sbcl (sb-sys:interactive-interrupt (e)
                                                        (declare (ignore e))
