@@ -73,6 +73,39 @@
       (sibyl.repl.spinner:stop-spinner s))))
 
 ;;; ============================================================
+;;; Spinner: stream resilience
+;;; ============================================================
+
+(test spinner-survives-closed-stream
+  "The spinner thread must not crash when its output stream is closed.
+   Previously this caused SB-KERNEL:LAYOUT-INVALID and SBCL corruption."
+  ;; Bind *standard-output* only during start-spinner so FiveAM's
+  ;; format-to-t reporting uses the real output stream.
+  (let* ((stream (make-string-output-stream))
+         (s (let ((*standard-output* stream))
+              (sibyl.repl.spinner:start-spinner "resilience test"))))
+    ;; Close the stream while the spinner is still running.
+    ;; The spinner should detect the write failure and self-stop
+    ;; instead of crashing the SBCL process.
+    (close stream)
+    ;; Give the spinner thread time to encounter the closed stream.
+    (sleep 0.3)
+    ;; Now stop it cleanly — should not error.
+    (finishes (sibyl.repl.spinner:stop-spinner s))
+    (is (not (sibyl.repl.spinner:spinner-active-p s))
+        "Spinner should be inactive after stop")))
+
+(test spinner-stop-on-closed-stream
+  "stop-spinner should not error when the spinner's stream is already closed."
+  (let* ((stream (make-string-output-stream))
+         (s (let ((*standard-output* stream))
+              (sibyl.repl.spinner:start-spinner "Test"))))
+    (sibyl.repl.spinner:stop-spinner s)
+    (close stream)
+    ;; Calling stop-spinner again on a closed stream should be safe.
+    (finishes (sibyl.repl.spinner:stop-spinner s))))
+
+;;; ============================================================
 ;;; Cancel flag: *cancel-requested* and *last-interrupt-time*
 ;;; ============================================================
 

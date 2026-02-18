@@ -2,26 +2,29 @@
 
 (defpackage #:sibyl.agent.tests
   (:use #:cl #:fiveam)
-  (:import-from #:sibyl.agent
-                #:*default-system-prompt*
-                #:agent-hooks
-                #:make-agent
-                #:agent-system-prompt
-                #:run-hook
-                #:make-memory
-                #:memory-push
-                #:memory-compact
-                #:memory-conversation)
-  (:import-from #:sibyl.llm
-                #:user-message
-                #:assistant-message
-                #:tool-result-message
-                #:make-tool-call
-                #:message-role
-                #:conversation-to-list)
-  (:export #:agent-tests
-            #:tdd-orchestration-tests
-            #:memory-compact-tests))
+   (:import-from #:sibyl.agent
+                 #:*default-system-prompt*
+                 #:agent-hooks
+                 #:make-agent
+                 #:agent-system-prompt
+                 #:run-hook
+                 #:make-memory
+                 #:memory-push
+                 #:memory-compact
+                 #:memory-sanitize
+                 #:memory-conversation)
+   (:import-from #:sibyl.llm
+                 #:user-message
+                 #:assistant-message
+                 #:tool-result-message
+                 #:make-tool-call
+                 #:message-role
+                 #:message-tool-call-id
+                 #:conversation-to-list)
+   (:export #:agent-tests
+             #:tdd-orchestration-tests
+             #:memory-compact-tests
+             #:memory-sanitize-tests))
 
 (in-package #:sibyl.agent.tests)
 
@@ -309,6 +312,106 @@
   
 (let ((sibyl.agent::*current-agent* :test-agent))
   (is (eq sibyl.agent::*current-agent* :test-agent))))
+
+;;; ============================================================
+;;; Conversation Sanitizer Tests
+;;; ============================================================
+
+(def-suite memory-sanitize-tests
+  :description "Tests for memory-sanitize orphaned tool_use repair."
+  :in sibyl.tests:sibyl-tests)
+
+(in-suite memory-sanitize-tests)
+
+(test sanitize-clean-conversation
+  "memory-sanitize returns 0 and makes no changes when all tool_use
+   messages have matching tool_result messages."
+  (let ((mem (make-memory)))
+    (memory-push mem (user-message "hello"))
+    (memory-push mem (assistant-message "let me check"
+                       :tool-calls (list (make-tool-call
+                                           :id "tc_clean_1"
+                                           :name "read-file"
+                                           :arguments nil))))
+    (memory-push mem (tool-result-message "tc_clean_1" "file contents"))
+    (memory-push mem (assistant-message "done"))
+    (let ((count (memory-sanitize mem))
+          (msgs (conversation-to-list (memory-conversation mem))))
+      (is (= 0 count)
+          "Clean conversation should require 0 fixes")
+      (is (= 4 (length msgs))
+          "Message count should be unchanged"))))
+
+(test sanitize-single-orphan
+  "memory-sanitize detects a single orphaned tool_use and appends
+   a synthetic tool_result."
+  (let ((mem (make-memory)))
+    (memory-push mem (user-message "read file"))
+    ;; Push assistant with tool_use but NO matching tool_result
+    (memory-push mem (assistant-message "let me check"
+                       :tool-calls (list (make-tool-call
+                                           :id "tc_orphan_1"
+                                           :name "read-file"
+                                           :arguments nil))))
+    ;; Orphaned: no tool_result for tc_orphan_1
+    (let ((count (memory-sanitize mem))
+          (msgs (conversation-to-list (memory-conversation mem))))
+      (is (= 1 count)
+          "Should fix exactly 1 orphan")
+      (is (= 3 (length msgs))
+          "Should have original 2 + 1 synthetic result")
+      ;; Last message should be the synthetic tool_result
+      (let ((last-msg (car (last msgs))))
+        (is (eq :tool (message-role last-msg)))
+        (is (string= "tc_orphan_1" (message-tool-call-id last-msg)))
+        (is (search "interrupted" (sibyl.llm:message-content last-msg)))))))
+
+(test sanitize-multiple-orphans
+  "memory-sanitize repairs multiple orphaned tool_use IDs from
+   the same assistant message."
+  (let ((mem (make-memory)))
+    (memory-push mem (user-message "do two things"))
+    ;; Assistant requests 2 tool calls
+    (memory-push mem (assistant-message nil
+                       :tool-calls (list (make-tool-call
+                                           :id "tc_multi_a" :name "tool-a"
+                                           :arguments nil)
+                                          (make-tool-call
+                                           :id "tc_multi_b" :name "tool-b"
+                                           :arguments nil))))
+    ;; Only tool-a got a result; tool-b is orphaned
+    (memory-push mem (tool-result-message "tc_multi_a" "result a"))
+    (let ((count (memory-sanitize mem)))
+      (is (= 1 count)
+          "Should fix 1 orphan (tc_multi_b)")
+      (let* ((msgs (conversation-to-list (memory-conversation mem)))
+             (tool-ids (loop for m in msgs
+                             when (eq :tool (message-role m))
+                               collect (message-tool-call-id m))))
+        (is (= 2 (length tool-ids))
+            "Should have 2 tool_result messages total")
+        (is (member "tc_multi_b" tool-ids :test #'string=)
+            "tc_multi_b should now have a synthetic result")))))
+
+(test sanitize-idempotent
+  "Calling memory-sanitize twice returns 0 the second time."
+  (let ((mem (make-memory)))
+    (memory-push mem (user-message "test"))
+    (memory-push mem (assistant-message nil
+                       :tool-calls (list (make-tool-call
+                                           :id "tc_idem" :name "tool"
+                                           :arguments nil))))
+    (is (= 1 (memory-sanitize mem))
+        "First call should fix 1 orphan")
+    (is (= 0 (memory-sanitize mem))
+        "Second call should find 0 orphans (idempotent)")))
+
+(test sanitize-no-tool-calls
+  "memory-sanitize returns 0 on a conversation with no tool calls at all."
+  (let ((mem (make-memory)))
+    (memory-push mem (user-message "hello"))
+    (memory-push mem (assistant-message "hi there"))
+    (is (= 0 (memory-sanitize mem)))))
 
 ;;; ============================================================
 ;;; Parallel Tool Execution Tests

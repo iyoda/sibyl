@@ -152,6 +152,43 @@ Focus on key decisions, facts, and context needed for continuity.~%~%~
         (dolist (msg to-keep)
           (conversation-push (memory-conversation mem) msg))))))
 
+;;; ============================================================
+;;; Conversation sanitizer — repair orphaned tool_use
+;;; ============================================================
+
+(defgeneric memory-sanitize (memory)
+  (:documentation "Ensure every assistant tool_use has a matching tool_result.
+Appends synthetic '[interrupted]' results for any orphaned tool_use IDs.
+Returns the number of synthetic results added (0 when conversation is clean)."))
+
+(defmethod memory-sanitize ((mem memory))
+  "Scan conversation for orphaned tool_use messages and append synthetic
+tool_result messages for each missing ID.  This prevents the Anthropic API
+from rejecting the conversation with HTTP 400."
+  (let* ((messages (conversation-to-list (memory-conversation mem)))
+         ;; Collect all tool_use IDs from assistant messages.
+         (use-ids (loop for msg in messages
+                        when (and (eq :assistant (message-role msg))
+                                  (message-tool-calls msg))
+                          append (mapcar #'tool-call-id
+                                         (message-tool-calls msg))))
+         ;; Collect all tool_result IDs from :tool messages.
+         (result-ids (loop for msg in messages
+                           when (eq :tool (message-role msg))
+                             collect (message-tool-call-id msg)))
+         ;; Orphans = use-ids that have no matching result-id.
+         (orphans (set-difference use-ids result-ids :test #'string=))
+         (count 0))
+    (dolist (id orphans count)
+      (conversation-push
+       (memory-conversation mem)
+       (tool-result-message id "[interrupted — no result available]"))
+      (incf count))))
+
+;;; ============================================================
+;;; Reset
+;;; ============================================================
+
 (defgeneric memory-reset (memory)
   (:documentation "Clear all memory."))
 

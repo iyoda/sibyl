@@ -58,24 +58,35 @@
          (thread
            (bt:make-thread
             (lambda ()
-              (unwind-protect
-                   (loop for i = 0 then (mod (1+ i) (length *spinner-frames*))
-                         while (not (spinner-stop-flag s))
-                         do (let* ((msg     (bt:with-recursive-lock-held ((spinner-lock s))
-                                              (spinner-message s)))
-                                   (elapsed (/ (- (get-internal-real-time) start-time)
-                                               (float internal-time-units-per-second))))
-                              (format out "~C~C[2K~A ~A (~,1fs)"
-                                      #\Return #\Escape
-                                      (aref *spinner-frames* i)
-                                      msg
-                                      elapsed)
-                              (force-output out))
-                            (loop repeat 2
-                                  while (not (spinner-stop-flag s))
-                                  do (sleep 0.05)))
-                (format out "~C~C[2K" #\Return #\Escape)
-                (force-output out)))
+              (flet ((%write-safe (stream fmt &rest args)
+                       "Write to STREAM, returning T on success or NIL on failure.
+                        Catches any stream error (LAYOUT-INVALID, closed stream, etc.)
+                        so the spinner thread never crashes the SBCL process."
+                       (handler-case
+                           (progn (apply #'format stream fmt args)
+                                  (force-output stream)
+                                  t)
+                         (error () nil))))
+                (unwind-protect
+                     (loop for i = 0 then (mod (1+ i) (length *spinner-frames*))
+                           while (not (spinner-stop-flag s))
+                           do (let* ((msg     (bt:with-recursive-lock-held ((spinner-lock s))
+                                                (spinner-message s)))
+                                     (elapsed (/ (- (get-internal-real-time) start-time)
+                                                 (float internal-time-units-per-second))))
+                                (unless (%write-safe out "~C~C[2K~A ~A (~,1fs)"
+                                                    #\Return #\Escape
+                                                    (aref *spinner-frames* i)
+                                                    msg
+                                                    elapsed)
+                                  ;; Stream is dead — stop spinning to prevent further errors.
+                                  (setf (spinner-stop-flag s) t)
+                                  (return)))
+                              (loop repeat 2
+                                    while (not (spinner-stop-flag s))
+                                    do (sleep 0.05)))
+                  ;; Cleanup: best-effort line clear; ignore failures.
+                  (%write-safe out "~C~C[2K" #\Return #\Escape))))
             :name "sibyl-spinner")))
     (setf (spinner-thread s) thread
           (spinner-active s) t)
@@ -99,10 +110,14 @@
           (loop repeat 10
                 while (bt:thread-alive-p thread)
                 do (sleep 0.05))))))
-  ;; Belt-and-suspenders: clear line in case unwind-protect already ran
+  ;; Belt-and-suspenders: clear line in case unwind-protect already ran.
+  ;; Guard against invalid/closed streams — the thread's cleanup may have
+  ;; already written this, or the stream may have been invalidated.
   (let ((out (spinner-output s)))
-    (format out "~C~C[2K" #\Return #\Escape)
-    (force-output out))
+    (handler-case
+        (progn (format out "~C~C[2K" #\Return #\Escape)
+               (force-output out))
+      (error () nil)))
   (setf (spinner-active s) nil)
   s)
 

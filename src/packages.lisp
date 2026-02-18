@@ -258,6 +258,7 @@
    #:memory-compact
    #:memory-compaction-strategy
    #:memory-compaction-client
+   #:memory-sanitize
    ;; Agent
    #:agent
    #:make-agent
