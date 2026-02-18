@@ -72,6 +72,7 @@
    - Other lists → list (JSON array)
    - Atoms → passed through"
   (cond
+    ((eq value :null) :null)
     ((hash-table-p value)
       (let ((ht (make-hash-table :test 'equal)))
         (maphash (lambda (k v)
