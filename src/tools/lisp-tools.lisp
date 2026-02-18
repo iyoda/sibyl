@@ -773,6 +773,39 @@ Use the package parameter to set the evaluation context (e.g. \"SIBYL.AGENT\")."
       (butlast lines)
       lines))
 
+(defun %generate-unified-diff (path old-content new-content)
+  "Generate a unified diff string between OLD-CONTENT and NEW-CONTENT for PATH.
+Returns NIL if there is no difference, otherwise returns a unified diff string
+with --- a/PATH and +++ b/PATH headers."
+  (when (string= old-content new-content)
+    (return-from %generate-unified-diff nil))
+  (uiop:with-temporary-file (:stream old-stream :pathname old-path :keep nil
+                              :prefix "sibyl-diff-old-" :suffix ".tmp")
+    (write-string old-content old-stream)
+    :close-stream
+    (uiop:with-temporary-file (:stream new-stream :pathname new-path :keep nil
+                                :prefix "sibyl-diff-new-" :suffix ".tmp")
+      (write-string new-content new-stream)
+      :close-stream
+      (let* ((label-old (format nil "a/~a" path))
+             (label-new (format nil "b/~a" path))
+             (diff-output
+               (handler-case
+                   (uiop:run-program
+                    (list "diff" "-u"
+                          (format nil "--label=~a" label-old)
+                          (format nil "--label=~a" label-new)
+                          (namestring old-path)
+                          (namestring new-path))
+                    :output :string
+                    :error-output :string
+                    :ignore-error-status t)
+                 (error (e)
+                   (format nil "diff error: ~a" e)))))
+        (if (or (null diff-output) (string= diff-output ""))
+            nil
+            diff-output)))))
+
 (defun %sync-to-file-write-content (path content)
   (with-open-file (stream path :direction :output
                           :if-exists :supersede
@@ -847,7 +880,10 @@ Use the package parameter to set the evaluation context (e.g. \"SIBYL.AGENT\")."
                            (updated (append before new-lines after))
                            (new-content (%sync-to-file-join-lines updated)))
                       (%sync-to-file-write-content file new-content)
-                      (format nil "Success: ~a synced to ~a" name file)))
+                      (let ((diff (%generate-unified-diff file original-content new-content)))
+                        (if diff
+                            (format nil "Success: ~a synced to ~a~%~%```diff~%~a```" name file diff)
+                            (format nil "Success: ~a synced to ~a" name file)))))
                 (restore-file ()
                   :report "Restore original file content"
                   (%sync-to-file-write-content file original-content)
@@ -931,82 +967,94 @@ Use the package parameter to set the evaluation context (e.g. \"SIBYL.AGENT\")."
     result))
 
 (deftool "add-definition"
-    (:description "Append a new definition to an existing Lisp source file."
-     :category :code
-     :parameters ((:name "file" :type "string" :required t
-                   :description "Path to the source file")
-                  (:name "new-definition" :type "string" :required t
-                   :description "New definition as an S-expression string")
-                  (:name "after" :type "string" :required nil
-                   :description "Optional definition name to insert after")))
-  (block add-definition
-    (let* ((file (getf args :file))
-           (definition (getf args :new-definition))
-           (after-input (getf args :after)))
-      (unless (and file (stringp file) (string/= file ""))
-        (error "File path not specified"))
-      (unless (uiop:file-exists-p file)
-        (error "File not found: ~a" file))
-      (unless (and definition (stringp definition)
-                   (string/= (string-trim-whitespace definition) ""))
-        (error "New definition not specified"))
-      (when after-input
-        (unless (and (stringp after-input)
-                     (string/= (string-trim-whitespace after-input) ""))
-          (error "After definition name not specified: ~a" after-input)))
-      (%add-definition-validate-definition definition)
-      (let ((package-name (%add-definition-file-package file)))
-        (unless package-name
-          (error "Package declaration not found in ~a" file))
-        (unless (%add-definition-sibyl-package-name-p package-name)
-          (error "add-definition can only modify Sibyl packages: ~a" package-name))
-        (let* ((after-name (when after-input
-                             (multiple-value-bind (package symbol-name)
-                                 (%split-symbol-string after-input)
-                               (declare (ignore package))
-                               (string-trim-whitespace
-                                (or symbol-name after-input)))))
-               (read-args (if after-name
-                              (list (cons "path" file)
-                                    (cons "name" after-name))
-                              (list (cons "path" file))))
-               (result (execute-tool "read-sexp" read-args))
-               (entries (%add-definition-parse-read-sexp-result result)))
-          (when (null entries)
-            (if after-name
-                (error "Definition ~a not found in ~a" after-input file)
-                (error "No definitions found in ~a" file)))
-          (when (and after-name (> (length entries) 1))
-            (error "Multiple definitions found for ~a in ~a" after-input file))
-          (let* ((entry (if after-name
-                            (first entries)
-                            (car (last entries))))
-                 (end-line (%add-definition-entry-line entry "end_line")))
-            (unless end-line
-              (error "Definition not found in ~a" file))
-            (let ((original-content (uiop:read-file-string file)))
-              (restart-case
-                  (let* ((lines (%sync-to-file-split-lines original-content))
-                         (line-count (length lines))
-                         (insert-index end-line))
-                    (when (or (< end-line 1)
-                              (> end-line line-count))
-                      (error "Invalid definition range for ~a in ~a: ~a"
-                             (or after-input "last definition")
-                             file
-                             end-line))
-                    (let* ((before (subseq lines 0 insert-index))
-                           (after (subseq lines insert-index))
-                           (new-lines (%add-definition-prepare-lines definition))
-                           (updated (append before new-lines after))
-                           (new-content (%sync-to-file-join-lines updated)))
-                      (%sync-to-file-write-content file new-content)
-                      (%add-definition-eval-definition definition package-name)
-                      (format nil "Success: definition added to ~a" file)))
-                (:undo-addition ()
-                  :report "Undo the definition addition"
-                  (%sync-to-file-write-content file original-content)
-                  (format nil "Addition undone."))))))))))
+ (:description "Append a new definition to an existing Lisp source file."
+  :category :code :parameters
+  ((:name "file" :type "string" :required t :description
+    "Path to the source file")
+   (:name "new-definition" :type "string" :required t :description
+    "New definition as an S-expression string")
+   (:name "after" :type "string" :required nil :description
+    "Optional definition name to insert after")))
+ (block add-definition
+   (let* ((file (getf args :file))
+          (definition (getf args :new-definition))
+          (after-input (getf args :after)))
+     (unless (and file (stringp file) (string/= file ""))
+       (error "File path not specified"))
+     (unless (uiop/filesystem:file-exists-p file)
+       (error "File not found: ~a" file))
+     (unless
+         (and definition (stringp definition)
+              (string/= (string-trim-whitespace definition) ""))
+       (error "New definition not specified"))
+     (when after-input
+       (unless
+           (and (stringp after-input)
+                (string/= (string-trim-whitespace after-input) ""))
+         (error "After definition name not specified: ~a" after-input)))
+     (%add-definition-validate-definition definition)
+     (let ((package-name (%add-definition-file-package file)))
+       (unless package-name (error "Package declaration not found in ~a" file))
+       (unless (%add-definition-sibyl-package-name-p package-name)
+         (error "add-definition can only modify Sibyl packages: ~a"
+                package-name))
+       (let* ((after-name
+               (when after-input
+                 (multiple-value-bind (package symbol-name)
+                     (%split-symbol-string after-input)
+                   (declare (ignore package))
+                   (string-trim-whitespace (or symbol-name after-input)))))
+              (read-args
+               (if after-name
+                   (list (cons "path" file) (cons "name" after-name))
+                   (list (cons "path" file))))
+              (result (execute-tool "read-sexp" read-args))
+              (entries (%add-definition-parse-read-sexp-result result)))
+         (when (null entries)
+           (if after-name
+               (error "Definition ~a not found in ~a" after-input file)
+               (error "No definitions found in ~a" file)))
+         (when (and after-name (> (length entries) 1))
+           (error "Multiple definitions found for ~a in ~a" after-input file))
+         (let* ((entry
+                 (if after-name
+                     (first entries)
+                     (car (last entries))))
+                (end-line (%add-definition-entry-line entry "end_line")))
+           (unless end-line (error "Definition not found in ~a" file))
+           (let ((original-content (uiop/stream:read-file-string file)))
+             (restart-case (let* ((lines
+                                   (%sync-to-file-split-lines
+                                    original-content))
+                                  (line-count (length lines))
+                                  (insert-index end-line))
+                             (when (or (< end-line 1) (> end-line line-count))
+                               (error
+                                "Invalid definition range for ~a in ~a: ~a"
+                                (or after-input "last definition") file
+                                end-line))
+                             (let* ((before (subseq lines 0 insert-index))
+                                    (after (subseq lines insert-index))
+                                    (new-lines
+                                     (%add-definition-prepare-lines
+                                      definition))
+                                    (updated (append before new-lines after))
+                                    (new-content
+                                     (%sync-to-file-join-lines updated)))
+                               (%sync-to-file-write-content file new-content)
+                               (%add-definition-eval-definition definition
+                                package-name)
+                               (let ((diff (%generate-unified-diff
+                                            file original-content new-content)))
+                                 (if diff
+                                     (format nil
+                                             "Success: definition added to ~a~%~%```diff~%~a```"
+                                             file diff)
+                                     (format nil "Success: definition added to ~a"
+                                             file)))))
+               (:undo-addition nil :report "Undo the definition addition"
+                (%sync-to-file-write-content file original-content)
+                (format nil "Addition undone."))))))))))
 
 ;;; ============================================================
 ;;; Macro expansion

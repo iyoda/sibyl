@@ -24,14 +24,20 @@
                    :description "File path to write to")
                   (:name "content" :type "string" :required t
                    :description "Content to write")))
-  (let ((path (getf args :path))
-        (content (getf args :content)))
+  (let* ((path (getf args :path))
+         (content (getf args :content))
+         (original-content (when (probe-file path)
+                             (uiop:read-file-string path))))
     (ensure-directories-exist path)
     (with-open-file (stream path :direction :output
                                  :if-exists :supersede
                                  :if-does-not-exist :create)
       (write-string content stream))
-    (format nil "Written ~a bytes to ~a" (length content) path)))
+    (let ((diff (when original-content
+                  (sibyl.tools::%generate-unified-diff path original-content content))))
+      (if diff
+          (format nil "Written ~a bytes to ~a~%~%```diff~%~a```" (length content) path diff)
+          (format nil "Written ~a bytes to ~a" (length content) path)))))
 
 (deftool "list-directory"
     (:description "List files and subdirectories in a directory."
