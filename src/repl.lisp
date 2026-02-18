@@ -127,8 +127,41 @@
                       (t 37)))) ; default to white
     (format stream "~C[~Am~A~C[0m" #\Escape color-code text #\Escape)))
 
+(defun %rl-escape (ansi-string)
+  "Wrap ANSI escape sequences in STRING with readline's invisible markers.
+   \\001 (RL_PROMPT_START_IGNORE) and \\002 (RL_PROMPT_END_IGNORE) tell
+   readline which characters are non-printable, so it correctly calculates
+   visible prompt width for cursor positioning.  Without these markers,
+   readline counts escape bytes as visible columns, causing cursor drift
+   (especially noticeable when editing CJK/full-width characters)."
+  (with-output-to-string (out)
+    (loop with i = 0
+          with len = (length ansi-string)
+          while (< i len)
+          for ch = (char ansi-string i)
+          do (cond
+               ;; ESC starts an ANSI sequence — wrap it in \001...\002
+               ((char= ch #\Escape)
+                (write-char (code-char 1) out)   ; RL_PROMPT_START_IGNORE
+                (write-char ch out)
+                (incf i)
+                ;; Copy through the terminating letter (e.g. 'm')
+                (loop while (and (< i len)
+                                 (not (alpha-char-p (char ansi-string i))))
+                      do (write-char (char ansi-string i) out)
+                         (incf i))
+                (when (< i len)                  ; the letter itself
+                  (write-char (char ansi-string i) out)
+                  (incf i))
+                (write-char (code-char 2) out))  ; RL_PROMPT_END_IGNORE
+               (t
+                (write-char ch out)
+                (incf i))))))
+
 (defun format-enhanced-prompt (name &optional (command-count 0))
-  "Format an enhanced prompt with colors and information"
+  "Format an enhanced prompt with colors and information.
+   Returns the raw ANSI-colored string.  When passing to readline,
+   callers should wrap with %rl-escape to mark invisible sequences."
   (with-output-to-string (s)
     (format-colored-text "┌─[" :cyan s)
     (format-colored-text name :green s)
@@ -1062,10 +1095,14 @@
          (input (if (readline-available-p)
                     ;; cl-readline handles prompt display and history navigation.
                     ;; Use find-symbol to avoid compile-time package dependency.
+                    ;; Wrap prompt with %rl-escape so readline knows which bytes
+                    ;; are ANSI escapes (invisible) — fixes cursor drift with
+                    ;; CJK/full-width characters.
                     (handler-case
-                        (funcall (find-symbol "READLINE" :cl-readline) :prompt prompt)
+                        (funcall (find-symbol "READLINE" :cl-readline)
+                                 :prompt (%rl-escape prompt))
                       (error () (read-line *standard-input* nil nil)))
-                    ;; Fallback: manual prompt + read-line
+                    ;; Fallback: manual prompt + read-line (no rl-escape needed)
                     (progn
                       (format t "~A" prompt)
                       (force-output)
