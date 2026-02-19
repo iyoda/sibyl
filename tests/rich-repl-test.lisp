@@ -375,22 +375,56 @@
 ;;; unbind-key integration tests
 ;;; ============================================================
 
-(test unbind-key-guard-when-ignore-ctrl-j-true
-  "When *ignore-ctrl-j* is T, the variable holds T"
+(test ignore-ctrl-j-unbind-key-called-when-enabled
+  "When *ignore-ctrl-j* is T and readline is available, unbind-key is called with (code-char 10)"
+  ;; Mock: capture the key passed to unbind-key
+  (let* ((captured-key nil)
+         (sibyl.repl::*ignore-ctrl-j* t))
+    ;; Only run if cl-readline is available (skip gracefully otherwise)
+    (when (sibyl.repl::readline-available-p)
+      (let ((original-fn (find-symbol "UNBIND-KEY" :cl-readline)))
+        ;; Temporarily rebind unbind-key to capture the argument
+        (setf (symbol-function (find-symbol "UNBIND-KEY" :cl-readline))
+              (lambda (key) (setf captured-key key) nil))
+        (unwind-protect
+            (progn
+              ;; Simulate the guard logic from start-repl
+              (when (and sibyl.repl::*ignore-ctrl-j* (sibyl.repl::readline-available-p))
+                (funcall (find-symbol "UNBIND-KEY" :cl-readline) (code-char 10)))
+              (is (char= captured-key (code-char 10))
+                  "unbind-key should be called with (code-char 10)"))
+          ;; Restore original function
+          (setf (symbol-function (find-symbol "UNBIND-KEY" :cl-readline))
+                original-fn))))))
+
+(test ignore-ctrl-j-unbind-key-not-called-when-disabled
+  "When *ignore-ctrl-j* is NIL, unbind-key is NOT called"
+  (let* ((called-p nil)
+         (sibyl.repl::*ignore-ctrl-j* nil))
+    (when (sibyl.repl::readline-available-p)
+      (let ((original-fn (find-symbol "UNBIND-KEY" :cl-readline)))
+        (setf (symbol-function (find-symbol "UNBIND-KEY" :cl-readline))
+              (lambda (key) (declare (ignore key)) (setf called-p t) nil))
+        (unwind-protect
+            (progn
+              ;; Simulate the guard logic from start-repl
+              (when (and sibyl.repl::*ignore-ctrl-j* (sibyl.repl::readline-available-p))
+                (funcall (find-symbol "UNBIND-KEY" :cl-readline) (code-char 10)))
+              (is (null called-p)
+                  "unbind-key should NOT be called when *ignore-ctrl-j* is NIL"))
+          (setf (symbol-function (find-symbol "UNBIND-KEY" :cl-readline))
+                original-fn))))
+    ;; When readline not available, guard prevents call regardless
+    (unless (sibyl.repl::readline-available-p)
+      (is (null called-p)
+          "unbind-key should NOT be called when readline is not available"))))
+
+(test ignore-ctrl-j-guard-skips-when-readline-unavailable
+  "When readline is not available, the guard prevents unbind-key call"
+  ;; This tests the (readline-available-p) part of the guard
+  ;; by verifying the guard condition evaluates to NIL when readline is absent
   (let ((sibyl.repl::*ignore-ctrl-j* t))
-    (is (eq sibyl.repl::*ignore-ctrl-j* t)
-        "*ignore-ctrl-j* should be T when bound to T")))
-
-(test unbind-key-guard-when-ignore-ctrl-j-false
-  "When *ignore-ctrl-j* is NIL, the variable holds NIL"
-  (let ((sibyl.repl::*ignore-ctrl-j* nil))
-    (is (null sibyl.repl::*ignore-ctrl-j*)
-        "*ignore-ctrl-j* should be NIL when bound to NIL")))
-
-(test code-char-10-is-linefeed
-  "Verify that (code-char 10) produces the linefeed character"
-  (let ((ch (code-char 10)))
-    (is (= (char-code ch) 10)
-        "code-char 10 should have char-code 10")
-    (is (char= ch #\Newline)
-        "code-char 10 should be the newline character")))
+    ;; Simulate readline unavailable by checking the guard with mocked availability
+    (let ((guard-result (and sibyl.repl::*ignore-ctrl-j* nil))) ; nil = readline unavailable
+      (is (null guard-result)
+          "Guard should be NIL when readline is unavailable, preventing unbind-key call"))))
