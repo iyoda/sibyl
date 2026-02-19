@@ -172,36 +172,21 @@
 ;; Test 2: Opus 4-6 has :thinking capability
 (test opus-4-6-has-thinking-capability
   "Claude Opus 4-6 should have :thinking in capabilities"
-  (let* ((tier (find "heavy" sibyl.llm::*latest-model-tiers*
-                     :key #'sibyl.llm::tier-name :test #'string=))
-         (opus-model (find-if (lambda (m)
-                                (and (eq (sibyl.llm::model-provider m) :anthropic)
-                                     (string= (sibyl.llm::model-name m) "claude-opus-4-6")))
-                              (sibyl.llm::tier-models tier))))
+  (let ((opus-model (gethash "claude-opus-4-6" sibyl.llm::*model-registry*)))
     (is (not (null opus-model)))
     (is (member :thinking (sibyl.llm::model-capabilities opus-model)))))
 
 ;; Test 3: Sonnet 4-6 has :thinking capability
 (test sonnet-4-6-has-thinking-capability
   "Claude Sonnet 4-6 should have :thinking in capabilities"
-  (let* ((tier (find "medium" sibyl.llm::*latest-model-tiers*
-                     :key #'sibyl.llm::tier-name :test #'string=))
-         (sonnet-model (find-if (lambda (m)
-                                  (and (eq (sibyl.llm::model-provider m) :anthropic)
-                                       (string= (sibyl.llm::model-name m) "claude-sonnet-4-6")))
-                                (sibyl.llm::tier-models tier))))
+  (let ((sonnet-model (gethash "claude-sonnet-4-6" sibyl.llm::*model-registry*)))
     (is (not (null sonnet-model)))
     (is (member :thinking (sibyl.llm::model-capabilities sonnet-model)))))
 
 ;; Test 4: Haiku does NOT have :thinking capability
 (test haiku-no-thinking-capability
   "Claude Haiku should NOT have :thinking in capabilities"
-  (let* ((tier (find "light" sibyl.llm::*latest-model-tiers*
-                     :key #'sibyl.llm::tier-name :test #'string=))
-         (haiku-model (find-if (lambda (m)
-                                 (and (eq (sibyl.llm::model-provider m) :anthropic)
-                                      (search "haiku" (sibyl.llm::model-name m))))
-                               (sibyl.llm::tier-models tier))))
+  (let ((haiku-model (gethash "claude-haiku-4-5-20251015" sibyl.llm::*model-registry*)))
     (is (not (null haiku-model)))
     (is (not (member :thinking (sibyl.llm::model-capabilities haiku-model))))))
 

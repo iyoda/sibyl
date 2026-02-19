@@ -194,16 +194,6 @@
       (is (null (assoc "cache_control" last-tool :test #'string=))))))
 
 ;;; ============================================================
-;;; Model selector tests (Task 6: auto-routing integration)
-;;; ============================================================
-
-(def-suite model-selector-suite
-  :description "Model selector and adaptive agent routing tests"
-  :in sibyl-tests)
-
-(in-suite model-selector-suite)
-
-;;; ============================================================
 ;;; Memory Compaction Strategy Tests (Task 5)
 ;;; ============================================================
 
@@ -243,26 +233,56 @@
   (let ((mem (sibyl.agent::make-memory)))
     (is (= 50 (sibyl.agent::memory-max-messages mem)))))
 
-(test benchmark-task-set-defined
-  "Auto-generated test"
-  
-(is (not (null sibyl.llm::*benchmark-task-set*)))
-(is (listp sibyl.llm::*benchmark-task-set*))
-(is (>= (length sibyl.llm::*benchmark-task-set*) 30))
-(let ((tiers (mapcar (lambda (entry) (getf entry :expected-tier)) sibyl.llm::*benchmark-task-set*)))
-  (is (member "light"  tiers :test #'string=))
-  (is (member "medium" tiers :test #'string=))
-  (is (member "heavy"  tiers :test #'string=)))
-)
+;;; ============================================================
+;;; Model Registry and Pricing Tests (simplified functionality)
+;;; ============================================================
 
-(test classify-accuracy-function-exists
-  "Auto-generated test"
-  
-(is (fboundp 'sibyl.llm::evaluate-classification-accuracy))
-(let* ((selector (sibyl.llm::make-default-model-selector))
-       (result (sibyl.llm::evaluate-classification-accuracy selector)))
-  (is (listp result))
-  (is (getf result :accuracy))
-  (is (getf result :total))
-  (is (numberp (getf result :accuracy))))
-)
+(def-suite model-registry-tests
+  :description "Model registry and pricing tests for simplified functionality"
+  :in sibyl-tests)
+
+(in-suite model-registry-tests)
+
+(test context-window-for-gpt-5.2-codex
+  "Verify context-window-for-model returns 400000 for gpt-5.2-codex"
+  (is (= 400000 (sibyl.llm:context-window-for-model "gpt-5.2-codex"))))
+
+(test context-window-for-claude-sonnet-4-6
+  "Verify context-window-for-model returns 200000 for claude-sonnet-4-6"
+  (is (= 200000 (sibyl.llm:context-window-for-model "claude-sonnet-4-6"))))
+
+(test context-window-fallback
+  "Verify context-window-for-model falls back to 200000 for unknown models"
+  (is (= 200000 (sibyl.llm:context-window-for-model "unknown-model-xyz"))))
+
+(test gpt-5.2-codex-pricing
+  "Verify lookup-model-pricing returns correct values for gpt-5.2-codex"
+  (let ((pricing (sibyl.llm:lookup-model-pricing "gpt-5.2-codex")))
+    (is (= 1.75 (getf pricing :input)))
+    (is (= 14.0 (getf pricing :output)))
+    (is (= 0.0 (getf pricing :cache-write)))
+    (is (= 0.175 (getf pricing :cache-read)))))
+
+(test simplified-task-cost-record
+  "Verify make-task-cost-record-from-delta works without tier parameters"
+  (let* ((delta '(:input 1000 :output 500 :cache-write 100 :cache-read 50))
+         (rec (sibyl.llm:make-task-cost-record-from-delta
+               "test task" "gpt-5.2-codex" delta)))
+    (is (string= "test task" (sibyl.llm:task-cost-record-task-description rec)))
+    (is (string= "gpt-5.2-codex" (sibyl.llm:task-cost-record-model-name rec)))
+    (is (= 1000 (sibyl.llm:task-cost-record-input-tokens rec)))
+    (is (> (sibyl.llm:task-cost-record-actual-cost-usd rec) 0))))
+
+(test simplified-session-report
+  "Verify compute-session-report works without tier distribution"
+  (let* ((rec1 (sibyl.llm:make-task-cost-record
+                :task-description "task1"
+                :model-name "gpt-5.2-codex"
+                :input-tokens 1000
+                :output-tokens 500
+                :actual-cost-usd 0.01d0))
+         (report (sibyl.llm:compute-session-report (list rec1))))
+    (is (= 1 (sibyl.llm:session-cost-report-task-count report)))
+    (is (> (sibyl.llm:session-cost-report-total-actual-cost-usd report) 0))))
+
+

@@ -62,9 +62,9 @@
     ;; Task 1: Newly classified safe suites (pure logic, no I/O, no global state)
     tokens-tests                    ;; Token tracking: pure logic, no I/O, no sleep
     token-tracking-suite            ;; Token usage tracking: pure logic, hash table operations
-    model-selector-suite            ;; Model selection: pure logic, no I/O, no global state
     memory-compaction-suite         ;; Memory compaction: pure logic, no I/O, no sleep
-    phase6-tests                    ;; Japanese patterns, cost calculation: pure logic, no I/O
+    phase6-tests                    ;; Cost calculation: pure logic, no I/O
+    model-registry-tests            ;; Model registry and pricing: pure logic, no I/O
     mcp-tests                       ;; MCP protocol: JSON-RPC, schema conversion (pure logic, no I/O)
     openai-usage-tests              ;; OpenAI usage extraction: pure logic, no I/O
     openai-pricing-tests            ;; OpenAI pricing table: pure logic, no I/O

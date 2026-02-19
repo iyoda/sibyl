@@ -698,14 +698,7 @@
     (is (string= "gpt-oss:120b" (sibyl.llm::client-model client)))
     (is (= 8192 (sibyl.llm::client-max-tokens client)))))
 
-(test latest-model-tiers-include-ollama
-  "latest-model-tiers heavy tier includes an Ollama gpt-oss model"
-  (let* ((heavy (find "heavy" sibyl.llm::*latest-model-tiers*
-                       :key #'sibyl.llm::tier-name :test #'string=))
-         (models (sibyl.llm::tier-models heavy))
-         (ollama-model (find :ollama models :key #'sibyl.llm::model-provider)))
-    (is (not (null ollama-model)))
-    (is (string= "gpt-oss:120b" (sibyl.llm::model-name ollama-model)))))
+
 
 ;;; ============================================================
 ;;; Native think API integration tests
