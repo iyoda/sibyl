@@ -505,15 +505,15 @@ Returns (values message usage-plist)."
 
 (defclass openai-client (llm-client)
   ()
-  (:default-initargs
-   :base-url "https://api.openai.com/v1"
-   :model "gpt-5-mini")
+   (:default-initargs
+    :base-url "https://api.openai.com/v1"
+    :model "gpt-5.2-codex")
   (:documentation "Client for OpenAI's GPT API."))
 
 (defun make-openai-client (&key api-key
-                             (model "gpt-5-mini")
-                             (max-tokens 4096)
-                             (temperature 0.0))
+                              (model "gpt-5.2-codex")
+                              (max-tokens 4096)
+                              (temperature 0.0))
   "Create an OpenAI API client."
   (log-debug "llm" "Creating OpenAI client (model: ~a)" model)
   (make-instance 'openai-client

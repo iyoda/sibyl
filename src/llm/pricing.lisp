@@ -20,9 +20,11 @@
     ("claude-opus-4-6"
      :input 5.00 :output 25.00 :cache-write 6.25 :cache-read 0.50)
     ;; OpenAI models (USD per 1M tokens)
-    ("gpt-5-mini"
-     :input 0.25 :output 1.00 :cache-write 0.0 :cache-read 0.025)
-    ;; Baseline model for savings calculation (medium tier default)
+     ("gpt-5-mini"
+      :input 0.25 :output 1.00 :cache-write 0.0 :cache-read 0.025)
+     ("gpt-5.2-codex"
+      :input 1.75 :output 14.00 :cache-write 0.0 :cache-read 0.175)
+     ;; Baseline model for savings calculation (medium tier default)
     ("__baseline__"
      :input 3.00 :output 15.00 :cache-write 3.75 :cache-read 0.30))
   "Pricing table: model-name -> (:input N :output N :cache-write N :cache-read N)
