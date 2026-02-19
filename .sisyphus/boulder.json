@@ -1,11 +1,12 @@
 {
-  "active_plan": "/Users/iyoda/Projects/atikoro/sibyl/.sisyphus/plans/test-parallel-runner.md",
-  "started_at": "2026-02-19T06:32:00.000Z",
-  "completed_at": "2026-02-19T08:52:37.365Z",
+  "active_plan": null,
+  "started_at": "2026-02-19T08:57:46.698Z",
+  "completed_at": "2026-02-19T09:15:00.000Z",
   "session_ids": [
     "ses_38c322a6cffeaFvZIuErRUC6Tc"
   ],
-  "plan_name": "test-parallel-runner",
+  "plan_name": "both-plans-verified",
   "agent": "atlas",
-  "status": "complete"
+  "status": "complete",
+  "notes": "Verified and closed both openai-token-cache and repl-display-overhaul plans"
 }
