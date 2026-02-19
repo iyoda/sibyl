@@ -94,12 +94,8 @@ Convenience function equivalent to (setf (config-value KEY) VALUE)."
                     ("llm.temperature"          . 0.0)
                     ;; Model selection defaults
                     ("models.preferred-provider" . "anthropic")
-                    ("models.light.anthropic"   . "claude-haiku-4-5-20251015")
-                    ("models.light.openai"      . "gpt-5-nano")
-                    ("models.medium.anthropic"  . "claude-sonnet-4-6")
-                    ("models.medium.openai"     . "gpt-5-mini")
-                    ("models.heavy.anthropic"   . "claude-opus-4-6")
-                    ("models.heavy.openai"      . "gpt-5.2")
+                    ("openai.model"             . "gpt-5.2-codex")
+                    ("anthropic.model"          . "claude-sonnet-4-6")
                     ;; Agent defaults
                     ("agent.max-steps"          . 50)
                     ("agent.name"               . "Sibyl")
