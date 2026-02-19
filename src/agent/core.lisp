@@ -37,7 +37,10 @@
                      Hooks: :before-step :after-step :on-tool-call :on-tool-result :on-error")
    (token-tracker :initform (sibyl.llm::make-token-tracker)
                   :accessor agent-token-tracker
-                  :documentation "Cumulative token usage for this session."))
+                  :documentation "Cumulative token usage for this session.")
+   (cost-records :initform nil
+                 :accessor agent-cost-records
+                 :documentation "List of task-cost-record instances for this session."))
   (:documentation "The central agent that orchestrates LLM and tools."))
 
 ;;; ============================================================

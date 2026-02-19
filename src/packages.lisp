@@ -246,7 +246,6 @@
    #:run-adaptive-vs-baseline-ab-test
    #:format-provisioning-stats
    #:format-ab-test-report
-   #:agent-cost-records
     #:make-openai-client
     #:ollama-client
    #:make-ollama-client
@@ -357,6 +356,7 @@
    #:agent-system-prompt
    #:agent-hooks
    #:agent-token-tracker
+   #:agent-cost-records
    #:agent-step
    #:agent-run
    #:agent-role

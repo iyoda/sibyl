@@ -621,10 +621,9 @@ Returns TEXT unchanged when it is not a string."
   nil)
 
 (defun %model-show-status (agent)
-  "Show current model and tier information."
+  "Show current model information."
   (let* ((client (sibyl.agent:agent-client agent))
-         (model-name (ignore-errors (sibyl.llm::client-model client)))
-         (is-adaptive (typep agent 'sibyl.llm::adaptive-agent)))
+         (model-name (ignore-errors (sibyl.llm::client-model client))))
     (format t "~%Current Model:~%")
     (if model-name
         (if *use-colors*
@@ -633,56 +632,19 @@ Returns TEXT unchanged when it is not a string."
               (format-colored-text model-name :green)
               (format t "~%"))
             (format t "  Model: ~a~%" model-name))
-        (format t "  Model: (unknown)~%"))
-    (if is-adaptive
-        (let* ((selector (sibyl.llm::agent-model-selector agent))
-               (current-tier (sibyl.llm::selector-current-tier selector))
-               (auto-select (sibyl.llm::selector-auto-select selector)))
-          (format t "  Tier:  ~a~%" current-tier)
-          (format t "  Auto:  ~a~%" (if auto-select "enabled" "disabled"))
-          (format t "~%Available tiers:~%")
-          (dolist (tier (sibyl.llm::selector-tiers selector))
-            (let ((marker (if (string= (sibyl.llm::tier-name tier) current-tier) "\u25b6" " ")))
-              (format t "  ~a ~a \u2014 ~a (cost: ~ax, speed: ~ax)~%"
-                      marker
-                      (sibyl.llm::tier-name tier)
-                      (sibyl.llm::tier-description tier)
-                      (sibyl.llm::tier-cost-factor tier)
-                      (sibyl.llm::tier-speed-factor tier)))))
-        (format t "  (Standard agent \u2014 use :use-model-selector t to enable adaptive selection)~%"))))
+        (format t "  Model: (unknown)~%"))))
 
 (defun %model-switch-tier (agent tier-name)
-  "Switch the agent to a specific model tier."
-  (if (typep agent 'sibyl.llm::adaptive-agent)
-      (let* ((selector (sibyl.llm::agent-model-selector agent))
-             (tier (sibyl.llm::find-tier selector tier-name)))
-        (if tier
-            (progn
-              (setf (sibyl.llm::selector-current-tier selector) tier-name)
-              (setf (sibyl.llm::selector-auto-select selector) nil)
-              (multiple-value-bind (model-config new-tier)
-                  (sibyl.llm::select-model-for-task selector "manual tier switch"
-                                                    :force-tier tier-name)
-                (declare (ignore new-tier))
-                (setf (sibyl.llm::agent-current-model-config agent) model-config)
-                (setf (sibyl.agent:agent-client agent)
-                      (sibyl.llm::create-client-for-model model-config))
-                (format t "~%Switched to ~a tier: ~a~%"
-                        tier-name
-                        (sibyl.llm::model-name model-config))
-                (format t "(Auto-selection disabled. Use /model auto to re-enable.)~%")))
-            (format t "~%Unknown tier: ~a. Valid tiers: light, medium, heavy~%" tier-name)))
-      (format t "~%Model tier switching requires adaptive agent.~%~
-                  Start REPL with :use-model-selector t~%")))
+  "Tier switching is not available in this version."
+  (declare (ignore agent tier-name))
+  (format t "~%Model tier switching is not available.~%~
+                Adaptive model selection has been removed from the REPL.~%"))
 
 (defun %model-enable-auto (agent)
-  "Enable automatic model selection."
-  (if (typep agent 'sibyl.llm::adaptive-agent)
-      (let ((selector (sibyl.llm::agent-model-selector agent)))
-        (setf (sibyl.llm::selector-auto-select selector) t)
-        (format t "~%Automatic model selection enabled.~%~
-                    Models will be chosen based on task complexity.~%"))
-      (format t "~%Adaptive agent required. Start REPL with :use-model-selector t~%")))
+  "Automatic model selection is not available in this version."
+  (declare (ignore agent))
+  (format t "~%Automatic model selection is not available.~%~
+                Adaptive model selection has been removed from the REPL.~%"))
 
 (defun %model-run-benchmark (agent)
   "Run the classification accuracy benchmark."
@@ -715,20 +677,9 @@ Returns TEXT unchanged when it is not a string."
     (format t "~%Completed in ~,2fs~%" elapsed)))
 
 (defun %model-show-detailed-status (agent)
-  "Show detailed model selector status including task history."
+  "Show detailed model status."
   (%model-show-status agent)
-  (when (typep agent 'sibyl.llm::adaptive-agent)
-    (let ((history (sibyl.llm::agent-task-history agent)))
-      (if history
-          (progn
-            (format t "~%Recent model selections (~a):~%" (min 5 (length history)))
-            (dolist (entry (subseq history 0 (min 5 (length history))))
-              (format t "  [~a] ~a \u2192 ~a (score: ~,1f)~%"
-                      (getf entry :tier)
-                      (sibyl.util:truncate-string (getf entry :task) 40)
-                      (getf entry :model)
-                      (or (getf entry :complexity-score) 0.0))))
-          (format t "~%No model selection history yet.~%")))))
+  (format t "~%Adaptive model selection history is not available.~%"))
 
 (defun format-tier-bar-chart (tier-distribution total-tasks &key (width 30))
   "Render an ASCII horizontal bar chart for tier distribution.
@@ -779,12 +730,6 @@ Returns TEXT unchanged when it is not a string."
                   (sibyl.llm::session-cost-report-task-count report))
             (setf (gethash "actual_cost_usd" entry)
                   (sibyl.llm::session-cost-report-total-actual-cost-usd report))
-            (setf (gethash "baseline_cost_usd" entry)
-                  (sibyl.llm::session-cost-report-total-baseline-cost-usd report))
-            (setf (gethash "savings_usd" entry)
-                  (sibyl.llm::session-cost-report-total-savings-usd report))
-            (setf (gethash "savings_pct" entry)
-                  (sibyl.llm::session-cost-report-total-savings-pct report))
             (setf (gethash "cache_hit_rate" entry)
                   (sibyl.llm::session-cost-report-cache-hit-rate report))
             (vector-push-extend entry arr)
@@ -802,70 +747,29 @@ Returns TEXT unchanged when it is not a string."
    Displays a formatted session cost report with tier distribution bar chart.
    Saves the report to ~/.sibyl/cost-log.json."
   (declare (ignore input))
-  (if (typep agent 'sibyl.llm::adaptive-agent)
-      (let* ((records (sibyl.llm::agent-cost-records agent))
-             (n (length records)))
-        (if (zerop n)
-            (format t "~%No cost data yet. Run some tasks first.~%")
-            (let* ((report (sibyl.llm::compute-session-report records))
-                   (tier-dist (sibyl.llm::session-cost-report-tier-distribution report))
-                   (total (sibyl.llm::session-cost-report-task-count report)))
-              ;; Print the standard session report
-              (sibyl.llm::format-session-report report)
-              ;; Append ASCII bar chart
-              (format t "~a" (format-tier-bar-chart tier-dist total))
-              ;; Persist to disk
-              (let ((saved-path (save-cost-log report)))
-                (when saved-path
-                  (format t "  [Saved to ~a]~%" saved-path)))
-              report)))
-      (format t "~%Cost reporting requires adaptive agent.~%~
-                  Start REPL with :use-model-selector t~%"))
+  (let* ((records (sibyl.agent::agent-cost-records agent))
+         (n (length records)))
+    (if (zerop n)
+        (format t "~%No cost data yet. Run some tasks first.~%")
+        (let* ((report (sibyl.llm::compute-session-report records))
+               (tier-dist (sibyl.llm::session-cost-report-tier-distribution report))
+               (total (sibyl.llm::session-cost-report-task-count report)))
+          ;; Print the standard session report
+          (sibyl.llm::format-session-report report)
+          ;; Append ASCII bar chart
+          (format t "~a" (format-tier-bar-chart tier-dist total))
+          ;; Persist to disk
+          (let ((saved-path (save-cost-log report)))
+            (when saved-path
+              (format t "  [Saved to ~a]~%" saved-path)))
+          report)))
   nil)
 
 (defun handle-tier-stats-command (agent input)
-  "Handler for /tier-stats command.
-   Shows per-tier statistics: task count, avg cost, avg tokens."
-  (declare (ignore input))
-  (if (typep agent 'sibyl.llm::adaptive-agent)
-      (let* ((records (sibyl.llm::agent-cost-records agent))
-             (n (length records)))
-        (if (zerop n)
-            (format t "~%No tier statistics yet. Run some tasks first.~%")
-            (let ((tier-groups (make-hash-table :test 'equal)))
-              ;; Group records by tier
-              (dolist (rec records)
-                (let* ((tier (sibyl.llm::task-cost-record-tier-name rec))
-                       (group (gethash tier tier-groups)))
-                  (setf (gethash tier tier-groups) (cons rec group))))
-              ;; Header
-              (format t "~%=== Tier Statistics (~a tasks total) ===~%" n)
-              (format t "~%~12a ~8a ~14a ~12a~%"
-                      "Tier" "Tasks" "Avg Cost($)" "Avg Tokens")
-              (format t "~a~%" (make-string 50 :initial-element #\─))
-              ;; Per-tier rows
-              (dolist (tier '("light" "medium" "heavy"))
-                (let ((group (gethash tier tier-groups)))
-                  (when group
-                    (let* ((cnt (length group))
-                           (avg-cost (/ (reduce #'+ group
-                                                :key #'sibyl.llm::task-cost-record-actual-cost-usd)
-                                        cnt))
-                           (avg-tokens (/ (reduce #'+ group
-                                                  :key (lambda (r)
-                                                         (+ (sibyl.llm::task-cost-record-input-tokens r)
-                                                            (sibyl.llm::task-cost-record-output-tokens r))))
-                                          cnt)))
-                      (format t "~12a ~8d ~14,6f ~12,0f~%"
-                              tier cnt avg-cost avg-tokens)))))
-              (format t "~a~%" (make-string 50 :initial-element #\─))
-              ;; Bar chart
-              (let ((dist (mapcar (lambda (tier)
-                                    (cons tier (length (gethash tier tier-groups (list)))))
-                                  '("light" "medium" "heavy"))))
-                (format t "~a" (format-tier-bar-chart dist n))))))
-      (format t "~%Tier statistics require adaptive agent.~%~
-                  Start REPL with :use-model-selector t~%"))
+  "Handler for /tier-stats command (no longer available)."
+  (declare (ignore agent input))
+  (format t "~%Tier statistics are not available.~%~
+                Adaptive model selection has been removed from the REPL.~%")
   nil)
 
 ;;; Command handler registry
@@ -1434,34 +1338,20 @@ Otherwise, use model-specific optimized prompt for Ollama models."
 
 (defun start-repl (&key client
                      (system-prompt sibyl.agent::*default-system-prompt*)
-                     (name "Sibyl")
-                     (use-model-selector nil))
+                     (name "Sibyl"))
   "Start the interactive REPL.
 
    Usage:
      (sibyl:with-config ()
        (sibyl:start-repl :client (sibyl:make-anthropic-client)))
 
-   With adaptive model selection:
-     (sibyl:start-repl :client (sibyl:make-anthropic-client) :use-model-selector t)
-
    Or with an existing agent:
      (start-repl :client my-client)"
   (let* ((effective-prompt (%select-system-prompt client system-prompt))
-         ;; Ollama runs a single local model — skip adaptive model selection
-         (ollama-p (typep client 'sibyl.llm:ollama-client))
-         (agent (if (and (not ollama-p)
-                         (or use-model-selector
-                             (sibyl.config:config-value "optimization.auto-model-routing")))
-                    (make-instance 'sibyl.llm::adaptive-agent
-                                   :client client
-                                   :name name
-                                   :system-prompt effective-prompt
-                                   :model-selector (sibyl.llm::make-default-model-selector))
-                    (sibyl.agent:make-agent
-                     :client client
-                     :name name
-                     :system-prompt effective-prompt))))
+         (agent (sibyl.agent:make-agent
+                 :client client
+                 :name name
+                 :system-prompt effective-prompt)))
     (let ((model (and client (ignore-errors (sibyl.llm::client-model client)))))
       (if model
           (log-info "repl" "Starting REPL (model: ~a)" model)
