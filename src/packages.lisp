@@ -95,8 +95,9 @@
    #:message-tool-calls
    #:message-tool-call-id
    #:message-timestamp
-   #:message-thinking
-   #:system-message
+    #:message-thinking
+    #:message-thinking-signature
+    #:system-message
    #:user-message
    #:assistant-message
    #:tool-result-message
@@ -140,17 +141,10 @@
     #:tracker-cache-hit-rate
    ;; Provider construction
    #:make-anthropic-client
-   #:model-config
-   #:task-analyzer
-   #:complexity-analysis
-   #:make-task-analyzer
-   #:analyze-task-complexity
-   #:complexity-reasoning
-   #:complexity-score
-   #:complexity-factors
-   #:model-name
-   #:model-provider
-   #:enhanced-model-config
+    #:model-config
+    #:model-name
+    #:model-provider
+    #:enhanced-model-config
     #:model-release-date
     #:model-version
     #:model-context-window
@@ -447,8 +441,9 @@
                 #:message-content
                 #:message-tool-calls
                 #:message-tool-call-id
-                #:message-thinking
-                #:tool-call
+                 #:message-thinking
+                 #:message-thinking-signature
+                 #:tool-call
                 #:tool-call-id
                 #:tool-call-name
                 #:tool-call-arguments

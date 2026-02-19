@@ -50,10 +50,13 @@
                                         (tool-call-arguments tc))))
                           (message-tool-calls msg)))
             result))
-    ;; Include thinking if present
-    (when (message-thinking msg)
-      (push (cons "thinking" (message-thinking msg)) result))
-    result))
+     ;; Include thinking if present
+     (when (message-thinking msg)
+       (push (cons "thinking" (message-thinking msg)) result))
+     ;; Include thinking signature if present
+     (when (message-thinking-signature msg)
+       (push (cons "thinking_signature" (message-thinking-signature msg)) result))
+     result))
 
 (defun %tools-to-cache-alist (tools)
   "Normalize a tools schema list for cache key computation.

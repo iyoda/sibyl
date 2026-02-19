@@ -106,46 +106,54 @@
                   ("content" . ,(ensure-anthropic-content-blocks
                                  (message-content msg))))
                 api-msgs))
-         (:assistant
-          (if (message-tool-calls msg)
-              ;; Assistant with tool use
-              (let ((content-blocks nil))
-                 ;; Add thinking block first if present
+          (:assistant
+           (if (message-tool-calls msg)
+               ;; Assistant with tool use
+               (let ((content-blocks nil))
+                  ;; Add thinking block first if present (with signature for API compliance)
+                  (when (message-thinking msg)
+                    (push (if (message-thinking-signature msg)
+                              `(("type" . "thinking")
+                                ("thinking" . ,(message-thinking msg))
+                                ("signature" . ,(message-thinking-signature msg)))
+                              `(("type" . "thinking")
+                                ("thinking" . ,(message-thinking msg))))
+                          content-blocks))
+                  ;; Add text content blocks
+                  (setf content-blocks
+                        (nconc (nreverse content-blocks)
+                               (ensure-anthropic-content-blocks (message-content msg))))
+                  ;; Add tool_use blocks
+                  (dolist (tc (message-tool-calls msg))
+                    (setf content-blocks
+                          (nconc content-blocks
+                                 (list `(("type" . "tool_use")
+                                         ("id" . ,(tool-call-id tc))
+                                         ("name" . ,(tool-call-name tc))
+                                         ("input" . ,(or (tool-call-arguments tc)
+                                                         (make-hash-table
+                                                          :test 'equal))))))))
+                 (push `(("role" . "assistant")
+                         ("content" . ,content-blocks))
+                       api-msgs))
+               ;; Plain assistant message
+               (let ((content-blocks nil))
+                 ;; Add thinking block first if present (with signature for API compliance)
                  (when (message-thinking msg)
-                   (push `(("type" . "thinking")
-                           ("thinking" . ,(message-thinking msg)))
+                   (push (if (message-thinking-signature msg)
+                             `(("type" . "thinking")
+                               ("thinking" . ,(message-thinking msg))
+                               ("signature" . ,(message-thinking-signature msg)))
+                             `(("type" . "thinking")
+                               ("thinking" . ,(message-thinking msg))))
                          content-blocks))
                  ;; Add text content blocks
                  (setf content-blocks
                        (nconc (nreverse content-blocks)
                               (ensure-anthropic-content-blocks (message-content msg))))
-                 ;; Add tool_use blocks
-                 (dolist (tc (message-tool-calls msg))
-                   (setf content-blocks
-                         (nconc content-blocks
-                                (list `(("type" . "tool_use")
-                                        ("id" . ,(tool-call-id tc))
-                                        ("name" . ,(tool-call-name tc))
-                                        ("input" . ,(or (tool-call-arguments tc)
-                                                        (make-hash-table
-                                                         :test 'equal))))))))
-                (push `(("role" . "assistant")
-                        ("content" . ,content-blocks))
-                      api-msgs))
-              ;; Plain assistant message
-              (let ((content-blocks nil))
-                ;; Add thinking block first if present
-                (when (message-thinking msg)
-                  (push `(("type" . "thinking")
-                          ("thinking" . ,(message-thinking msg)))
-                        content-blocks))
-                ;; Add text content blocks
-                (setf content-blocks
-                      (nconc (nreverse content-blocks)
-                             (ensure-anthropic-content-blocks (message-content msg))))
-                (push `(("role" . "assistant")
-                        ("content" . ,content-blocks))
-                      api-msgs))))
+                 (push `(("role" . "assistant")
+                         ("content" . ,content-blocks))
+                       api-msgs))))
         (:tool
          (push `(("role" . "user")
                  ("content" . ((("type" . "tool_result")
@@ -253,38 +261,42 @@ Returns (values message usage-plist) where usage-plist may be nil."
                              raw-blocks
                              (coerce raw-blocks 'list)))
          (text-parts nil)
-         (thinking-parts nil)
-         (tool-calls nil)
-         ;; Extract usage
-         (usage-ht (gethash "usage" response))
-         (usage-plist (when usage-ht
-                        (list :input-tokens (or (gethash "input_tokens" usage-ht) 0)
-                              :output-tokens (or (gethash "output_tokens" usage-ht) 0)
-                              :cache-read-tokens (or (gethash "cache_read_input_tokens" usage-ht) 0)
-                              :cache-write-tokens (or (gethash "cache_creation_input_tokens" usage-ht) 0)))))
-    (when content-blocks
-      (loop for block in content-blocks
-            for block-type = (gethash "type" block)
-            do (cond
-                 ((string= block-type "text")
-                  (push (gethash "text" block) text-parts))
-                 ((string= block-type "thinking")
-                  (push (gethash "thinking" block) thinking-parts))
-                 ((string= block-type "tool_use")
-                  (push (make-tool-call
-                         :id (gethash "id" block)
-                         :name (gethash "name" block)
-                         :arguments (hash-to-alist
-                                     (gethash "input" block)))
-                        tool-calls)))))
-    (values
-     (assistant-message
-      (when text-parts
-        (string-join "" (nreverse text-parts)))
-      :tool-calls (nreverse tool-calls)
-      :thinking (when thinking-parts
-                  (string-join "" (nreverse thinking-parts))))
-     usage-plist)))
+          (thinking-parts nil)
+          (thinking-signature nil)
+          (tool-calls nil)
+          ;; Extract usage
+          (usage-ht (gethash "usage" response))
+          (usage-plist (when usage-ht
+                         (list :input-tokens (or (gethash "input_tokens" usage-ht) 0)
+                               :output-tokens (or (gethash "output_tokens" usage-ht) 0)
+                               :cache-read-tokens (or (gethash "cache_read_input_tokens" usage-ht) 0)
+                               :cache-write-tokens (or (gethash "cache_creation_input_tokens" usage-ht) 0)))))
+     (when content-blocks
+       (loop for block in content-blocks
+             for block-type = (gethash "type" block)
+             do (cond
+                  ((string= block-type "text")
+                   (push (gethash "text" block) text-parts))
+                  ((string= block-type "thinking")
+                   (push (gethash "thinking" block) thinking-parts)
+                   (let ((sig (gethash "signature" block)))
+                     (when sig (setf thinking-signature sig))))
+                  ((string= block-type "tool_use")
+                   (push (make-tool-call
+                          :id (gethash "id" block)
+                          :name (gethash "name" block)
+                          :arguments (hash-to-alist
+                                      (gethash "input" block)))
+                         tool-calls)))))
+     (values
+      (assistant-message
+       (when text-parts
+         (string-join "" (nreverse text-parts)))
+       :tool-calls (nreverse tool-calls)
+       :thinking (when thinking-parts
+                   (string-join "" (nreverse thinking-parts)))
+       :thinking-signature thinking-signature)
+      usage-plist)))
 
 (defun parse-anthropic-sse-events (event-type data-str)
   "Parse an Anthropic SSE event into a normalized plist.
@@ -298,14 +310,15 @@ Returns NIL when parsing fails."
                    :content-block-type (gethash "type" block)
                    :tool-id (gethash "id" block)
                    :tool-name (gethash "name" block))))
-          ((string= event-type "content_block_delta")
-           (let* ((delta (gethash "delta" data))
-                  (delta-type (gethash "type" delta)))
-             (list :event event-type
-                   :delta-type delta-type
-                   :text (gethash "text" delta)
-                   :thinking (gethash "thinking" delta)
-                   :partial-json (gethash "partial_json" delta))))
+           ((string= event-type "content_block_delta")
+            (let* ((delta (gethash "delta" data))
+                   (delta-type (gethash "type" delta)))
+              (list :event event-type
+                    :delta-type delta-type
+                    :text (gethash "text" delta)
+                    :thinking (gethash "thinking" delta)
+                    :signature (gethash "signature" delta)
+                    :partial-json (gethash "partial_json" delta))))
           ((string= event-type "content_block_stop")
            (list :event event-type))
           ((string= event-type "message_stop")
@@ -343,9 +356,10 @@ Returns a reconstructed assistant message."
                            (append `(("system" . ,system-with-cache)) body-with-tools)
                            body-with-tools))
            (final-body-with-thinking (apply-anthropic-thinking final-body (client-model client)))
-           (text-parts nil)
-           (thinking-parts nil)
-           (tool-calls nil)
+            (text-parts nil)
+            (thinking-parts nil)
+            (signature-parts nil)
+            (tool-calls nil)
            (current-tool-id nil)
            (current-tool-name nil)
            (current-tool-input-parts nil)
@@ -389,11 +403,15 @@ Returns a reconstructed assistant message."
                             (when text
                               (push text text-parts)
                               (funcall *streaming-text-callback* text))))
-                         ((string= delta-type "thinking_delta")
-                          (let ((thinking (getf parsed :thinking)))
-                            (when thinking
-                              (push thinking thinking-parts))))
-                         ((string= delta-type "input_json_delta")
+                          ((string= delta-type "thinking_delta")
+                           (let ((thinking (getf parsed :thinking)))
+                             (when thinking
+                               (push thinking thinking-parts))))
+                          ((string= delta-type "signature_delta")
+                           (let ((sig (getf parsed :signature)))
+                             (when sig
+                               (push sig signature-parts))))
+                          ((string= delta-type "input_json_delta")
                           (let ((partial (getf parsed :partial-json)))
                             (when partial
                               (push partial current-tool-input-parts)))))))
@@ -428,14 +446,16 @@ Returns a reconstructed assistant message."
                    (sibyl.cache:record-server-cache-tokens total-cache-tokens))
                (error (e)
                  (log-warn "llm" "Telemetry recording failed: ~a" e))))
-           (values
-           (assistant-message
-            (when text-parts
-              (string-join "" (nreverse text-parts)))
-            :tool-calls (nreverse tool-calls)
-            :thinking (when thinking-parts
-                        (string-join "" (nreverse thinking-parts))))
-           usage-plist))))))
+            (values
+            (assistant-message
+             (when text-parts
+               (string-join "" (nreverse text-parts)))
+             :tool-calls (nreverse tool-calls)
+             :thinking (when thinking-parts
+                         (string-join "" (nreverse thinking-parts)))
+             :thinking-signature (when signature-parts
+                                   (string-join "" (nreverse signature-parts))))
+            usage-plist))))))
 
 (defun anthropic-messages-url (client)
   "Build the messages endpoint URL. Appends ?beta=true for OAuth."

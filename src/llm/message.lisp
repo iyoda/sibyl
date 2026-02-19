@@ -28,16 +28,18 @@
   (tool-calls   nil      :type list)        ; list of tool-call structs
   (tool-call-id nil      :type (or string null))  ; for :tool role
   (timestamp    ""       :type string)
-  (thinking     nil      :type (or string null)))  ; extended thinking content
+  (thinking     nil      :type (or string null))   ; extended thinking content
+  (thinking-signature nil :type (or string null)))  ; signature for thinking block (required by Anthropic API)
 
-(defun make-message (&key role content tool-calls tool-call-id thinking)
+(defun make-message (&key role content tool-calls tool-call-id thinking thinking-signature)
   "Create a message with automatic timestamp."
   (%make-message :role role
                  :content content
                  :tool-calls tool-calls
                  :tool-call-id tool-call-id
                  :timestamp (timestamp-now)
-                 :thinking thinking))
+                 :thinking thinking
+                 :thinking-signature thinking-signature))
 
 ;;; Convenience constructors
 
@@ -52,9 +54,10 @@ The Anthropic API accepts both forms for the top-level \"system\" field."
   "Create a user message."
   (make-message :role :user :content content))
 
-(defun assistant-message (content &key tool-calls thinking)
+(defun assistant-message (content &key tool-calls thinking thinking-signature)
   "Create an assistant message, optionally with tool calls and extended thinking."
-  (make-message :role :assistant :content content :tool-calls tool-calls :thinking thinking))
+  (make-message :role :assistant :content content :tool-calls tool-calls
+                :thinking thinking :thinking-signature thinking-signature))
 
 (defun tool-result-message (tool-call-id content)
   "Create a tool result message."
