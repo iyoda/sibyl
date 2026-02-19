@@ -428,3 +428,50 @@
     (let ((guard-result (and sibyl.repl::*ignore-ctrl-j* nil))) ; nil = readline unavailable
       (is (null guard-result)
           "Guard should be NIL when readline is unavailable, preventing unbind-key call"))))
+
+;;; ============================================================
+;;; Interrupt handler decision logic tests
+;;; ============================================================
+
+(def-suite interrupt-handler-tests
+  :description "Tests for Ctrl+C interrupt handler decision logic"
+  :in sibyl-tests)
+
+(in-suite interrupt-handler-tests)
+
+(test interrupt-action-single-press-returns-hint
+  "Single press with large time gap returns :hint"
+  (let ((window (* 2 internal-time-units-per-second))
+        (now (* 100 internal-time-units-per-second))
+        (last-time 0))
+    (is (eq :hint (sibyl.repl::%interrupt-action now last-time window)))))
+
+(test interrupt-action-double-press-returns-exit
+  "Double press within 2-second window returns :exit"
+  (let* ((window (* 2 internal-time-units-per-second))
+         (last-time (* 50 internal-time-units-per-second))
+         (now (+ last-time (floor window 2))))
+    (is (eq :exit (sibyl.repl::%interrupt-action now last-time window)))))
+
+(test interrupt-action-timeout-expired-returns-hint
+  "Press after timeout expired (just over 2 seconds) returns :hint"
+  (let* ((window (* 2 internal-time-units-per-second))
+         (last-time (* 50 internal-time-units-per-second))
+         (now (+ last-time window 1)))
+    (is (eq :hint (sibyl.repl::%interrupt-action now last-time window)))))
+
+(test interrupt-action-first-ever-press-returns-hint
+  "First-ever press (last-time = 0, now = large) returns :hint"
+  (let ((window (* 2 internal-time-units-per-second))
+        (now (* 1000 internal-time-units-per-second))
+        (last-time 0))
+    (is (eq :hint (sibyl.repl::%interrupt-action now last-time window)))))
+
+(test interrupt-action-boundary-at-window-edge
+  "Press exactly at window boundary returns :hint (not :exit)"
+  (let* ((window (* 2 internal-time-units-per-second))
+         (last-time (* 50 internal-time-units-per-second))
+         (now (+ last-time window)))
+    (is (eq :hint (sibyl.repl::%interrupt-action now last-time window)))
+    ;; One tick before window boundary should return :exit
+    (is (eq :exit (sibyl.repl::%interrupt-action (1- now) last-time window)))))

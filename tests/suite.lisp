@@ -76,7 +76,8 @@
     anthropic-thinking-params-tests ;; Anthropic thinking params helper: pure logic, no I/O
     repl-display-tests              ;; REPL display formatting: pure logic, no I/O, no global state
     turn-footer-tests               ;; Turn footer display: pure logic, no I/O, no global state
-    session-summary-tests)          ;; Session summary display: pure logic, no I/O, no global state
+    session-summary-tests           ;; Session summary display: pure logic, no I/O, no global state
+    interrupt-handler-tests)        ;; Ctrl+C interrupt handler decision logic: pure logic, no I/O
   "Test suites in sibyl.tests package safe for parallel execution.
 Cross-package suites are resolved at runtime via %safe-suites-resolved.")
 

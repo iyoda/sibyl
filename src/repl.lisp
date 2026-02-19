@@ -1197,17 +1197,20 @@ Returns TEXT unchanged when it is not a string."
       (push sanitized *command-history*))
     sanitized))
 
+(defun %interrupt-action (now last-time window)
+  "Determine interrupt action: :exit for double-press within WINDOW, :hint otherwise."
+  (if (< (- now last-time) window)
+      :exit
+      :hint))
+
 #+sbcl
 (defun install-interrupt-handler (exit-fn)
   "Install SBCL-specific Ctrl+C handler using handler-bind around the REPL loop.
    EXIT-FN is called when a double Ctrl+C press is detected within 2 seconds.
    Returns a thunk that, when called, wraps BODY with the interrupt handler.
 
-   Single Ctrl+C: sets *CANCEL-REQUESTED* to T (for cooperative cancellation).
-   Double Ctrl+C within 2 seconds: calls EXIT-FN to leave the REPL.
-
-   NOTE: This function is defined for SBCL only (#+sbcl guard).
-   On non-SBCL implementations the REPL loop omits interrupt handling gracefully."
+   Single Ctrl+C at idle: prints hint message and throws to catch wrapper.
+   Double Ctrl+C within 2 seconds: calls EXIT-FN to leave the REPL."
   (lambda (body-thunk)
     (handler-bind
         ((sb-sys:interactive-interrupt
@@ -1215,17 +1218,14 @@ Returns TEXT unchanged when it is not a string."
             (declare (ignore c))
             (let ((now (get-internal-real-time))
                   (window (* 2 internal-time-units-per-second)))
-              (if (< (- now *last-interrupt-time*) window)
-                  ;; Double press — exit REPL
-                  (funcall exit-fn)
-                  ;; Single press — request cancellation
-                  (progn
-                    (setf *cancel-requested* t
-                          *last-interrupt-time* now)
-                    (format *standard-output*
-                            "~%[^C: LLM call cancelled. Press Ctrl+C again to exit.]~%")
-                    (force-output *standard-output*))))
-            (invoke-restart 'continue))))
+              (ecase (%interrupt-action now *last-interrupt-time* window)
+                (:exit (funcall exit-fn))
+                (:hint
+                 (setf *last-interrupt-time* now)
+                 (format *standard-output*
+                         "~%[Press Ctrl+C again to exit.]~%")
+                 (force-output *standard-output*)
+                 (throw 'idle-interrupt nil)))))))
       (funcall body-thunk))))
 
 (defun %select-system-prompt (client explicit-prompt)
@@ -1326,6 +1326,7 @@ Otherwise, use model-specific optimized prompt for Ollama models."
     (when (and (readline-available-p) (probe-file "~/.sibyl_history"))
       (funcall (find-symbol "READ-HISTORY" :cl-readline) "~/.sibyl_history"))
     (block repl-loop
+      (setf *last-interrupt-time* 0)
       (labels ((save-history ()
                  (when (readline-available-p)
                    (funcall (find-symbol "WRITE-HISTORY" :cl-readline) "~/.sibyl_history")))
@@ -1341,14 +1342,15 @@ Otherwise, use model-specific optimized prompt for Ollama models."
                    (return-from repl-loop))
                (repl-body ()
                    (tagbody
-                    next-iteration
-                      (let ((input (read-user-input)))
-                        ;; EOF
-                        (unless input
-                          (exit-repl "Goodbye."))
-                        ;; Empty input
-                        (when (string= (string-trim '(#\Space #\Tab) input) "")
-                          (go next-iteration))
+                     next-iteration
+                       (catch 'idle-interrupt
+                         (let ((input (read-user-input)))
+                           ;; EOF
+                           (unless input
+                             (exit-repl "Goodbye."))
+                           ;; Empty input
+                           (when (string= (string-trim '(#\Space #\Tab) input) "")
+                             (go next-iteration))
                         ;; REPL command
                         (let ((cmd (repl-command-p input)))
                           (when cmd
@@ -1502,8 +1504,9 @@ Otherwise, use model-specific optimized prompt for Ollama models."
                                        (sibyl.agent:agent-memory agent))
                                       (setf *cancel-requested* nil)
                                       (format t "~%[Cancelled]~%~%"))))
-                              (stop-current-spinner))))
-                      (go next-iteration))))
+                               (stop-current-spinner)))))
+                       (fresh-line)
+                       (go next-iteration))))
         #+sbcl
         (let ((wrapper (install-interrupt-handler (lambda () (exit-repl)))))
           (funcall wrapper #'repl-body))
