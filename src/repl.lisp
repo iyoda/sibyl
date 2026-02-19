@@ -1511,4 +1511,8 @@ Otherwise, use model-specific optimized prompt for Ollama models."
         (let ((wrapper (install-interrupt-handler (lambda () (exit-repl)))))
           (funcall wrapper #'repl-body))
         #-sbcl
-        (repl-body)))))
+        (repl-body)))
+    ;; After the REPL loop exits (via /quit, Ctrl+D, or double Ctrl+C),
+    ;; terminate the SBCL process so the user returns to the shell.
+    #+sbcl (sb-ext:exit :code 0)
+    #-sbcl (uiop:quit 0)))
