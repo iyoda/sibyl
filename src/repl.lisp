@@ -1266,16 +1266,26 @@ Otherwise, use model-specific optimized prompt for Ollama models."
                 (cons :on-error (make-on-error-hook))))
     (let ((*ignore-ctrl-j*
            (not (null (sibyl.config:config-value "repl.ignore-ctrl-j" nil)))))
-    ;; Ctrl+J filtering is handled at the application level by %strip-ctrl-j
-    ;; in read-user-input.  Kernel-level termios manipulation (INLCR+IGNCR)
-    ;; was removed because it also suppresses normal Enter (CR), making the
-    ;; REPL unusable.
-    ;; Auto-load cl-readline for line-editing support (history, Emacs keys).
-    ;; Must happen before %ensure-utf8-locale so readline sees the correct locale.
-    (%ensure-readline)
-    ;; SBCL starts with LC_ALL="C" — fix locale before any readline use
-    ;; so that mbrtowc/wcwidth correctly handle multibyte characters.
-    (%ensure-utf8-locale)
+    ;; When *ignore-ctrl-j* is T, Ctrl+J is unbound from accept-line at the
+    ;; readline level (see unbind-key call after %ensure-readline).
+    ;; The post-processing %strip-ctrl-j in read-user-input remains as
+    ;; defense-in-depth for the fallback read-line path (no cl-readline).
+     ;; Auto-load cl-readline for line-editing support (history, Emacs keys).
+     ;; Must happen before %ensure-utf8-locale so readline sees the correct locale.
+     (%ensure-readline)
+     ;; When *ignore-ctrl-j* is T, unbind Ctrl+J (linefeed) from accept-line
+     ;; at the readline level to prevent accidental input submission.
+     ;; The post-processing %strip-ctrl-j in read-user-input remains as
+     ;; defense-in-depth for the fallback read-line path (no cl-readline).
+     (when (and *ignore-ctrl-j* (readline-available-p))
+       (let ((result (funcall (find-symbol "UNBIND-KEY" :cl-readline)
+                              (code-char 10))))
+         (if result
+             (log-warn "repl" "Failed to unbind Ctrl+J in readline")
+             (log-info "repl" "Ctrl+J (linefeed) unbound from accept-line"))))
+     ;; SBCL starts with LC_ALL="C" — fix locale before any readline use
+     ;; so that mbrtowc/wcwidth correctly handle multibyte characters.
+     (%ensure-utf8-locale)
     (print-banner)
     ;; Pre-warm Ollama model — large models use blocking ensure-warm with
     ;; progress display; small models use lightweight background pre-warm.

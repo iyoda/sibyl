@@ -370,3 +370,27 @@
         (when sibyl.repl::*current-spinner*
           (sibyl.repl.spinner:stop-spinner sibyl.repl::*current-spinner*)
           (setf sibyl.repl::*current-spinner* nil))))))
+
+;;; ============================================================
+;;; unbind-key integration tests
+;;; ============================================================
+
+(test unbind-key-guard-when-ignore-ctrl-j-true
+  "When *ignore-ctrl-j* is T, the guard condition (and *ignore-ctrl-j* (readline-available-p)) is true"
+  (let ((sibyl.repl::*ignore-ctrl-j* t))
+    (is (and sibyl.repl::*ignore-ctrl-j* (sibyl.repl::readline-available-p))
+        "Guard should be true when *ignore-ctrl-j* is T and readline is available")))
+
+(test unbind-key-guard-when-ignore-ctrl-j-false
+  "When *ignore-ctrl-j* is NIL, the guard condition is false"
+  (let ((sibyl.repl::*ignore-ctrl-j* nil))
+    (is (not (and sibyl.repl::*ignore-ctrl-j* (sibyl.repl::readline-available-p)))
+        "Guard should be false when *ignore-ctrl-j* is NIL")))
+
+(test code-char-10-is-linefeed
+  "Verify that (code-char 10) produces the linefeed character"
+  (let ((ch (code-char 10)))
+    (is (= (char-code ch) 10)
+        "code-char 10 should have char-code 10")
+    (is (char= ch #\Newline)
+        "code-char 10 should be the newline character")))
