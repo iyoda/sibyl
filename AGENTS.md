@@ -30,9 +30,30 @@
 - Framework: FiveAM (see `tests/suite.lisp`).
 - Add tests alongside the feature area (e.g., `tests/tools-test.lisp` for tool changes).
 - Keep test names descriptive and scoped to behavior; ensure new modules are loaded by the test system.
-- Always define a per-file test suite and add it to `*safe-suites*` or `*unsafe-suites*` in `tests/suite.lisp`.
-  - SAFE: pure logic, no file I/O, no global state mutation, no external processes.
-  - UNSAFE: file I/O, global registries/state, random timing, network, or tool execution.
+
+### Suite Classification (MANDATORY)
+- **Always define a per-file test suite and add it to `*safe-suites*` or `*unsafe-suites*` in `tests/suite.lisp`.**
+- The `run-tests-parallel` validator will warn about unclassified suites.
+- Classification criteria:
+  - **SAFE**: pure logic, no file I/O, no global state mutation, no external processes.
+  - **UNSAFE**: file I/O, global registries/state, random timing, network, or tool execution.
+
+### Test Speed & Performance
+- Avoid unnecessary `sleep` calls — use them only when testing timing-sensitive behavior.
+- If a test doesn't need I/O, classify it as SAFE to enable parallel execution.
+- **Always mock external APIs** — never make real network calls in tests.
+- Test execution times are recorded in `tests/timing-history.json`; significant regressions trigger warnings.
+
+### Mock Patterns
+Use these established patterns for mocking:
+1. **CLOS override**: Define a mock class (e.g., `mock-llm-client` in `tests/cache-test.lisp`)
+2. **Factory functions**: Build mock responses (e.g., `%make-ollama-text-response` in `tests/ollama-test.lisp`)
+3. **Let-binding**: Temporarily rebind globals (e.g., `*self-assess-last-test-results*` in `tests/analysis-tools-test.lisp`)
+
+### Parallel Execution Constraints
+- SAFE suites run in parallel; UNSAFE suites run sequentially.
+- **Do NOT use cross-suite `depends-on`** — each suite must be independent.
+- If your test mutates global state, classify it as UNSAFE.
 
 ## Commit & Pull Request Guidelines
 - Commit messages follow a Conventional Commits pattern: `type(scope): summary` (e.g., `feat(plan): add planning module`).
