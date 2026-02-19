@@ -126,6 +126,29 @@
        (string/= name "")
        (not (char= (char name 0) #\%))))
 
+(defun %suggest-improvements-build-tests-index (tests-content)
+  "Build a hash-set of all whitespace/punctuation-delimited tokens in TESTS-CONTENT.
+Tokens are already lowercased (tests-content is pre-lowercased by the caller).
+Returns a hash-table with equal test for O(1) membership checks, replacing
+the O(n) repeated (search key tests-content) calls."
+  (let ((index (make-hash-table :test 'equal))
+        (len (length tests-content))
+        (start nil))
+    (flet ((flush (end)
+             (when (and start (> end start))
+               (setf (gethash (subseq tests-content start end) index) t)
+               (setf start nil))))
+      (dotimes (i len)
+        (let ((c (char tests-content i)))
+          (if (or (char= c #\Space) (char= c #\Newline) (char= c #\Tab)
+                  (char= c #\Return) (char= c #\() (char= c #\))
+                  (char= c #\") (char= c #\') (char= c #\,)
+                  (char= c #\;))
+              (flush i)
+              (unless start (setf start i)))))
+      (flush len))
+    index))
+
 (defun %suggest-improvements-parse-form (form-string)
   (let ((*read-eval* nil))
     (handler-case
@@ -258,57 +281,62 @@
                  "Public functions should document intent for maintainability and self-analysis.")
                  suggestions))))))
 
-(defun %suggest-improvements-missing-tests (definitions tests-content baseline-callers)
+(defun %suggest-improvements-missing-tests
+       (definitions tests-content baseline-callers)
+  ;; Build a one-time O(n) token index instead of O(n) per-symbol search calls.
   (let ((suggestions nil)
         (seen (make-hash-table :test 'equal))
+        (tests-index (%suggest-improvements-build-tests-index tests-content))
         (tool-count 0)
         (function-count 0))
     (dolist (definition definitions (nreverse suggestions))
-      (let* ((type (getf definition :type))
-             (name (getf definition :name)))
+      (let* ((type (getf definition :type)) (name (getf definition :name)))
         (when (and name (stringp name) (string/= name ""))
           (let ((key (string-downcase name)))
             (unless (gethash key seen)
               (setf (gethash key seen) t)
-              (when (not (search key tests-content))
+              (when (not (gethash key tests-index))
                 (cond
-                  ((and (string= type "deftool") (< tool-count 3))
-                   (incf tool-count)
-                   (push (%suggest-improvements-make-suggestion
-                          "test-coverage"
-                          (if (and baseline-callers (> baseline-callers 0))
+                 ((and (string= type "deftool") (< tool-count 3))
+                  (incf tool-count)
+                  (push
+                   (%suggest-improvements-make-suggestion "test-coverage"
+                    (if (and baseline-callers (> baseline-callers 0))
+                        "high"
+                        "medium")
+                    (format nil "Tool \"~a\" lacks explicit test coverage."
+                            name)
+                    (getf definition :file) (getf definition :start-line)
+                    "User-facing tools should have regression tests to avoid behavioral drift.")
+                   suggestions))
+                 ((and (member type '("defun" "defmethod") :test #'string=)
+                       (%suggest-improvements-public-name-p name)
+                       (< function-count 2))
+                  (incf function-count)
+                  (let* ((package
+                          (%suggest-improvements-package-for-file
+                           (getf definition :file)))
+                         (qualified
+                          (format nil "~a::~a" (string-downcase package) name))
+                         (callers
+                          (%suggest-improvements-callers-count qualified))
+                         (priority
+                          (if (and callers (> callers 0))
                               "high"
-                              "medium")
-                          (format nil "Tool \"~a\" lacks explicit test coverage." name)
-                          (getf definition :file)
-                          (getf definition :start-line)
-                          "User-facing tools should have regression tests to avoid behavioral drift.")
-                         suggestions))
-                  ((and (member type '("defun" "defmethod") :test #'string=)
-                        (%suggest-improvements-public-name-p name)
-                        (< function-count 2))
-                   (incf function-count)
-                   (let* ((package (%suggest-improvements-package-for-file
-                                    (getf definition :file)))
-                          (qualified (format nil "~a::~a"
-                                             (string-downcase package)
-                                             name))
-                          (callers (%suggest-improvements-callers-count qualified))
-                          (priority (if (and callers (> callers 0))
-                                        "high"
-                                        "medium"))
-                          (rationale (if (and callers (> callers 0))
-                                         (format nil "Function has ~a internal callers; missing tests increase regression risk."
-                                                 callers)
-                                         "Public functions benefit from explicit tests to lock in expectations.")))
-                     (push (%suggest-improvements-make-suggestion
-                            "test-coverage"
-                            priority
-                            (format nil "Function \"~a\" appears untested." name)
-                            (getf definition :file)
-                            (getf definition :start-line)
-                            rationale)
-                           suggestions))))))))))))
+                              "medium"))
+                         (rationale
+                          (if (and callers (> callers 0))
+                              (format nil
+                                      "Function has ~a internal callers; missing tests increase regression risk."
+                                      callers)
+                              "Public functions benefit from explicit tests to lock in expectations.")))
+                    (push
+                     (%suggest-improvements-make-suggestion "test-coverage"
+                      priority
+                      (format nil "Function \"~a\" appears untested." name)
+                      (getf definition :file) (getf definition :start-line)
+                      rationale)
+                     suggestions))))))))))))
 
 (defun %suggest-improvements-todo-comments (files)
   (let ((suggestions nil)

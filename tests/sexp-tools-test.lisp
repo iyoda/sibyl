@@ -1656,3 +1656,14 @@
                               (cons "content" "line1\nline2-modified\n")))))
            (is (search "```diff" result) "上書き時に diff ブロックが含まれる")))
     (when (probe-file path) (delete-file path)))))
+
+(test suggest-improvements-tests-index-fast
+  "Auto-generated test"
+  (let* ((content "foo bar baz quux some-function another-fn")
+       (index (sibyl.tools::%suggest-improvements-build-tests-index content)))
+  (is (hash-table-p index))
+  (is (gethash "foo" index))
+  (is (gethash "some-function" index))
+  (is (gethash "another-fn" index))
+  (is (not (gethash "missing" index)))
+  (is (not (gethash "quux2" index)))))
