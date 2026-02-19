@@ -474,14 +474,14 @@
                   :capability-score 9
                   :models (list
                            ;; Claude Sonnet 4.5 (latest Sonnet)
-                           (make-instance 'enhanced-model-config
-                                          :provider :anthropic
-                                          :model-name "claude-sonnet-4-6"
-                                          :release-date "2025-09-29"
-                                          :version "4.5"
-                                          :max-tokens 16384
-                                          :context-window 200000
-                                          :capabilities '(:advanced-reasoning :code-generation :analysis))
+                            (make-instance 'enhanced-model-config
+                                           :provider :anthropic
+                                           :model-name "claude-sonnet-4-6"
+                                           :release-date "2025-09-29"
+                                           :version "4.5"
+                                           :max-tokens 16384
+                                           :context-window 200000
+                                           :capabilities '(:advanced-reasoning :code-generation :analysis :thinking))
                            ;; GPT-5 Mini (latest balanced)
                            (make-instance 'enhanced-model-config
                                           :provider :openai
@@ -501,15 +501,15 @@
                   :capability-score 10
                   :models (list
                            ;; Claude Opus 4.6 (latest Opus)
-                           (make-instance 'enhanced-model-config
-                                          :provider :anthropic
-                                          :model-name "claude-opus-4-6"
-                                          :release-date "2026-02-05"
-                                          :version "4.6"
-                                          :max-tokens 32768
-                                          :context-window 200000
-                                          :temperature 0.1
-                                          :capabilities '(:deep-reasoning :code-generation :analysis :architecture))
+                            (make-instance 'enhanced-model-config
+                                           :provider :anthropic
+                                           :model-name "claude-opus-4-6"
+                                           :release-date "2026-02-05"
+                                           :version "4.6"
+                                           :max-tokens 32768
+                                           :context-window 200000
+                                           :temperature 0.1
+                                           :capabilities '(:deep-reasoning :code-generation :analysis :architecture :thinking))
                            ;; GPT-5.2 (latest high-capability)
                            (make-instance 'enhanced-model-config
                                           :provider :openai

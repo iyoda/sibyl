@@ -106,11 +106,20 @@
                   ("content" . ,(ensure-anthropic-content-blocks
                                  (message-content msg))))
                 api-msgs))
-        (:assistant
+         (:assistant
           (if (message-tool-calls msg)
               ;; Assistant with tool use
-              (let ((content-blocks
-                      (ensure-anthropic-content-blocks (message-content msg))))
+              (let ((content-blocks nil))
+                 ;; Add thinking block first if present
+                 (when (message-thinking msg)
+                   (push `(("type" . "thinking")
+                           ("thinking" . ,(message-thinking msg)))
+                         content-blocks))
+                 ;; Add text content blocks
+                 (setf content-blocks
+                       (nconc (nreverse content-blocks)
+                              (ensure-anthropic-content-blocks (message-content msg))))
+                 ;; Add tool_use blocks
                  (dolist (tc (message-tool-calls msg))
                    (setf content-blocks
                          (nconc content-blocks
@@ -124,10 +133,19 @@
                         ("content" . ,content-blocks))
                       api-msgs))
               ;; Plain assistant message
-              (push `(("role" . "assistant")
-                      ("content" . ,(ensure-anthropic-content-blocks
-                                     (message-content msg))))
-                    api-msgs)))
+              (let ((content-blocks nil))
+                ;; Add thinking block first if present
+                (when (message-thinking msg)
+                  (push `(("type" . "thinking")
+                          ("thinking" . ,(message-thinking msg)))
+                        content-blocks))
+                ;; Add text content blocks
+                (setf content-blocks
+                      (nconc (nreverse content-blocks)
+                             (ensure-anthropic-content-blocks (message-content msg))))
+                (push `(("role" . "assistant")
+                        ("content" . ,content-blocks))
+                      api-msgs))))
         (:tool
          (push `(("role" . "user")
                  ("content" . ((("type" . "tool_result")
@@ -185,6 +203,33 @@ Returns SYSTEM unchanged when caching is disabled or SYSTEM is not a list."
              (rest-blocks (rest system)))
         (cons cached-first rest-blocks))
       system))
+
+(defun anthropic-thinking-params (model-name)
+  "Return thinking params alist for supported Anthropic models, or NIL." 
+  (labels ((version-at-least-p (prefix min-version)
+             (when (and (stringp model-name)
+                        (<= (length prefix) (length model-name))
+                        (string= prefix (subseq model-name 0 (length prefix))))
+               (let* ((rest (subseq model-name (length prefix)))
+                      (dash (position #\- rest))
+                      (version-str (if dash (subseq rest 0 dash) rest))
+                      (version (ignore-errors (parse-integer version-str
+                                                             :junk-allowed t))))
+                 (and version (>= version min-version)))))
+           (model-is-opus-p ()
+             (version-at-least-p "claude-opus-4-" 6))
+           (model-supports-thinking-p ()
+             (or (model-is-opus-p)
+                 (version-at-least-p "claude-sonnet-4-" 6))))
+    (when (model-supports-thinking-p)
+      (let ((effort (or (config-value "thinking.effort") "high")))
+        (when (and (string= effort "max")
+                   (not (model-is-opus-p)))
+          (log-warn "llm" "effort=max only supported on Opus, downgrading to high for ~a"
+                    model-name)
+          (setf effort "high"))
+        (list (cons "thinking" '(("type" . "adaptive")))
+              (cons "output_config" `(("effort" . ,effort))))))))
 
 (defun parse-anthropic-response (response)
   "Parse Anthropic API response into a message struct.
@@ -255,7 +300,9 @@ Returns NIL when parsing fails."
            (let* ((message-obj (gethash "message" data))
                   (usage-obj (when message-obj (gethash "usage" message-obj))))
              (list :event event-type
-                   :input-tokens (when usage-obj (gethash "input_tokens" usage-obj)))))
+                   :input-tokens (when usage-obj (gethash "input_tokens" usage-obj))
+                   :cache-read-tokens (when usage-obj (gethash "cache_read_input_tokens" usage-obj))
+                   :cache-write-tokens (when usage-obj (gethash "cache_creation_input_tokens" usage-obj)))))
           ((string= event-type "message_delta")
            (let ((usage-obj (gethash "usage" data)))
              (list :event event-type
@@ -281,6 +328,10 @@ Returns a reconstructed assistant message."
            (final-body (if system-with-cache
                            (append `(("system" . ,system-with-cache)) body-with-tools)
                            body-with-tools))
+           (thinking-params (anthropic-thinking-params (client-model client)))
+           (final-body-with-thinking (if thinking-params
+                                         (append final-body thinking-params)
+                                         final-body))
            (text-parts nil)
            (thinking-parts nil)
            (tool-calls nil)
@@ -288,7 +339,9 @@ Returns a reconstructed assistant message."
            (current-tool-name nil)
            (current-tool-input-parts nil)
            (input-tokens-from-start nil)
-           (output-tokens-from-delta nil))
+           (output-tokens-from-delta nil)
+           (cache-read-tokens-from-start nil)
+           (cache-write-tokens-from-start nil))
       (labels ((finalize-tool-call ()
                  (when current-tool-name
                    (let* ((json-str (if current-tool-input-parts
@@ -311,7 +364,7 @@ Returns a reconstructed assistant message."
         (http-post-stream
          (anthropic-messages-url client)
          (anthropic-headers client)
-         (alist-to-hash final-body)
+         (alist-to-hash final-body-with-thinking)
          (lambda (event-type data-str)
            (let ((parsed (parse-anthropic-sse-events event-type data-str)))
              (when parsed
@@ -345,23 +398,33 @@ Returns a reconstructed assistant message."
                    ((string= parsed-event "content_block_stop")
                     (finalize-tool-call))
                    ((string= parsed-event "message_start")
-                    (setf input-tokens-from-start (getf parsed :input-tokens)))
+                    (setf input-tokens-from-start (getf parsed :input-tokens)
+                          cache-read-tokens-from-start (getf parsed :cache-read-tokens)
+                          cache-write-tokens-from-start (getf parsed :cache-write-tokens)))
                    ((string= parsed-event "message_delta")
                     (setf output-tokens-from-delta (getf parsed :output-tokens))))))))
          (lambda () nil))
-        (let* ((usage-plist (when (or input-tokens-from-start output-tokens-from-delta)
-                              (list :input-tokens (or input-tokens-from-start 0)
-                                    :output-tokens (or output-tokens-from-delta 0)
-                                    :cache-read-tokens 0
-                                    :cache-write-tokens 0))))
-          (values
+        (let ((usage-plist (when (or input-tokens-from-start output-tokens-from-delta)
+                             (list :input-tokens (or input-tokens-from-start 0)
+                                   :output-tokens (or output-tokens-from-delta 0)
+                                   :cache-read-tokens (or cache-read-tokens-from-start 0)
+                                    :cache-write-tokens (or cache-write-tokens-from-start 0)))))
+           ;; Record server-side cache tokens for telemetry
+           (when usage-plist
+             (handler-case
+                 (let ((total-cache-tokens (+ (or cache-read-tokens-from-start 0)
+                                              (or cache-write-tokens-from-start 0))))
+                   (sibyl.cache:record-server-cache-tokens total-cache-tokens))
+               (error (e)
+                 (log-warn "llm" "Telemetry recording failed: ~a" e))))
+           (values
            (assistant-message
             (when text-parts
               (string-join "" (nreverse text-parts)))
             :tool-calls (nreverse tool-calls)
             :thinking (when thinking-parts
                         (string-join "" (nreverse thinking-parts))))
-            usage-plist))))))
+           usage-plist))))))
 
 (defun anthropic-messages-url (client)
   "Build the messages endpoint URL. Appends ?beta=true for OAuth."
@@ -381,12 +444,15 @@ Returns (values message usage-plist)."
       (multiple-value-bind (system api-messages)
           (messages-to-anthropic-format messages)
         (let* ((system-with-cache (add-cache-control-to-system system))
-               (body `(("model" . ,(client-model client))
-                       ("max_tokens" . ,(client-max-tokens client))
-                       ("temperature" . ,(client-temperature client))
-                       ("messages" . ,api-messages))))
+                (body `(("model" . ,(client-model client))
+                        ("max_tokens" . ,(client-max-tokens client))
+                        ("temperature" . ,(client-temperature client))
+                        ("messages" . ,api-messages))))
           (when system-with-cache
             (push (cons "system" system-with-cache) body))
+          (let ((thinking-params (anthropic-thinking-params (client-model client))))
+            (when thinking-params
+              (setf body (append body thinking-params))))
           (let ((response (http-post-json
                            (anthropic-messages-url client)
                            (anthropic-headers client)
@@ -405,13 +471,16 @@ Returns (values message usage-plist)."
       (multiple-value-bind (system api-messages)
           (messages-to-anthropic-format messages)
         (let* ((system-with-cache (add-cache-control-to-system system))
-               (body `(("model" . ,(client-model client))
-                       ("max_tokens" . ,(client-max-tokens client))
-                       ("temperature" . ,(client-temperature client))
-                       ("messages" . ,api-messages)
-                       ("tools" . ,(tools-to-anthropic-format tools)))))
+                (body `(("model" . ,(client-model client))
+                        ("max_tokens" . ,(client-max-tokens client))
+                        ("temperature" . ,(client-temperature client))
+                        ("messages" . ,api-messages)
+                        ("tools" . ,(tools-to-anthropic-format tools)))))
           (when system-with-cache
             (push (cons "system" system-with-cache) body))
+          (let ((thinking-params (anthropic-thinking-params (client-model client))))
+            (when thinking-params
+              (setf body (append body thinking-params))))
           (let ((response (http-post-json
                            (anthropic-messages-url client)
                            (anthropic-headers client)

@@ -71,7 +71,11 @@
     openai-pricing-tests            ;; OpenAI pricing table: pure logic, no I/O
     openai-streaming-usage-tests    ;; OpenAI streaming usage extraction: pure logic, no I/O
     openai-cache-telemetry-tests    ;; OpenAI cache telemetry integration: pure logic, no I/O
-    openai-cache-integration-tests) ;; OpenAI cache integration with usage tracking: pure logic, no I/O
+    openai-cache-integration-tests  ;; OpenAI cache integration with usage tracking: pure logic, no I/O
+    anthropic-thinking-config-tests ;; Anthropic thinking config and capabilities: pure logic, no I/O
+    anthropic-streaming-cache-tests ;; Anthropic streaming cache token extraction: pure logic, no I/O
+    anthropic-thinking-serialization-tests ;; Anthropic thinking block serialization: pure logic, no I/O
+    anthropic-thinking-params-tests) ;; Anthropic thinking params helper: pure logic, no I/O
   "Test suites in sibyl.tests package safe for parallel execution.
 Cross-package suites are resolved at runtime via %safe-suites-resolved.")
 
@@ -190,7 +194,7 @@ and codebase-map caching for faster repeated scans."
       (dolist (test (funcall test-names-fn))
         (let ((obj (funcall get-test-fn test)))
           (when obj
-            (ignore-errors (setf (slot-value obj status-slot) :unknown)))))))))
+            (ignore-errors (setf (slot-value obj status-slot) :unknown))))))))
 
 (defvar *fiveam-reset-enabled* t
   "When T, reset suite statuses before running a suite in the parallel runner.")
@@ -199,12 +203,12 @@ and codebase-map caching for faster repeated scans."
   "Run SUITE in isolation with thread-local FiveAM globals.
 Uses *fiveam-reset-enabled* to control status reset before execution."
   (let* ((fiveam-pkg (find-package "IT.BESE.FIVEAM"))
-         (*test-dribble* (find-symbol "*TEST-DRIBBLE*" fiveam-pkg))
-         (*test-dribble-indent* (find-symbol "*TEST-DRIBBLE-INDENT*" fiveam-pkg))
-         (*print-names* (find-symbol "*PRINT-NAMES*" fiveam-pkg))
+         (test-dribble-sym (find-symbol "*TEST-DRIBBLE*" fiveam-pkg))
+         (test-dribble-indent-sym (find-symbol "*TEST-DRIBBLE-INDENT*" fiveam-pkg))
+         (print-names-sym (find-symbol "*PRINT-NAMES*" fiveam-pkg))
          (return-result-list-fn (find-symbol "RETURN-RESULT-LIST" fiveam-pkg))
          (%run-fn (find-symbol "%RUN" fiveam-pkg)))
-    (progv (list *test-dribble* *test-dribble-indent* *print-names*)
+    (progv (list test-dribble-sym test-dribble-indent-sym print-names-sym)
            (list (make-broadcast-stream)
                  (make-array 0 :element-type 'character :fill-pointer 0 :adjustable t)
                  nil)
@@ -217,10 +221,20 @@ Uses *fiveam-reset-enabled* to control status reset before execution."
   "Run SUITE collecting results with thread-safe serialization.
     Uses a lock to prevent concurrent FiveAM global state mutation."
   (bordeaux-threads:with-lock-held (*fiveam-run-lock*)
-    (when *fiveam-reset-enabled*
-      (%reset-suite-statuses suite))
-    (let ((it.bese.fiveam:*test-dribble* (make-broadcast-stream)))
-      (it.bese.fiveam:run suite))))
+    (let* ((fiveam-pkg (find-package "IT.BESE.FIVEAM"))
+           (test-dribble-sym (find-symbol "*TEST-DRIBBLE*" fiveam-pkg))
+           (test-dribble-indent-sym (find-symbol "*TEST-DRIBBLE-INDENT*" fiveam-pkg))
+           (print-names-sym (find-symbol "*PRINT-NAMES*" fiveam-pkg))
+           (return-result-list-fn (find-symbol "RETURN-RESULT-LIST" fiveam-pkg))
+           (%run-fn (find-symbol "%RUN" fiveam-pkg)))
+      (progv (list test-dribble-sym test-dribble-indent-sym print-names-sym)
+             (list (make-broadcast-stream)
+                   (make-array 0 :element-type 'character :fill-pointer 0 :adjustable t)
+                   nil)
+        (when *fiveam-reset-enabled*
+          (%reset-suite-statuses suite))
+        (funcall return-result-list-fn
+                 (lambda () (funcall %run-fn suite)))))))
 
 (defun %suite-run-order (suite)
   "Return the immediate test/suite names for SUITE, preserving duplicates." 
@@ -235,7 +249,58 @@ Uses *fiveam-reset-enabled* to control status reset before execution."
                (tests-bundle (safe-slot-value suite-obj tests-slot))
                (names (safe-slot-value tests-bundle names-slot)))
           (when names
-            (reverse (copy-list names)))))))
+            (reverse (copy-list names))))))))
+
+(defun %dedupe-suites (suites)
+  "Return SUITES with duplicates removed, preserving order."
+  (let ((seen (make-hash-table :test 'eq))
+        (result nil))
+    (dolist (suite suites (nreverse result))
+      (unless (gethash suite seen)
+        (setf (gethash suite seen) t)
+        (push suite result)))))
+
+(defun %suite-test-cases (suite)
+  "Return a list of test-case symbols reachable from SUITE."
+  (let* ((fiveam-pkg (find-package "IT.BESE.FIVEAM"))
+         (get-test-fn (find-symbol "GET-TEST" fiveam-pkg))
+         (suite-class (find-class (find-symbol "TEST-SUITE" fiveam-pkg) nil))
+         (test-case-class (find-class (find-symbol "TEST-CASE" fiveam-pkg) nil))
+         (name-slot (find-symbol "NAME" fiveam-pkg))
+         (tests-slot (find-symbol "TESTS" fiveam-pkg))
+         (bundle-tests-slot (find-symbol "TESTS" fiveam-pkg))
+         (acc (make-hash-table :test 'eq)))
+    (labels ((safe-slot-value (obj slot)
+               (when slot (ignore-errors (slot-value obj slot))))
+             (bundle-tests (bundle)
+               (safe-slot-value bundle bundle-tests-slot))
+             (suite-tests (suite-object)
+               (let ((tests-bundle (safe-slot-value suite-object tests-slot)))
+                 (cond
+                   ((hash-table-p tests-bundle) tests-bundle)
+                   (tests-bundle (bundle-tests tests-bundle))
+                   (t nil))))
+             (add-test (test-obj)
+               (let ((resolved (cond
+                                 ((symbolp test-obj)
+                                  (and get-test-fn (funcall get-test-fn test-obj)))
+                                 (t test-obj))))
+                 (when resolved
+                   (cond
+                     ((and test-case-class (typep resolved test-case-class))
+                      (let ((name (safe-slot-value resolved name-slot)))
+                        (when name
+                          (setf (gethash name acc) t))))
+                     ((and suite-class (typep resolved suite-class))
+                      (let ((tests (suite-tests resolved)))
+                        (when tests
+                          (maphash (lambda (name nested-obj)
+                                     (declare (ignore name))
+                                     (add-test nested-obj))
+                                   tests)))))))))
+      (when (and get-test-fn suite)
+        (add-test (funcall get-test-fn suite))))
+    (loop for key being the hash-keys of acc collect key)))
 
 (defun %time-call (thunk)
   "Call THUNK, returning (values result elapsed-seconds).
@@ -444,83 +509,88 @@ THUNK is a zero-argument function. elapsed-seconds is a float."
             (n-safe (length safe-run-vector))
             (safe-results (make-array n-safe :initial-element nil))
             (safe-error-output (make-array n-safe :initial-element ""))
-            (safe-first (make-hash-table :test 'eq))
-            (safe-parallel-indices nil)
-            (safe-duplicate-indices nil)
             (threads nil)
             (safe-wall-clock 0.0)
             (unsafe-wall-clock 0.0)
             (unsafe-timed nil))
         ;; Reset all test statuses once, like fiveam:run
         (%reset-all-statuses)
-        (let ((*fiveam-reset-enabled* nil))
-          (loop for i from 0 below n-safe
-                for suite = (aref safe-run-vector i)
-                do (if (gethash suite safe-first)
-                       (push i safe-duplicate-indices)
-                       (progn
-                         (setf (gethash suite safe-first) t)
-                         (push i safe-parallel-indices))))
-          (setf safe-parallel-indices (nreverse safe-parallel-indices)
-                safe-duplicate-indices (nreverse safe-duplicate-indices))
-          (multiple-value-bind (ignored elapsed)
-              (%time-call
-               (lambda ()
-                 (setf threads
-                       (loop for i in safe-parallel-indices
-                             for suite = (aref safe-run-vector i)
-                             collect
-                             (let ((suite-capture suite)
-                                   (i-capture i))
-                               (bt:make-thread
-                                (lambda ()
-                                  (let ((error-stream (make-string-output-stream)))
-                                    (unwind-protect
-                                         (let ((*error-output* error-stream)
-                                               (sibyl.tools:*codebase-map-cache*
-                                                 (when sibyl.tools:*codebase-map-cache*
-                                                   (make-hash-table :test 'equal))))
-                                           (handler-case
-                                               (multiple-value-bind (results elapsed)
-                                                   (%time-call (lambda () (%run-suite-isolated suite-capture)))
-                                                 (setf (aref safe-results i-capture) (cons results elapsed)))
-                                             (error (e)
-                                               (format *error-output* "~%[parallel-runner] Error in ~a: ~a~%"
-                                                       suite-capture e)
-                                               (setf (aref safe-results i-capture) (cons nil 0.0)))))
-                                      (setf (aref safe-error-output i-capture)
-                                            (get-output-stream-string error-stream)))))
-                                :name (format nil "test-~a" suite-capture)))))
+        (let* ((*fiveam-reset-enabled* t)
+               (suite-test-cache (make-hash-table :test 'eq)))
+          (labels ((suite-test-set (suite)
+                     (or (gethash suite suite-test-cache)
+                         (let ((set (make-hash-table :test 'eq)))
+                           (dolist (name (%suite-test-cases suite))
+                             (setf (gethash name set) t))
+                           (setf (gethash suite suite-test-cache) set))))
+                   (suite-overlaps-p (suite-set batch-set)
+                     (let ((overlap nil))
+                       (when suite-set
+                         (maphash (lambda (name present)
+                                    (declare (ignore present))
+                                    (when (gethash name batch-set)
+                                      (setf overlap t)))
+                                  suite-set))
+                       overlap))
+                   (merge-suite-set (suite-set batch-set)
+                     (when suite-set
+                       (maphash (lambda (name present)
+                                  (declare (ignore present))
+                                  (setf (gethash name batch-set) t))
+                                suite-set))))
+            (setf safe-wall-clock
+                  (nth-value
+                   1
+                   (%time-call
+                    (lambda ()
+                      (let ((i 0))
+                        (loop while (< i n-safe)
+                              do (let ((batch nil)
+                                       (batch-set (make-hash-table :test 'eq)))
+                                   (loop while (< i n-safe)
+                                         for suite = (aref safe-run-vector i)
+                                         for suite-set = (suite-test-set suite)
+                                         do (if (and batch (suite-overlaps-p suite-set batch-set))
+                                                (return)
+                                                (progn
+                                                  (push i batch)
+                                                  (merge-suite-set suite-set batch-set)
+                                                  (incf i))))
+                                   (setf threads
+                                         (loop for i in (nreverse batch)
+                                               for suite = (aref safe-run-vector i)
+                                               collect
+                                               (let ((suite-capture suite)
+                                                     (i-capture i))
+                                                 (bt:make-thread
+                                                  (lambda ()
+                                                    (let ((error-stream (make-string-output-stream)))
+                                                      (unwind-protect
+                                                           (let ((*error-output* error-stream)
+                                                                 (sibyl.tools:*codebase-map-cache*
+                                                                   (when sibyl.tools:*codebase-map-cache*
+                                                                     (make-hash-table :test 'equal))))
+                                                             (handler-case
+                                                                 (multiple-value-bind (results elapsed)
+                                                                     (%time-call (lambda () (%run-suite-isolated suite-capture)))
+                                                                   (setf (aref safe-results i-capture) (cons results elapsed)))
+                                                               (error (e)
+                                                                 (format *error-output* "~%[parallel-runner] Error in ~a: ~a~%"
+                                                                         suite-capture e)
+                                                                 (setf (aref safe-results i-capture) (cons nil 0.0)))))
+                                                        (setf (aref safe-error-output i-capture)
+                                                              (get-output-stream-string error-stream)))))
+                                                  :name (format nil "test-~a" suite-capture))))
+                                    )
 
-                 ;; Wait for all parallel threads to complete
-                 (dolist (thread threads)
-                   (bt:join-thread thread))
+                                    (dolist (thread threads)
+                                      (bt:join-thread thread)))
 
-                 ;; Run duplicate SAFE suite entries sequentially (no reset)
-                 (dolist (i safe-duplicate-indices)
-                   (let ((suite (aref safe-run-vector i))
-                         (error-stream (make-string-output-stream)))
-                     (unwind-protect
-                          (let ((*error-output* error-stream))
-                            (handler-case
-                                (multiple-value-bind (results elapsed)
-                                    (%time-call (lambda () (%run-suite-isolated suite)))
-                                  (setf (aref safe-results i) (cons results elapsed)))
-                              (error (e)
-                                (format *error-output* "~%[parallel-runner] Error in ~a: ~a~%"
-                                        suite e)
-                                (setf (aref safe-results i) (cons nil 0.0)))))
-                       (setf (aref safe-error-output i)
-                             (get-output-stream-string error-stream)))))
-
-                 ;; Flush per-thread error output in a deterministic order
-                 (loop for i from 0 below n-safe
-                       for output = (aref safe-error-output i)
-                       unless (or (null output) (string= output ""))
-                         do (write-string output *error-output*)
-                            (finish-output *error-output*))))
-            (declare (ignore ignored))
-            (setf safe-wall-clock elapsed))
+                        (loop for i from 0 below n-safe
+                              for output = (aref safe-error-output i)
+                              unless (or (null output) (string= output ""))
+                                do (write-string output *error-output*)
+                                   (finish-output *error-output*))))))))
 
           ;; Sequential phase: run UNSAFE suites
           (multiple-value-bind (timed elapsed)
@@ -540,9 +610,9 @@ THUNK is a zero-argument function. elapsed-seconds is a float."
             (setf unsafe-timed timed)
             (setf unsafe-wall-clock elapsed)))
 
-        (let* ((unsafe-results (loop for cell in unsafe-timed nconc (car cell)))
+        (let* ((unsafe-results (loop for cell in unsafe-timed append (car cell)))
                (final-results (append (loop for i from 0 below n-safe
-                                            nconc (car (aref safe-results i)))
+                                            append (car (aref safe-results i)))
                                       unsafe-results)))
 
         ;; Print summary (like fiveam:run! does)
@@ -597,4 +667,4 @@ THUNK is a zero-argument function. elapsed-seconds is a float."
             (error (e)
               (format *error-output* "~%[parallel-runner] WARNING: Timing history error: ~a~%" e))))
 
-        final-results)))))
+        final-results))))))

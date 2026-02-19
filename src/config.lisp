@@ -17,6 +17,10 @@
       (gethash key *config*)
     (if found-p val default)))
 
+(defun get-config (key &optional default)
+  "Retrieve a configuration value by KEY. Convenience wrapper for config-value."
+  (config-value key default))
+
 (defun (setf config-value) (value key)
   "Sets the configuration value for KEY to VALUE in *config*.
 
@@ -112,7 +116,9 @@ Convenience function equivalent to (setf (config-value KEY) VALUE)."
                      ("ollama.num-predict" . 8192)
                      ("ollama.keep-alive"  . "30m")
                      ;; REPL defaults
-                     ("repl.ignore-ctrl-j" . nil))))
+                     ("repl.ignore-ctrl-j" . nil)
+                     ;; Thinking defaults
+                     ("thinking.effort" . "high"))))
     (dolist (pair defaults)
       (unless (config-value (car pair))
         (setf (config-value (car pair)) (cdr pair))))))

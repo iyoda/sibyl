@@ -43,6 +43,7 @@
    #:*config*
    #:*default-config-path*
    #:load-config
+   #:get-config
    #:config-value
    #:config-set
    #:with-config))
@@ -521,7 +522,7 @@
 (defpackage #:sibyl
   (:use #:cl)
   (:import-from #:sibyl.config
-                #:load-config #:config-value #:config-set #:with-config)
+                #:load-config #:get-config #:config-value #:config-set #:with-config)
    (:import-from #:sibyl.llm
                   #:make-anthropic-client #:make-openai-client
                   #:make-ollama-client #:ollama-client
@@ -539,6 +540,7 @@
   (:export
    ;; Top-level API
    #:load-config
+   #:get-config
    #:config-value
    #:config-set
    #:with-config
