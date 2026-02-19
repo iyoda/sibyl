@@ -78,16 +78,16 @@ Transform the REPL from a minimal text interface into a rich, informative develo
 - Updated `tests/suite.lisp` — New suite classification
 
 ### Definition of Done
-- [ ] All existing tests pass (`asdf:test-system :sibyl` → T)
-- [ ] All new display tests pass
-- [ ] Per-turn footer shows model, time, tokens, cost
-- [ ] Tool execution shows timing and result size on completion
-- [ ] Cache savings visible when cache tokens present
-- [ ] Thinking tokens visible when thinking used
-- [ ] Context window percentage visible
-- [ ] `/tokens` shows rich session summary with costs
-- [ ] All UI strings in English
-- [ ] `*use-colors*` = nil produces clean plain-text fallback
+- [x] All existing tests pass (`asdf:test-system :sibyl` → T)
+- [x] All new display tests pass
+- [x] Per-turn footer shows model, time, tokens, cost
+- [x] Tool execution shows timing and result size on completion
+- [x] Cache savings visible when cache tokens present
+- [x] Thinking tokens visible when thinking used
+- [x] Context window percentage visible
+- [x] `/tokens` shows rich session summary with costs
+- [x] All UI strings in English
+- [x] `*use-colors*` = nil produces clean plain-text fallback
 
 ### Must Have
 - Per-turn cost display using `estimate-cost-usd`
@@ -193,7 +193,7 @@ Wave 3 (After Wave 2 — Integration):
 
 ## TODOs
 
-- [ ] 1. Display Infrastructure Module
+- [x] 1. Display Infrastructure Module
 
   **What to do**:
 
@@ -304,7 +304,7 @@ Wave 3 (After Wave 2 — Integration):
 
 ---
 
-- [ ] 2. Tool Timing + on-tool-result Hook
+- [x] 2. Tool Timing + on-tool-result Hook
 
   **What to do**:
 
@@ -405,7 +405,7 @@ Wave 3 (After Wave 2 — Integration):
 
 ---
 
-- [ ] 3. Token Tracker Enhancements
+- [x] 3. Token Tracker Enhancements
 
   **What to do**:
 
@@ -511,7 +511,7 @@ Wave 3 (After Wave 2 — Integration):
 
 ---
 
-- [ ] 4. Tool Display Overhaul + English Strings
+- [x] 4. Tool Display Overhaul + English Strings
 
   **What to do**:
 
@@ -637,7 +637,7 @@ Wave 3 (After Wave 2 — Integration):
 
 ---
 
-- [ ] 5. Per-Turn Footer Redesign
+- [x] 5. Per-Turn Footer Redesign
 
   **What to do**:
 
@@ -769,7 +769,7 @@ Wave 3 (After Wave 2 — Integration):
 
 ---
 
-- [ ] 6. Session Summary Enhancement
+- [x] 6. Session Summary Enhancement
 
   **What to do**:
 
@@ -889,7 +889,7 @@ Wave 3 (After Wave 2 — Integration):
 
 ---
 
-- [ ] 7. Integration Verification + Context Window
+- [x] 7. Integration Verification + Context Window
 
   **What to do**:
 
@@ -1063,13 +1063,13 @@ sbcl --eval '(ql:quickload :sibyl :silent t)' --eval '(format t "~a" (find-symbo
 ```
 
 ### Final Checklist
-- [ ] All "Must Have" present
-- [ ] All "Must NOT Have" absent
-- [ ] All tests pass (existing + new)
-- [ ] No Japanese in user-visible strings
-- [ ] Plain-text fallback works (*use-colors* nil)
-- [ ] Cost displayed per-turn and in session summary
-- [ ] Cache savings visible when cache tokens present
-- [ ] Tool timing and result feedback visible
-- [ ] Context window percentage visible
-- [ ] `/tokens` shows rich summary with cost
+- [x] All "Must Have" present
+- [x] All "Must NOT Have" absent
+- [x] All tests pass (existing + new)
+- [x] No Japanese in user-visible strings
+- [x] Plain-text fallback works (*use-colors* nil)
+- [x] Cost displayed per-turn and in session summary
+- [x] Cache savings visible when cache tokens present
+- [x] Tool timing and result feedback visible
+- [x] Context window percentage visible
+- [x] `/tokens` shows rich summary with cost

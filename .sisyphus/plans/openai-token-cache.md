@@ -763,10 +763,10 @@ Parallel Speedup: ~35% faster than sequential
 ```
 
 ### Final Checklist
-- [ ] All "Must Have" present
-- [ ] All "Must NOT Have" absent
-- [ ] All tests pass (`(asdf:test-system :sibyl)`)
-- [ ] New suites classified in suite.lisp
-- [ ] New test file registered in sibyl.asd
-- [ ] No Anthropic code modified
-- [ ] No pricing table schema changes
+- [x] All "Must Have" present
+- [x] All "Must NOT Have" absent
+- [x] All tests pass (`(asdf:test-system :sibyl)`)
+- [x] New suites classified in suite.lisp
+- [x] New test file registered in sibyl.asd
+- [x] No Anthropic code modified
+- [x] No pricing table schema changes
