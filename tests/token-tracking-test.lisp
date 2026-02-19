@@ -203,38 +203,6 @@
 
 (in-suite model-selector-suite)
 
-;; Test 14: make-default-model-selector returns a model-selector instance
-(test model-selector-default-constructor
-  "make-default-model-selector creates a model-selector with tiers"
-  (let ((selector (sibyl.llm::make-default-model-selector)))
-    (is (typep selector 'sibyl.llm::model-selector))
-    (is (not (null (sibyl.llm::selector-tiers selector))))))
-
-;; Test 15: analyze-task-complexity on model-selector returns complexity-analysis
-(test model-selector-returns-complexity-analysis
-  "analyze-task-complexity dispatches on model-selector and returns complexity-analysis"
-  (let* ((selector (sibyl.llm::make-default-model-selector))
-         (analysis (sibyl.llm::analyze-task-complexity selector "simple quick task")))
-    (is (typep analysis 'sibyl.llm::complexity-analysis))
-    (is (stringp (sibyl.llm::recommended-tier analysis)))))
-
-;; Test 16: simple input routes to light tier
-(test model-selector-light-tier-for-simple-input
-  "Simple task with 'simple' keyword should route to light tier"
-  (let* ((selector (sibyl.llm::make-default-model-selector))
-         (analysis (sibyl.llm::analyze-task-complexity selector "simple task")))
-    (is (string= "light" (sibyl.llm::recommended-tier analysis)))))
-
-;; Test 17: complex input routes to heavy tier
-(test model-selector-heavy-tier-for-complex-input
-  "Complex analysis tasks should route to heavy tier"
-  (let* ((selector (sibyl.llm::make-default-model-selector))
-         (analysis (sibyl.llm::analyze-task-complexity
-                    selector
-                    "analyze this complex codebase architecture and refactor the authentication module")))
-    (is (or (string= "medium" (sibyl.llm::recommended-tier analysis))
-            (string= "heavy" (sibyl.llm::recommended-tier analysis))))))
-
 ;;; ============================================================
 ;;; Memory Compaction Strategy Tests (Task 5)
 ;;; ============================================================

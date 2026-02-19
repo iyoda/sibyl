@@ -129,15 +129,6 @@
 (defvar *current-coordinator* nil
   "Current active agent coordinator")
 
-(defvar *global-model-selector* nil
-  "Global model selector instance")
-
-(defun ensure-global-model-selector ()
-  "Ensure global model selector is initialized"
-  (unless *global-model-selector*
-    (setf *global-model-selector* (sibyl.llm:make-model-selector)))
-  *global-model-selector*)
-
 (deftool "create-agent-team"
     (:description "Create a team of specialized agents for collaborative work"
      :category :general
@@ -173,47 +164,7 @@
                       (format nil "~a (~a)" 
                               (sibyl.agent:agent-name agent)
                               (sibyl.agent:role-name (sibyl.agent:agent-role agent))))
-                    (sibyl.agent:list-agents coordinator)))))
-
-(deftool "create-adaptive-agent-team"
-    (:description "Create a team of adaptive agents that select models based on task complexity"
-     :category :general
-     :parameters ((:name "roles" :type "string" :required t 
-                   :description "Comma-separated list of agent roles (coder,tester,architect,coordinator)")
-                  (:name "strategy" :type "string" :required nil
-                   :description "Coordination strategy: sequential, parallel, or hierarchical")
-                  (:name "auto-select" :type "string" :required nil
-                   :description "Enable automatic model selection (true/false, default: true)")))
-  (let* ((role-names (mapcar (lambda (s) (string-trim '(#\Space #\Tab) s))
-                             (cl-ppcre:split "," (getf args :roles))))
-         (strategy-keyword (if (getf args :strategy)
-                              (intern (string-upcase (getf args :strategy)) :keyword)
-                              :sequential))
-         (auto-select (not (string-equal (getf args :auto-select) "false")))
-         (coordinator (sibyl.agent:make-agent-coordinator :strategy strategy-keyword))
-         (model-selector (sibyl.llm:make-model-selector :auto-select auto-select)))
-    
-    ;; Create adaptive agents for each role
-    (dolist (role-name role-names)
-      (let ((role (find role-name sibyl.agent:*default-roles* 
-                        :key #'sibyl.agent:role-name :test #'string-equal)))
-        (when role
-          (let ((agent (make-specialized-agent-adaptive role :model-selector model-selector)))
-            (sibyl.agent:add-agent coordinator agent)))))
-    
-    ;; Set as current coordinator
-    (setf *current-coordinator* coordinator)
-    (setf *global-model-selector* model-selector)
-    
-    (format nil "Created adaptive agent team with ~a agents using ~a strategy:~%~{- ~a~%~}~%Model selection: ~a"
-            (length (sibyl.agent:list-agents coordinator))
-            strategy-keyword
-            (mapcar (lambda (agent) 
-                      (format nil "~a (~a)" 
-                              (sibyl.agent:agent-name agent)
-                              (sibyl.agent:role-name (sibyl.agent:agent-role agent))))
-                    (sibyl.agent:list-agents coordinator))
-            (if auto-select "Automatic" "Manual"))))
+                     (sibyl.agent:list-agents coordinator)))))
 
 (deftool "delegate-task"
     (:description "Delegate a task to a specific agent in the team"

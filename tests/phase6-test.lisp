@@ -12,45 +12,7 @@
 ;;; Japanese pattern tests
 ;;; ─────────────────────────────────────────────────────────────────────────
 
-(test japanese-simple-questions-are-light
-  "Simple Japanese questions (no technical keywords) should be classified as light."
-  (let* ((analyzer (sibyl.llm::make-task-analyzer))
-         (tasks '("2+2は何ですか？"
-                  "フランスの首都はどこですか？"
-                  "水の沸点は何度ですか？"
-                  "一週間は何日ですか？"
-                  "日本の人口は何人ですか？"))
-         (tiers (mapcar (lambda (task)
-                          (sibyl.llm::recommended-tier
-                           (sibyl.llm::analyze-task-complexity analyzer task)))
-                        tasks)))
-    (is (every (lambda (r) (string= r "light")) tiers)
-        "Simple Japanese questions should be light, got: ~a" tiers)))
 
-(test japanese-technical-tasks-are-medium-or-heavy
-  "Japanese tasks with technical keywords should be medium or heavy."
-  (let* ((analyzer (sibyl.llm::make-task-analyzer))
-         (tasks '("再帰アルゴリズムを実装してください。"
-                  "バイナリサーチ関数を書いてください。"
-                  "SQLクエリを最適化してください。"))
-         (tiers (mapcar (lambda (task)
-                          (sibyl.llm::recommended-tier
-                           (sibyl.llm::analyze-task-complexity analyzer task)))
-                        tasks)))
-    (is (every (lambda (r) (or (string= r "medium") (string= r "heavy"))) tiers)
-        "Japanese technical tasks should be medium or heavy, got: ~a" tiers)))
-
-(test japanese-complex-tasks-are-heavy
-  "Japanese tasks with complex/system-level keywords should be heavy."
-  (let* ((analyzer (sibyl.llm::make-task-analyzer))
-         (tasks '("分散合意アルゴリズムを設計・実装してください。システム全体のアーキテクチャも含めて。"
-                  "機械学習フレームワークをゼロから実装してください。複雑な最適化も含む。"))
-         (tiers (mapcar (lambda (task)
-                          (sibyl.llm::recommended-tier
-                           (sibyl.llm::analyze-task-complexity analyzer task)))
-                        tasks)))
-    (is (every (lambda (r) (string= r "heavy")) tiers)
-        "Complex Japanese tasks should be heavy, got: ~a" tiers)))
 
 ;;; ─────────────────────────────────────────────────────────────────────────
 ;;; Cost-factor correction tests

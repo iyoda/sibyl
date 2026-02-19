@@ -304,21 +304,3 @@ the completed-ids accumulator."
   ;; For now, return a placeholder result
   (format nil "Task '~a' executed by ~a" (task-description task) (agent-name agent)))
 
-;; Enhanced specialized agent with adaptive model selection
-(defmethod make-specialized-agent-adaptive ((role agent-role) &key (model-selector (sibyl.llm:make-model-selector)))
-  "Create a specialized agent with adaptive model selection capabilities"
-  (let* ((agent-name (format nil "~a-agent-~a" (role-name role) (random 1000000000)))
-         (system-prompt (format nil "~a~%~%Role: ~a~%~a~%~%Available tools: ~{~a~^, ~}"
-                                (role-system-prompt role)
-                                (role-name role)
-                                (role-description role)
-                                (role-tools role)))
-         (agent (sibyl.llm:make-adaptive-agent :model-selector model-selector
-                                               :name agent-name
-                                               :system-prompt system-prompt)))
-    
-    ;; Set the role
-    (setf (agent-role agent) role)
-    (setf (agent-status agent) :idle)
-    
-    agent))

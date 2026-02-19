@@ -262,14 +262,11 @@
     
     ;; Third line (conditional): Cache info
     (when (plusp cache-read-tokens)
-      ;; Calculate cache savings
-      (let* ((savings-result (sibyl.llm:decompose-savings
-                             model
-                             :input-tokens input-tokens
-                             :output-tokens output-tokens
-                             :cache-write-tokens cache-write-tokens
-                             :cache-read-tokens cache-read-tokens))
-             (cache-savings (getf savings-result :cache-savings-usd)))
+      ;; Calculate cache savings: difference between cache-read cost and regular input cost
+      (let* ((pricing (sibyl.llm:lookup-model-pricing model))
+             (price-input (getf pricing :input 3.00))
+             (price-cr (getf pricing :cache-read 0.30))
+             (cache-savings (* cache-read-tokens (/ (- price-input price-cr) 1000000.0d0))))
         (format stream " Cache   Read ")
         (format-tokens-compact cache-read-tokens stream)
         ;; Only show savings if positive
@@ -321,14 +318,11 @@
          (total-cost        (sibyl.llm::token-tracker-cost-usd tracker))
          ;; Server cache hit rate
          (server-hit-rate   (sibyl.llm::tracker-cache-hit-rate tracker))
-         ;; Cache savings calculation
-         (savings-result    (sibyl.llm:decompose-savings
-                            model-name
-                            :input-tokens input-tokens
-                            :output-tokens output-tokens
-                            :cache-write-tokens cache-write-tokens
-                            :cache-read-tokens cache-read-tokens))
-         (cache-savings     (getf savings-result :cache-savings-usd))
+         ;; Cache savings calculation: difference between cache-read cost and regular input cost
+         (pricing           (sibyl.llm:lookup-model-pricing model-name))
+         (price-input       (getf pricing :input 3.00))
+         (price-cr          (getf pricing :cache-read 0.30))
+         (cache-savings     (* cache-read-tokens (/ (- price-input price-cr) 1000000.0d0)))
          ;; Response cache stats
          (rcache-stats      (sibyl.cache:response-cache-stats))
          (cache-entries     (if rcache-stats (getf rcache-stats :size) 0))

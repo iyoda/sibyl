@@ -66,13 +66,13 @@
     (is (not (search "Thinking     2,100" summary)))))
 
 (test session-summary-includes-cache-savings
-  "Session summary includes cache savings from decompose-savings."
+  "Session summary includes cache savings calculation."
   (let* ((tracker (make-test-tracker :input 10000 :output 5000
                                      :cache-read 3456 :cache-write 890
                                      :requests 5))
          (summary (with-output-to-string (s)
                     (sibyl.repl.display:format-session-summary tracker "claude-opus-4-6" s))))
-    ;; Should show cache savings (calculated via decompose-savings)
+    ;; Should show cache savings
     (is (search "saved" summary))
     ;; Should show cache read tokens
     (is (search "3,456" summary))))

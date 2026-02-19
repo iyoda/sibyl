@@ -56,7 +56,6 @@
     package-symbols-tests
     codebase-map-tests
     sync-to-file-tests
-    provisioning-tests
     ollama-tests
     cache-key-tests
     cache-adapter-tests

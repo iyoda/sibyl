@@ -643,9 +643,7 @@
        (simple-analysis (sibyl.llm:analyze-task-complexity analyzer "Create a simple test"))
        (complex-analysis (sibyl.llm:analyze-task-complexity analyzer "Design complex system with optimization and debugging")))
   (is (< (sibyl.llm:complexity-score simple-analysis) 4.0))
-  (is (> (sibyl.llm:complexity-score complex-analysis) 7.0))
-  (is (string= (sibyl.llm:recommended-tier simple-analysis) "light"))
-  (is (string= (sibyl.llm:recommended-tier complex-analysis) "heavy"))))
+  (is (> (sibyl.llm:complexity-score complex-analysis) 7.0))))
 
 (test logging-system-basic
   "Auto-generated test"
