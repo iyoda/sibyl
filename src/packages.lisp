@@ -125,16 +125,19 @@
    #:complete-with-tools
    #:count-tokens
    #:*streaming-text-callback*
-   ;; Token tracking
-   #:token-tracker
-   #:make-token-tracker
-   #:token-tracker-input-tokens
-   #:token-tracker-output-tokens
-   #:token-tracker-cache-read-tokens
-   #:token-tracker-cache-write-tokens
-   #:token-tracker-request-count
-   #:tracker-add-usage
-   #:tracker-cache-hit-rate
+    ;; Token tracking
+    #:token-tracker
+    #:make-token-tracker
+    #:token-tracker-input-tokens
+    #:token-tracker-output-tokens
+    #:token-tracker-cache-read-tokens
+    #:token-tracker-cache-write-tokens
+    #:token-tracker-request-count
+    #:token-tracker-cost-usd
+    #:token-tracker-thinking-tokens
+    #:tracker-add-usage
+    #:tracker-add-cost
+    #:tracker-cache-hit-rate
    ;; Provider construction
    #:make-anthropic-client
    #:model-tier
@@ -165,15 +168,17 @@
    #:latest-model-selector
    #:make-latest-model-selector
    #:select-latest-model-for-task
-   #:model-release-date
-   #:model-version
-   #:model-context-window
-   #:model-capabilities
-   #:call-llm
+    #:model-release-date
+    #:model-version
+    #:model-context-window
+    #:model-capabilities
+    #:context-window-for-model
+    #:call-llm
    #:lookup-model-pricing
    #:estimate-cost-usd
    #:estimate-baseline-cost-usd
    #:compute-savings-pct
+   #:decompose-savings
    #:*model-pricing-table*
    #:task-cost-record
    #:make-task-cost-record
@@ -451,6 +456,35 @@
    #:stop-spinner
    #:spinner-active-p
    #:update-spinner-message))
+
+(defpackage #:sibyl.repl.display
+  (:use #:cl)
+  (:import-from #:sibyl.llm
+                #:tool-call
+                #:tool-call-name
+                #:tool-call-arguments)
+   (:export
+    ;; Formatting functions
+    #:format-cost
+    #:format-tokens-compact
+    #:format-bytes-human
+    #:format-duration
+    #:format-context-percentage
+    #:format-separator-line
+    #:format-dim-text
+    #:format-bold-text
+    #:format-colored
+    ;; Footer display
+    #:format-turn-footer
+    ;; Session summary
+    #:format-session-summary
+    ;; Tool display
+    #:format-tool-start-line
+    #:format-tool-result-line
+    #:make-tool-call-hook-v2
+    #:make-tool-result-hook
+    ;; Configuration
+    #:*use-colors*))
 
 (defpackage #:sibyl.repl
   (:use #:cl #:sibyl.agent #:sibyl.config #:sibyl.logging)

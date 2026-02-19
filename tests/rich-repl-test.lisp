@@ -333,13 +333,13 @@
                 :name "read-file"
                 :arguments (list (cons "path" "src/repl.lisp")))))
       (unwind-protect
-           (progn
-             (funcall hook tc)
-             (when sibyl.repl::*current-spinner*
-               (let ((msg (sibyl.repl.spinner::spinner-message
-                           sibyl.repl::*current-spinner*)))
-                 (is (search "考え中" msg)
-                     "restarted spinner message should say 考え中..."))))
+             (progn
+              (funcall hook tc)
+              (when sibyl.repl::*current-spinner*
+                (let ((msg (sibyl.repl.spinner::spinner-message
+                            sibyl.repl::*current-spinner*)))
+                  (is (search "Thinking" msg)
+                      "restarted spinner message should say Thinking..."))))
         (when sibyl.repl::*current-spinner*
           (sibyl.repl.spinner:stop-spinner sibyl.repl::*current-spinner*)
           (setf sibyl.repl::*current-spinner* nil))))))

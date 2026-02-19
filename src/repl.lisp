@@ -573,8 +573,10 @@ Returns TEXT unchanged when it is not a string."
   "Handler for :tokens command. Displays cumulative token usage statistics."
   (declare (ignore input))
   (let* ((tracker (sibyl.agent:agent-token-tracker agent))
-         (usage-str (format-token-usage tracker)))
-    (format t "~a" usage-str))
+         (client (sibyl.agent:agent-client agent))
+         (model-name (ignore-errors (sibyl.llm::client-model client))))
+    ;; Use new session summary display
+    (sibyl.repl.display:format-session-summary tracker (or model-name "unknown")))
   nil)
 
 
@@ -1119,8 +1121,8 @@ Returns TEXT unchanged when it is not a string."
            (summary (format-tool-call-summary tc))
            (display
             (if (string= summary "")
-                (format nil "🔧 ~a を実行中..." tool-name)
-                (format nil "🔧 ~a を実行中... ~a" tool-name summary))))
+                (format nil "🔧 ~a ..." tool-name)
+                (format nil "🔧 ~a ... ~a" tool-name summary))))
       (log-info "agent" "Tool call: ~a ~a" tool-name summary)
       ;; Serialize spinner stop → output → spinner restart across threads.
       ;; Parallel tool execution fires this hook from multiple worker threads;
@@ -1140,7 +1142,7 @@ Returns TEXT unchanged when it is not a string."
           ;; Restart spinner to give visual feedback during tool execution.
           ;; The spinner runs until the next LLM streaming chunk arrives
           ;; (which stops it via the streaming callback).
-          (let ((new-spinner (sibyl.repl.spinner:start-spinner "考え中...")))
+          (let ((new-spinner (sibyl.repl.spinner:start-spinner "Thinking...")))
             (setf *current-spinner* new-spinner)))))))
 
 (defun format-tool-call-summary (tc &key (max-length 50))
@@ -1219,6 +1221,59 @@ Returns TEXT unchanged when it is not a string."
   "Return a closure suitable for the :on-error agent hook."
   (lambda (err)
     (log-error "agent" "Agent error: ~a" err)))
+
+(defun make-tool-call-hook-v2 (&optional spinner)
+  "Return a closure suitable for the :on-tool-call agent hook (v2).
+   Displays '🔧 tool-name ...' during execution.
+   
+   If a spinner is active, it is stopped first. After displaying the tool start line,
+   a fresh spinner is started with 'Thinking...' message.
+   
+   Usage:
+     (cons :on-tool-call (make-tool-call-hook-v2 spinner))"
+  (lambda (tc)
+    (let ((display (sibyl.repl.display:format-tool-start-line tc)))
+      (log-info "agent" "Tool call: ~a" (sibyl.llm:tool-call-name tc))
+      (bt:with-lock-held (*spinner-output-lock*)
+        (let ((active-spinner (or spinner *current-spinner*)))
+          ;; Stop spinner before printing
+          (when (and active-spinner
+                     (sibyl.repl.spinner:spinner-active-p active-spinner))
+            (sibyl.repl.spinner:stop-spinner active-spinner)
+            (setf *current-spinner* nil))
+          ;; Display tool start line
+          (if *use-colors*
+              (progn (format-colored-text display :cyan) (format t "~%"))
+              (format t "~a~%" display))
+          (force-output)
+          ;; Restart spinner
+          (let ((new-spinner (sibyl.repl.spinner:start-spinner "Thinking...")))
+            (setf *current-spinner* new-spinner)))))))
+
+(defun make-tool-result-hook ()
+  "Return a closure suitable for the :on-tool-result agent hook.
+   Overwrites the current line with a result line showing ✓/✗, tool name, args, time, size.
+   
+   The closure receives (tool-call result elapsed-seconds) and displays:
+     ✓ read-file (src/repl.lisp) 0.02s 14.9 KB
+     ✗ shell (bad-cmd) 1.20s Error
+   
+   Usage:
+     (cons :on-tool-result (make-tool-result-hook))"
+  (lambda (tc result elapsed-seconds)
+    (let ((bytes (if (stringp result) (length result) 0)))
+      (bt:with-lock-held (*spinner-output-lock*)
+        (let ((active-spinner *current-spinner*))
+          ;; Stop spinner
+          (when (and active-spinner
+                     (sibyl.repl.spinner:spinner-active-p active-spinner))
+            (sibyl.repl.spinner:stop-spinner active-spinner)
+            (setf *current-spinner* nil))
+          ;; Clear line and display result
+          (format t "~C~C[2K~a~%"
+                  #\Return #\Escape
+                  (sibyl.repl.display:format-tool-result-line tc result elapsed-seconds bytes))
+          (force-output))))))
 
 ;;; ============================================================
 ;;; Elapsed time utilities
@@ -1412,7 +1467,8 @@ Otherwise, use model-specific optimized prompt for Ollama models."
           (log-info "repl" "Starting REPL (model: ~a)" model)
           (log-info "repl" "Starting REPL")))
     (setf (sibyl.agent:agent-hooks agent)
-          (list (cons :on-tool-call (make-tool-call-hook))
+          (list (cons :on-tool-call (make-tool-call-hook-v2))
+                (cons :on-tool-result (make-tool-result-hook))
                 (cons :before-step (make-before-step-hook))
                 (cons :after-step (make-after-step-hook))
                 (cons :on-error (make-on-error-hook))))
@@ -1531,11 +1587,11 @@ Otherwise, use model-specific optimized prompt for Ollama models."
                                                                    (setf *cancel-requested* t
                                                                          *last-interrupt-time* now)
                                                                    (throw 'repl-cancelled :cancelled)))))))
-                                             (handler-case
-                                                 (progn
-                                                   (setf start-time (get-internal-real-time)
-                                                         spinner (sibyl.repl.spinner:start-spinner "考え中...")
-                                                         *current-spinner* spinner)
+                                              (handler-case
+                                                  (progn
+                                                    (setf start-time (get-internal-real-time)
+                                                          spinner (sibyl.repl.spinner:start-spinner "Thinking...")
+                                                          *current-spinner* spinner)
                             (let* ((first-chunk-p t)
                                    (ollama-client-p (typep (sibyl.agent:agent-client agent)
                                                             'sibyl.llm:ollama-client))
@@ -1558,13 +1614,14 @@ Otherwise, use model-specific optimized prompt for Ollama models."
                                             (when (and clean (plusp (length clean)))
                                               (write-string clean *standard-output*)
                                               (force-output *standard-output*))))))
-                                   (tracker (sibyl.agent:agent-token-tracker agent))
-                                   (in-before (sibyl.llm::token-tracker-input-tokens tracker))
-                                   (out-before (sibyl.llm::token-tracker-output-tokens tracker))
-                                   ;; Cache telemetry snapshot before agent-run
-                                   (cache-stats-before (sibyl.cache:get-cache-telemetry))
-                                   (cache-hits-before (getf cache-stats-before :client-hits))
-                                   (cache-total-before (getf cache-stats-before :total-requests))
+                                    (tracker (sibyl.agent:agent-token-tracker agent))
+                                    (in-before (sibyl.llm::token-tracker-input-tokens tracker))
+                                    (out-before (sibyl.llm::token-tracker-output-tokens tracker))
+                                    (thinking-before (sibyl.llm::token-tracker-thinking-tokens tracker))
+                                    ;; Cache telemetry snapshot before agent-run
+                                    (cache-stats-before (sibyl.cache:get-cache-telemetry))
+                                    (cache-hits-before (getf cache-stats-before :client-hits))
+                                    (cache-total-before (getf cache-stats-before :total-requests))
                                    (response (sibyl.agent:agent-run agent input))
                                    (in-delta (- (sibyl.llm::token-tracker-input-tokens tracker) in-before))
                                    (out-delta (- (sibyl.llm::token-tracker-output-tokens tracker) out-before))
@@ -1580,17 +1637,46 @@ Otherwise, use model-specific optimized prompt for Ollama models."
                                         (if ollama-client-p
                                             (strip-function-blocks response)
                                             response)))
-                              (unless first-chunk-p
-                                (format t "~%"))
-                              (format-elapsed-time (elapsed-seconds start-time)
-                                                   :model (ignore-errors
-                                                            (sibyl.llm::client-model
-                                                             (sibyl.agent:agent-client agent)))
-                                                   :input-tokens (when (plusp in-delta) in-delta)
-                                                   :output-tokens (when (plusp out-delta) out-delta)
-                                                   :cache-hits cache-hits-delta
-                                                   :cache-total cache-total-delta)
-                              (format t "~%")))
+                               (unless first-chunk-p
+                                 (format t "~%"))
+                               ;; Calculate footer metrics
+                               (let* ((model-name (ignore-errors
+                                                   (sibyl.llm::client-model
+                                                    (sibyl.agent:agent-client agent))))
+                                      (thinking-delta (- (sibyl.llm::token-tracker-thinking-tokens tracker)
+                                                        thinking-before))
+                                      ;; Calculate cost (nil for Ollama clients)
+                                      (cost-result (when (and model-name
+                                                             (not (typep (sibyl.agent:agent-client agent)
+                                                                        'sibyl.llm:ollama-client)))
+                                                    (sibyl.llm:estimate-cost-usd
+                                                     model-name
+                                                     :input-tokens in-delta
+                                                     :output-tokens out-delta
+                                                     :cache-read-tokens cache-hits-delta
+                                                     :cache-write-tokens (- cache-total-delta cache-hits-delta))))
+                                      (total-cost (when cost-result (getf cost-result :total)))
+                                      ;; Calculate context percentage
+                                      (context-window (when model-name
+                                                       (sibyl.llm:context-window-for-model model-name)))
+                                      (context-pct (if (and context-window (plusp context-window))
+                                                      (* 100.0 (/ (float in-delta) context-window))
+                                                      0.0)))
+                                 ;; Accumulate cost in tracker
+                                 (when total-cost
+                                   (sibyl.llm:tracker-add-cost tracker total-cost))
+                                 ;; Display footer
+                                 (sibyl.repl.display:format-turn-footer
+                                  :model model-name
+                                  :elapsed-seconds (elapsed-seconds start-time)
+                                  :input-tokens in-delta
+                                  :output-tokens out-delta
+                                  :thinking-tokens thinking-delta
+                                  :cache-read-tokens cache-hits-delta
+                                  :cache-write-tokens (- cache-total-delta cache-hits-delta)
+                                  :context-percentage context-pct
+                                  :cost-usd total-cost))
+                               (format t "~%")))
                                                 #+sbcl (sb-sys:interactive-interrupt (e)
                                                         (declare (ignore e))
                                                         (stop-current-spinner)

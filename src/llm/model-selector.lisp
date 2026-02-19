@@ -701,3 +701,23 @@ Returns a plist with:
             :total total
             :results (nreverse results)
             :by-tier (nreverse by-tier)))))
+
+;;; ============================================================
+;;; Context window lookup utility
+;;; ============================================================
+
+(defun context-window-for-model (model-name)
+  "Return context window size for MODEL-NAME. Falls back to 200000 for unknown models.
+   Looks up model in *latest-model-tiers* by prefix match."
+  (let ((model-name-lower (string-downcase model-name)))
+    (block search
+      ;; Search all tiers for a matching model
+      (dolist (tier *latest-model-tiers*)
+        (dolist (config (tier-models tier))
+          (let ((config-name (string-downcase (model-name config))))
+            ;; Prefix match: model-name starts with config-name or vice versa
+            (when (or (alexandria:starts-with-subseq config-name model-name-lower)
+                      (alexandria:starts-with-subseq model-name-lower config-name))
+              (return-from search (model-context-window config))))))
+      ;; Fallback for unknown models
+      200000)))

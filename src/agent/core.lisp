@@ -30,11 +30,11 @@
                   :accessor agent-step-count
                   :initform 0
                   :type integer)
-   (hooks         :initarg :hooks
-                   :accessor agent-hooks
-                   :initform nil
-                   :documentation "Alist of hook-name → function.
-                    Hooks: :before-step :after-step :on-tool-call :on-error")
+    (hooks         :initarg :hooks
+                    :accessor agent-hooks
+                    :initform nil
+                    :documentation "Alist of hook-name → function.
+                     Hooks: :before-step :after-step :on-tool-call :on-tool-result :on-error")
    (token-tracker :initform (sibyl.llm::make-token-tracker)
                   :accessor agent-token-tracker
                   :documentation "Cumulative token usage for this session."))
@@ -172,6 +172,19 @@ prompt with an optional system-prompt-hint prefix to save tokens."
           (warn 'sibyl-warning
                 :message (format nil "Hook ~a error: ~a" hook-name e)))))))
 
+(defun %execute-tool-with-timing (agent tc)
+  "Execute tool call TC with timing measurement and :on-tool-result hook.
+Returns the result string."
+  (let* ((start (get-internal-real-time))
+         (result (handler-case (execute-tool-call tc)
+                   (tool-error (e)
+                     (run-hook agent :on-error e)
+                     (format nil "Error: ~a" e))))
+         (end (get-internal-real-time))
+         (elapsed-seconds (/ (- end start) internal-time-units-per-second)))
+    (run-hook agent :on-tool-result tc result elapsed-seconds)
+    result))
+
 ;;; ============================================================
 ;;; Tool category heuristic
 ;;; ============================================================
@@ -223,37 +236,36 @@ Adds :code if input has code-related keywords. Adds :analysis for analysis keywo
               (complete-with-tools (agent-client agent) context tools-schema)
               (complete (agent-client agent) context))
         (sibyl.llm:tracker-add-usage (agent-token-tracker agent) usage)
+        ;; Estimate thinking tokens if present (API doesn't return them separately)
+        (let ((thinking-text (sibyl.llm:message-thinking response)))
+          (when (and thinking-text (plusp (length thinking-text)))
+            (let ((thinking-tokens (ceiling (length thinking-text) 4)))
+              (sibyl.llm:tracker-add-usage (agent-token-tracker agent)
+                                           (list :thinking-tokens thinking-tokens)))))
         (memory-push (agent-memory agent) response)
         (cond
          ((message-tool-calls response)
           (let* ((tc-list (message-tool-calls response))
                  (use-parallel (>= (length tc-list)
                                    sibyl.tools:*parallel-tool-threshold*)))
-            (if use-parallel
-                ;; --- 並列実行パス ---
-                (let ((results
-                       (sibyl.tools:execute-tool-calls-parallel
-                        tc-list
-                        (lambda (tc)
-                          (run-hook agent :on-tool-call tc)
-                          (handler-case (execute-tool-call tc)
-                            (tool-error (e)
-                              (run-hook agent :on-error e)
-                              (format nil "Error: ~a" e)))))))
-                  (loop for tc in tc-list
-                        for result in results
-                        do (memory-push (agent-memory agent)
-                                        (tool-result-message (tool-call-id tc) result))))
-                ;; --- シリアル実行パス (threshold 未満) ---
-                (dolist (tc tc-list)
-                  (run-hook agent :on-tool-call tc)
-                  (let ((result
-                         (handler-case (execute-tool-call tc)
-                           (tool-error (e)
-                             (run-hook agent :on-error e)
-                             (format nil "Error: ~a" e)))))
-                    (memory-push (agent-memory agent)
-                                 (tool-result-message (tool-call-id tc) result))))))
+             (if use-parallel
+                 ;; --- 並列実行パス ---
+                 (let ((results
+                        (sibyl.tools:execute-tool-calls-parallel
+                         tc-list
+                         (lambda (tc)
+                           (run-hook agent :on-tool-call tc)
+                           (%execute-tool-with-timing agent tc)))))
+                   (loop for tc in tc-list
+                         for result in results
+                         do (memory-push (agent-memory agent)
+                                         (tool-result-message (tool-call-id tc) result))))
+                 ;; --- シリアル実行パス (threshold 未満) ---
+                 (dolist (tc tc-list)
+                   (run-hook agent :on-tool-call tc)
+                   (let ((result (%execute-tool-with-timing agent tc)))
+                     (memory-push (agent-memory agent)
+                                  (tool-result-message (tool-call-id tc) result))))))
           (if (< (agent-step-count agent) (agent-max-steps agent))
               (agent-step agent nil)
               (format nil "[Sibyl: max steps (~a) reached]"

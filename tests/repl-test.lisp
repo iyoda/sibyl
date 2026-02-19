@@ -558,5 +558,5 @@
                        (funcall hook tc)))))))
   (is (search "update-plan-status" output)
       "tool name must appear in output immediately")
-  (is (search "を実行中" output)
-      "execution message must appear immediately")))
+  (is (search "🔧" output)
+      "tool execution indicator must appear immediately")))

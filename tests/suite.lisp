@@ -75,7 +75,10 @@
     anthropic-thinking-config-tests ;; Anthropic thinking config and capabilities: pure logic, no I/O
     anthropic-streaming-cache-tests ;; Anthropic streaming cache token extraction: pure logic, no I/O
     anthropic-thinking-serialization-tests ;; Anthropic thinking block serialization: pure logic, no I/O
-    anthropic-thinking-params-tests) ;; Anthropic thinking params helper: pure logic, no I/O
+    anthropic-thinking-params-tests ;; Anthropic thinking params helper: pure logic, no I/O
+    repl-display-tests              ;; REPL display formatting: pure logic, no I/O, no global state
+    turn-footer-tests               ;; Turn footer display: pure logic, no I/O, no global state
+    session-summary-tests)          ;; Session summary display: pure logic, no I/O, no global state
   "Test suites in sibyl.tests package safe for parallel execution.
 Cross-package suites are resolved at runtime via %safe-suites-resolved.")
 
@@ -91,7 +94,8 @@ Called at run-tests-parallel invocation time, after all packages are loaded."
               (%resolve-suite 'tdd-orchestration-tests '#:sibyl.agent.tests)
               (%resolve-suite 'run-hook-tests          '#:sibyl.agent.tests)
               (%resolve-suite 'memory-compact-tests    '#:sibyl.agent.tests)
-              (%resolve-suite 'memory-sanitize-tests   '#:sibyl.agent.tests))))))
+               (%resolve-suite 'memory-sanitize-tests   '#:sibyl.agent.tests)
+               (%resolve-suite 'token-tracker-enhancement-tests '#:sibyl.llm))))))
 
 (defparameter *unsafe-suites*
   '(planning-tests
@@ -116,7 +120,7 @@ Called at run-tests-parallel invocation time, after all packages are loaded."
     cache-telemetry-tests
     cache-integration-tests
     ;; Task 1: Newly classified unsafe suites (sleep, threads, timing-sensitive)
-    rich-repl-tests)                ;; REPL features: spinner threads, sleep calls (lines 64, 92, 94)
+    rich-repl-tests)              ;; REPL features: spinner threads, sleep calls
   "Test suites in sibyl.tests package that must run sequentially (file I/O, global state, or FiveAM side effects).
 Cross-package suites are resolved at runtime via %unsafe-suites-resolved.")
 
@@ -130,7 +134,8 @@ Called at run-tests-parallel invocation time, after all packages are loaded."
              (list
               ;; Task 1: Newly classified cross-package unsafe suites (sleep, threads)
               (%resolve-suite 'parallel-tool-execution-tests '#:sibyl.agent.tests)  ;; Parallel tool execution: sleep calls (lines 440, 441, 460)
-              (%resolve-suite 'parallel-agent-tests         '#:sibyl.parallel.tests))))))  ;; Parallel agent tasks: sleep calls, threads
+              (%resolve-suite 'parallel-agent-tests         '#:sibyl.parallel.tests)  ;; Parallel agent tasks: sleep calls, threads
+              (%resolve-suite 'tool-timing-tests            '#:sibyl.tests.tool-timing))))))  ;; Tool timing: sleep calls for timing verification
 
 ;;; Lock for serializing FiveAM calls (FiveAM is not thread-safe)
 (defvar *fiveam-run-lock* (bt:make-lock "fiveam-run-lock")
