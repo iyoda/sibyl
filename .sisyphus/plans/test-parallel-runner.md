@@ -59,12 +59,12 @@ FiveAM の Safe スイートを真に並列実行できるカスタムランナ�
 - `AGENTS.md`: テスト規約セクション
 
 ### Definition of Done
-- [ ] Safe スイートが真に並列実行される（wall-clock < 個別合計の50%）
-- [ ] `run-tests-parallel` の結果が `fiveam:run 'sibyl-tests` と同一チェック数
-- [ ] 同一イメージでの再実行が正しく動作（status リセット）
-- [ ] 未分類スイートに対してバリデーション警告が出る
-- [ ] タイミング履歴が JSON に記録される
-- [ ] `(asdf:test-system :sibyl)` が引き続き動作する
+- [x] Safe スイートが真に並列実行される（wall-clock < 個別合計の50%）
+- [x] `run-tests-parallel` の結果が `fiveam:run 'sibyl-tests` と同一チェック数
+- [x] 同一イメージでの再実行が正しく動作（status リセット）
+- [x] 未分類スイートに対してバリデーション警告が出る
+- [x] タイミング履歴が JSON に記録される
+- [x] `(asdf:test-system :sibyl)` が引き続き動作する
 
 ### Must Have
 - Safe スイートのロックなし並列実行
@@ -811,14 +811,14 @@ cat tests/timing-history.json | python3 -m json.tool
 ```
 
 ### Final Checklist
-- [ ] Safe スイートが真に並列実行される（wall-clock 検証）
-- [ ] 全テストが変わらずパスする
-- [ ] REPL 再実行が正しく動作する
-- [ ] 未分類スイートに対して警告が出る
-- [ ] タイミング履歴が JSON に記録される
-- [ ] 回帰検出が著しい劣化を警告する
-- [ ] `(asdf:test-system :sibyl)` が動作する
-- [ ] AGENTS.md にテスト規約が記載されている
-- [ ] FiveAM ソースが変更されていない
-- [ ] `run-sibyl-tests` が変更されていない
-- [ ] 新パッケージ依存が追加されていない
+- [x] Safe スイートが真に並列実行される（wall-clock 検証）
+- [x] 全テストが変わらずパスする
+- [x] REPL 再実行が正しく動作する
+- [x] 未分類スイートに対して警告が出る
+- [x] タイミング履歴が JSON に記録される
+- [x] 回帰検出が著しい劣化を警告する
+- [x] `(asdf:test-system :sibyl)` が動作する
+- [x] AGENTS.md にテスト規約が記載されている
+- [x] FiveAM ソースが変更されていない
+- [x] `run-sibyl-tests` が変更されていない
+- [x] 新パッケージ依存が追加されていない
