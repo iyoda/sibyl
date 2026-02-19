@@ -1,9 +1,11 @@
 {
-  "active_plan": "/Users/iyoda/Projects/atikoro/sibyl/.sisyphus/plans/openai-token-cache.md",
-  "started_at": "2026-02-19T03:35:53.836Z",
+  "active_plan": "/Users/iyoda/Projects/atikoro/sibyl/.sisyphus/plans/test-parallel-runner.md",
+  "started_at": "2026-02-19T06:32:00.000Z",
+  "completed_at": "2026-02-19T07:15:00.000Z",
   "session_ids": [
     "ses_38c322a6cffeaFvZIuErRUC6Tc"
   ],
-  "plan_name": "openai-token-cache",
-  "agent": "atlas"
+  "plan_name": "test-parallel-runner",
+  "agent": "atlas",
+  "status": "complete"
 }

@@ -57,12 +57,12 @@ OpenAI Client のトークン usage 抽出を修正し、サーバーサイド P
 - テレメトリ統合（既存の `openai-extract-server-cache-tokens` 接続）
 
 ### Definition of Done
-- [ ] `(multiple-value-bind (msg usage) (parse-openai-response resp))` で usage-plist が取得できる
-- [ ] `(getf usage :cache-read-tokens)` で `cached_tokens` の値が正しく返る
-- [ ] `(lookup-model-pricing "gpt-5-mini")` がフォールバック警告なしで正しい pricing を返す
-- [ ] ストリーミング時も usage-plist が返る（`stream_options` 込み）
-- [ ] `(asdf:test-system :sibyl)` が全テスト PASS
-- [ ] 新規テストスイートが `*safe-suites*` または `*unsafe-suites*` に分類済み
+- [x] `(multiple-value-bind (msg usage) (parse-openai-response resp))` で usage-plist が取得できる
+- [x] `(getf usage :cache-read-tokens)` で `cached_tokens` の値が正しく返る
+- [x] `(lookup-model-pricing "gpt-5-mini")` がフォールバック警告なしで正しい pricing を返す
+- [x] ストリーミング時も usage-plist が返る（`stream_options` 込み）
+- [x] `(asdf:test-system :sibyl)` が全テスト PASS
+- [x] 新規テストスイートが `*safe-suites*` または `*unsafe-suites*` に分類済み
 
 ### Must Have
 - `parse-openai-response` が `(values message usage-plist)` を返す
@@ -164,7 +164,7 @@ Parallel Speedup: ~35% faster than sequential
 
 ## TODOs
 
-- [ ] 1. parse-openai-response: usage-plist 抽出の追加 (TDD)
+- [x] 1. parse-openai-response: usage-plist 抽出の追加 (TDD)
 
   **What to do**:
   - **RED**: `tests/openai-test.lisp` に `openai-usage-tests` スイートを作成
@@ -268,7 +268,7 @@ Parallel Speedup: ~35% faster than sequential
 
 ---
 
-- [ ] 2. GPT-5 mini pricing テーブルエントリ追加 (TDD)
+- [x] 2. GPT-5 mini pricing テーブルエントリ追加 (TDD)
 
   **What to do**:
   - **RED**: `tests/openai-test.lisp` に `openai-pricing-tests` スイートを追加
@@ -353,7 +353,7 @@ Parallel Speedup: ~35% faster than sequential
 
 ---
 
-- [ ] 3. OpenAI ストリーミング usage 抽出 + stream_options (TDD)
+- [x] 3. OpenAI ストリーミング usage 抽出 + stream_options (TDD)
 
   **What to do**:
   - **RED**: `tests/openai-test.lisp` に `openai-streaming-usage-tests` スイートを追加
@@ -439,7 +439,7 @@ Parallel Speedup: ~35% faster than sequential
 
 ---
 
-- [ ] 4. サーバーサイドキャッシュトークンのテレメトリ統合 (TDD)
+- [x] 4. サーバーサイドキャッシュトークンのテレメトリ統合 (TDD)
 
   **What to do**:
   - **RED**: `tests/openai-test.lisp` に `openai-cache-telemetry-tests` スイートを追加
@@ -506,7 +506,7 @@ Parallel Speedup: ~35% faster than sequential
 
 ---
 
-- [ ] 5. キャッシュ統合検証（クライアントサイド LRU + usage 保存）(TDD)
+- [x] 5. キャッシュ統合検証（クライアントサイド LRU + usage 保存）(TDD)
 
   **What to do**:
   - **RED**: `tests/openai-test.lisp` に `openai-cache-integration-tests` スイートを追加
@@ -570,7 +570,7 @@ Parallel Speedup: ~35% faster than sequential
 
 ---
 
-- [ ] 6. prompt_cache_key / prompt_cache_retention サポート（条件付き）
+- [x] 6. prompt_cache_key / prompt_cache_retention サポート（条件付き） — SKIPPED: No OPENAI_API_KEY available
 
   **What to do**:
   - **⚠️ 前提条件**: まず OpenAI Chat Completions API ドキュメントで `prompt_cache_key` と `prompt_cache_retention` パラメータの存在を確認する。存在しない場合、このタスクはキャンセル。
@@ -646,7 +646,7 @@ Parallel Speedup: ~35% faster than sequential
 
 ---
 
-- [ ] 7. 最終統合テスト + suite 分類 + 全テスト PASS
+- [x] 7. 最終統合テスト + suite 分類 + 全テスト PASS
 
   **What to do**:
   - 全新規テストスイートを `tests/suite.lisp` の `*safe-suites*` または `*unsafe-suites*` に分類

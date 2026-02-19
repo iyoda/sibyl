@@ -158,7 +158,7 @@ Parallel Speedup: ~30% faster than sequential (Wave 1 + Wave 2 parallelism)
 
 ## TODOs
 
-- [ ] 1. 未分類スイートの分類追加
+- [x] 1. 未分類スイートの分類追加
 
   **What to do**:
   - 10個の未分類スイートを調査し、Safe/Unsafe に分類する
@@ -252,7 +252,7 @@ Parallel Speedup: ~30% faster than sequential (Wave 1 + Wave 2 parallelism)
 
 ---
 
-- [ ] 2. カスタム並列ランナー本体の実装
+- [x] 2. カスタム並列ランナー本体の実装
 
   **What to do**:
 
@@ -402,7 +402,7 @@ Parallel Speedup: ~30% faster than sequential (Wave 1 + Wave 2 parallelism)
 
 ---
 
-- [ ] 3. スイート分類バリデーション機構
+- [x] 3. スイート分類バリデーション機構
 
   **What to do**:
   - `%validate-suite-classification` 関数を追加
@@ -491,7 +491,7 @@ Parallel Speedup: ~30% faster than sequential (Wave 1 + Wave 2 parallelism)
 
 ---
 
-- [ ] 4. AGENTS.md テスト規約セクション追加
+- [x] 4. AGENTS.md テスト規約セクション追加 — Already complete (content present)
 
   **What to do**:
   - `AGENTS.md` の "Testing Guidelines" セクションを拡充
@@ -558,7 +558,7 @@ Parallel Speedup: ~30% faster than sequential (Wave 1 + Wave 2 parallelism)
 
 ---
 
-- [ ] 5. タイミング履歴記録 & 回帰検出
+- [x] 5. タイミング履歴記録 & 回帰検出
 
   **What to do**:
 
@@ -678,7 +678,7 @@ Parallel Speedup: ~30% faster than sequential (Wave 1 + Wave 2 parallelism)
 
 ---
 
-- [ ] 6. 統合検証
+- [x] 6. 統合検証
 
   **What to do**:
   - 全タスクの成果物を統合した上で、エンドツーエンドの検証を実施
