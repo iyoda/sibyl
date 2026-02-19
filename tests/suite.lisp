@@ -67,7 +67,12 @@
     memory-compaction-suite         ;; Memory compaction: pure logic
     rich-repl-tests                 ;; REPL features: spinner, cancel flags, conditions (no I/O)
     phase6-tests                    ;; Japanese patterns, cost calculation: pure logic
-    mcp-tests)                      ;; MCP protocol: JSON-RPC, schema conversion (pure logic)
+    mcp-tests                       ;; MCP protocol: JSON-RPC, schema conversion (pure logic)
+    openai-usage-tests              ;; OpenAI usage extraction: pure logic, no I/O
+    openai-pricing-tests            ;; OpenAI pricing table: pure logic, no I/O
+    openai-streaming-usage-tests    ;; OpenAI streaming usage extraction: pure logic, no I/O
+    openai-cache-telemetry-tests    ;; OpenAI cache telemetry integration: pure logic, no I/O
+    openai-cache-integration-tests) ;; OpenAI cache integration with usage tracking: pure logic, no I/O
   "Test suites in sibyl.tests package safe for parallel execution.
 Cross-package suites are resolved at runtime via %safe-suites-resolved.")
 

@@ -496,7 +496,8 @@ Returns (values message usage-plist)."
           messages))
 
 (defun parse-openai-response (response)
-  "Parse OpenAI API response into a message struct."
+  "Parse OpenAI API response into a message struct.
+Returns (values message usage-plist) where usage-plist may be nil."
   (let* ((raw-choices (gethash "choices" response))
          (choices (if (listp raw-choices) raw-choices (coerce raw-choices 'list)))
          (first-choice (first choices)))
@@ -504,7 +505,18 @@ Returns (values message usage-plist)."
       (error 'llm-invalid-response
              :message "OpenAI response missing choices"
              :raw-response response))
-    (let* ((msg (gethash "message" first-choice)))
+    (let* ((msg (gethash "message" first-choice))
+           ;; Extract usage
+           (usage-ht (gethash "usage" response))
+           (usage-plist (when usage-ht
+                          (let* ((prompt-details (gethash "prompt_tokens_details" usage-ht))
+                                 (cached-tokens (if prompt-details
+                                                    (or (gethash "cached_tokens" prompt-details) 0)
+                                                    0)))
+                            (list :input-tokens (or (gethash "prompt_tokens" usage-ht) 0)
+                                  :output-tokens (or (gethash "completion_tokens" usage-ht) 0)
+                                  :cache-read-tokens cached-tokens
+                                  :cache-write-tokens 0)))))
       (unless msg
         (error 'llm-invalid-response
                :message "OpenAI response missing message"
@@ -523,7 +535,9 @@ Returns (values message usage-plist)."
                                         (yason:parse (gethash "arguments" func)
                                                      :object-as :hash-table)))
                            tool-calls))))
-        (assistant-message content :tool-calls (nreverse tool-calls))))))
+        (values
+         (assistant-message content :tool-calls (nreverse tool-calls))
+         usage-plist)))))
 
 (defun complete-openai-streaming (client messages tools)
   "Stream OpenAI responses, invoking *streaming-text-callback* per text delta.
@@ -541,7 +555,8 @@ Returns a reconstructed assistant message."
          (body `(("model" . ,(client-model client))
                  ("max_completion_tokens" . ,(client-max-tokens client))
                  ("messages" . ,(messages-to-openai-format messages))
-                 ("stream" . t)))
+                 ("stream" . t)
+                 ("stream_options" . (("include_usage" . t)))))
          (temp-pair (openai-temperature-pair client))
          (final-body (progn
                        (when temp-pair
@@ -550,7 +565,10 @@ Returns a reconstructed assistant message."
                            (append body `(("tools" . ,openai-tools)))
                            body)))
          (text-parts nil)
-         (tool-call-state (make-hash-table :test 'eql)))
+         (tool-call-state (make-hash-table :test 'eql))
+         (prompt-tokens nil)
+         (completion-tokens nil)
+         (cached-tokens nil))
     (labels ((normalize-tool-call-index (value)
                (cond
                  ((integerp value) value)
@@ -592,47 +610,62 @@ Returns a reconstructed assistant message."
        (format nil "~a/chat/completions" (client-base-url client))
        (openai-headers client)
        (alist-to-hash final-body)
-       (lambda (event-type data-str)
-         (declare (ignore event-type))
-         (handler-case
-             (let* ((data (yason:parse data-str :object-as :hash-table))
-                    (choices (gethash "choices" data))
-                    (choice (cond
-                              ((vectorp choices)
-                               (when (> (length choices) 0)
-                                 (aref choices 0)))
-                              ((listp choices)
-                               (first choices))))
-                    (delta (when choice (gethash "delta" choice))))
-               (when delta
-                 (let ((content (gethash "content" delta)))
-                   (when (and content (not (equal content :null)))
-                     (push content text-parts)
-                     (funcall *streaming-text-callback* content)))
-                 (let ((tool-calls-delta (gethash "tool_calls" delta)))
-                   (when tool-calls-delta
-                     (cond
-                       ((vectorp tool-calls-delta)
-                        (dotimes (i (length tool-calls-delta))
-                          (record-tool-call-delta (aref tool-calls-delta i))))
-                       ((listp tool-calls-delta)
-                        (dolist (tc tool-calls-delta)
-                          (record-tool-call-delta tc))))))))
-           (error () nil)))
-       (lambda () nil))
-      (assistant-message
-       (when text-parts
-         (string-join "" (nreverse text-parts)))
-       :tool-calls (let ((indices nil)
-                         (tool-calls nil))
-                     (maphash (lambda (k v)
-                                (declare (ignore v))
-                                (push k indices))
-                              tool-call-state)
-                     (dolist (idx (sort indices #'<))
-                       (let ((tc (finalize-tool-call (gethash idx tool-call-state))))
-                         (when tc (push tc tool-calls))))
-                     (nreverse tool-calls))))))
+        (lambda (event-type data-str)
+          (declare (ignore event-type))
+          (handler-case
+              (let* ((data (yason:parse data-str :object-as :hash-table))
+                     (choices (gethash "choices" data))
+                     (choice (cond
+                               ((vectorp choices)
+                                (when (> (length choices) 0)
+                                  (aref choices 0)))
+                               ((listp choices)
+                                (first choices))))
+                     (delta (when choice (gethash "delta" choice)))
+                     (usage (gethash "usage" data)))
+                ;; Extract usage from final chunk
+                (when usage
+                  (setf prompt-tokens (gethash "prompt_tokens" usage)
+                        completion-tokens (gethash "completion_tokens" usage))
+                  (let ((prompt-details (gethash "prompt_tokens_details" usage)))
+                    (when prompt-details
+                      (setf cached-tokens (gethash "cached_tokens" prompt-details)))))
+                (when delta
+                  (let ((content (gethash "content" delta)))
+                    (when (and content (not (equal content :null)))
+                      (push content text-parts)
+                      (funcall *streaming-text-callback* content)))
+                  (let ((tool-calls-delta (gethash "tool_calls" delta)))
+                    (when tool-calls-delta
+                      (cond
+                        ((vectorp tool-calls-delta)
+                         (dotimes (i (length tool-calls-delta))
+                           (record-tool-call-delta (aref tool-calls-delta i))))
+                        ((listp tool-calls-delta)
+                         (dolist (tc tool-calls-delta)
+                           (record-tool-call-delta tc))))))))
+            (error () nil)))
+        (lambda () nil))
+      (let* ((usage-plist (when (or prompt-tokens completion-tokens)
+                            (list :input-tokens (or prompt-tokens 0)
+                                  :output-tokens (or completion-tokens 0)
+                                  :cache-read-tokens (or cached-tokens 0)
+                                  :cache-write-tokens 0))))
+        (values
+         (assistant-message
+          (when text-parts
+            (string-join "" (nreverse text-parts)))
+          :tool-calls (let ((indices nil)
+                            (tool-calls nil))
+                        (maphash (lambda (k v)
+                                   (declare (ignore v))
+                                   (push k indices))
+                                 tool-call-state)
+                        (dolist (idx (sort indices #'<))
+                          (let ((tc (finalize-tool-call (gethash idx tool-call-state))))
+                            (when tc (push tc tool-calls))))
+                        (nreverse tool-calls)))
+         usage-plist)))))
 
 (defmethod complete ((client openai-client) messages &key)
   "Send messages to OpenAI GPT API."

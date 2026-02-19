@@ -1507,3 +1507,81 @@ Suggestions:
 - [high][test-coverage] Function "parameter-to-json-schema" appears untested. (src/tools/protocol.lisp:94)
   - Rationale: Function has 1 internal callers; missing tests increase regression risk.
 
+## [2026-02-19T01:36:37Z] suggest-improvements
+
+Scope: all
+
+Suggestions:
+- [high][test-coverage] Function "select-ollama-system-prompt" appears untested. (src/agent/core.lisp:114)
+  - Rationale: Function has 1 internal callers; missing tests increase regression risk.
+- [high][test-coverage] Function "infer-tool-categories" appears untested. (src/agent/core.lisp:179)
+  - Rationale: Function has 1 internal callers; missing tests increase regression risk.
+- [high][test-coverage] Tool "create-agent-team" lacks explicit test coverage. (src/tools/builtin.lisp:141)
+  - Rationale: User-facing tools should have regression tests to avoid behavioral drift.
+- [high][test-coverage] Tool "create-adaptive-agent-team" lacks explicit test coverage. (src/tools/builtin.lisp:178)
+  - Rationale: User-facing tools should have regression tests to avoid behavioral drift.
+- [high][test-coverage] Tool "delegate-task" lacks explicit test coverage. (src/tools/builtin.lisp:218)
+  - Rationale: User-facing tools should have regression tests to avoid behavioral drift.
+- [medium][error-handling] Function "save-plan" performs risky operations without error handling. (src/plan/core.lisp:198)
+  - Rationale: I/O and tool calls should handle failures to avoid cascading errors.
+- [medium][missing-docstrings] Function "cache-get" lacks a docstring. (src/cache/lru.lisp:88)
+  - Rationale: Public functions should document intent for maintainability and self-analysis.
+- [medium][missing-docstrings] Function "cache-put" lacks a docstring. (src/cache/lru.lisp:109)
+  - Rationale: Public functions should document intent for maintainability and self-analysis.
+- [medium][missing-docstrings] Function "cache-flush" lacks a docstring. (src/cache/lru.lisp:149)
+  - Rationale: Public functions should document intent for maintainability and self-analysis.
+- [medium][todo] TODO comment: (defun %suggest-improvements-todo-comments (files) (src/tools/analysis-tools.lisp:313)
+  - Rationale: Outstanding TODOs should be triaged or resolved to reduce uncertainty.
+
+## [2026-02-19T01:36:38Z] suggest-improvements
+
+Scope: all
+
+Suggestions:
+- [high][test-coverage] Function "select-ollama-system-prompt" appears untested. (src/agent/core.lisp:114)
+  - Rationale: Function has 1 internal callers; missing tests increase regression risk.
+- [high][test-coverage] Function "infer-tool-categories" appears untested. (src/agent/core.lisp:179)
+  - Rationale: Function has 1 internal callers; missing tests increase regression risk.
+- [high][test-coverage] Tool "create-agent-team" lacks explicit test coverage. (src/tools/builtin.lisp:141)
+  - Rationale: User-facing tools should have regression tests to avoid behavioral drift.
+- [high][test-coverage] Tool "create-adaptive-agent-team" lacks explicit test coverage. (src/tools/builtin.lisp:178)
+  - Rationale: User-facing tools should have regression tests to avoid behavioral drift.
+- [high][test-coverage] Tool "delegate-task" lacks explicit test coverage. (src/tools/builtin.lisp:218)
+  - Rationale: User-facing tools should have regression tests to avoid behavioral drift.
+- [medium][error-handling] Function "save-plan" performs risky operations without error handling. (src/plan/core.lisp:198)
+  - Rationale: I/O and tool calls should handle failures to avoid cascading errors.
+- [medium][missing-docstrings] Function "cache-get" lacks a docstring. (src/cache/lru.lisp:88)
+  - Rationale: Public functions should document intent for maintainability and self-analysis.
+- [medium][missing-docstrings] Function "cache-put" lacks a docstring. (src/cache/lru.lisp:109)
+  - Rationale: Public functions should document intent for maintainability and self-analysis.
+- [medium][missing-docstrings] Function "cache-flush" lacks a docstring. (src/cache/lru.lisp:149)
+  - Rationale: Public functions should document intent for maintainability and self-analysis.
+- [medium][todo] TODO comment: (defun %suggest-improvements-todo-comments (files) (src/tools/analysis-tools.lisp:313)
+  - Rationale: Outstanding TODOs should be triaged or resolved to reduce uncertainty.
+
+## [2026-02-19T01:36:51Z] suggest-improvements
+
+Scope: NIL
+
+Suggestions:
+- [high][test-coverage] Function "select-ollama-system-prompt" appears untested. (src/agent/core.lisp:114)
+  - Rationale: Function has 1 internal callers; missing tests increase regression risk.
+- [high][test-coverage] Function "infer-tool-categories" appears untested. (src/agent/core.lisp:179)
+  - Rationale: Function has 1 internal callers; missing tests increase regression risk.
+- [high][test-coverage] Tool "create-agent-team" lacks explicit test coverage. (src/tools/builtin.lisp:141)
+  - Rationale: User-facing tools should have regression tests to avoid behavioral drift.
+- [high][test-coverage] Tool "create-adaptive-agent-team" lacks explicit test coverage. (src/tools/builtin.lisp:178)
+  - Rationale: User-facing tools should have regression tests to avoid behavioral drift.
+- [high][test-coverage] Tool "delegate-task" lacks explicit test coverage. (src/tools/builtin.lisp:218)
+  - Rationale: User-facing tools should have regression tests to avoid behavioral drift.
+- [medium][error-handling] Function "save-plan" performs risky operations without error handling. (src/plan/core.lisp:198)
+  - Rationale: I/O and tool calls should handle failures to avoid cascading errors.
+- [medium][missing-docstrings] Function "cache-get" lacks a docstring. (src/cache/lru.lisp:88)
+  - Rationale: Public functions should document intent for maintainability and self-analysis.
+- [medium][missing-docstrings] Function "cache-put" lacks a docstring. (src/cache/lru.lisp:109)
+  - Rationale: Public functions should document intent for maintainability and self-analysis.
+- [medium][missing-docstrings] Function "cache-flush" lacks a docstring. (src/cache/lru.lisp:149)
+  - Rationale: Public functions should document intent for maintainability and self-analysis.
+- [medium][todo] TODO comment: (defun %suggest-improvements-todo-comments (files) (src/tools/analysis-tools.lisp:313)
+  - Rationale: Outstanding TODOs should be triaged or resolved to reduce uncertainty.
+
