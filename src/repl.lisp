@@ -20,8 +20,7 @@
     ("/review"        . :review)
     ("/tokens"        . :tokens)
     ("/model"         . :model)
-    ("/cost-report"   . :cost-report)
-    ("/tier-stats"    . :tier-stats))
+    ("/cost-report"   . :cost-report))
   "Mapping of REPL commands to actions.")
 
 ;;; ============================================================
@@ -382,7 +381,7 @@ Returns TEXT unchanged when it is not a string."
         (format-colored-text "  /tokens" :green)
         (format t "         — Show cumulative token usage statistics~%")
         (format-colored-text "  /model" :green)
-        (format t "          — Manage model tier selection~%")
+        (format t "         — Show current model information~%")
         (format-colored-text "  /colors" :green)
         (format t "        — Toggle color output (on/off)~%")
         (format-colored-text "  /quit" :green)
@@ -400,7 +399,7 @@ Returns TEXT unchanged when it is not a string."
         (format t "  /improve         — Request self-improvement (TDD cycle)~%")
         (format t "  /review          — Review improvement suggestions~%")
         (format t "  /tokens          — Show cumulative token usage statistics~%")
-        (format t "  /model           — Manage model tier selection~%")
+        (format t "  /model           — Show current model information~%")
         (format t "  /colors          — Toggle color output (on/off)~%")
         (format t "  /quit            — Exit REPL~%")
         (format t "~%Type anything else to chat with the agent.~%")))
@@ -581,128 +580,41 @@ Returns TEXT unchanged when it is not a string."
 
 
 (defun handle-model-command (agent input)
-  "Handler for :model command. Shows and manages model tier selection.
+  "Handler for :model command. Shows current model information.
 
-   Usage:
-   - /model                    — Show current model and tier info
-   - /model light|medium|heavy — Switch to specified tier
-   - /model auto               — Enable automatic model selection
-   - /model benchmark          — Run classification accuracy benchmark
-   - /model status             — Show detailed model selector status"
-  (let* ((trimmed (string-trim '(#\Space #\Tab) (or input "")))
-         (args-str (string-trim '(#\Space #\Tab)
-                                (if (search "/model" trimmed :test #'string-equal)
-                                    (subseq trimmed (length "/model"))
-                                    trimmed))))
-    (cond
-      ;; No args: show current model info
-      ((string= args-str "")
-       (%model-show-status agent))
-
-      ;; Switch tier
-      ((member args-str '("light" "medium" "heavy") :test #'string-equal)
-       (%model-switch-tier agent args-str))
-
-      ;; Enable auto-selection
-      ((string-equal args-str "auto")
-       (%model-enable-auto agent))
-
-      ;; Run benchmark
-      ((string-equal args-str "benchmark")
-       (%model-run-benchmark agent))
-
-      ;; Detailed status
-      ((string-equal args-str "status")
-       (%model-show-detailed-status agent))
-
-      (t
-       (format t "~%Unknown model command: ~a~%" args-str)
-       (format t "Usage: /model [light|medium|heavy|auto|benchmark|status]~%"))))
+   Usage: /model — Show current model name, context window, and provider"
+  (declare (ignore input))
+  (%model-show-status agent)
   nil)
 
 (defun %model-show-status (agent)
-  "Show current model information."
+  "Show current model information (read-only)."
   (let* ((client (sibyl.agent:agent-client agent))
-         (model-name (ignore-errors (sibyl.llm::client-model client))))
-    (format t "~%Current Model:~%")
-    (if model-name
-        (if *use-colors*
-            (progn
-              (format t "  Model: ")
-              (format-colored-text model-name :green)
-              (format t "~%"))
-            (format t "  Model: ~a~%" model-name))
-        (format t "  Model: (unknown)~%"))))
-
-(defun %model-switch-tier (agent tier-name)
-  "Tier switching is not available in this version."
-  (declare (ignore agent tier-name))
-  (format t "~%Model tier switching is not available.~%~
-                Adaptive model selection has been removed from the REPL.~%"))
-
-(defun %model-enable-auto (agent)
-  "Automatic model selection is not available in this version."
-  (declare (ignore agent))
-  (format t "~%Automatic model selection is not available.~%~
-                Adaptive model selection has been removed from the REPL.~%"))
-
-(defun %model-run-benchmark (agent)
-  "Run the classification accuracy benchmark."
-  (declare (ignore agent))
-  (format t "~%Running model tier classification benchmark (30 tasks)...~%~%")
-  (let* ((selector (sibyl.llm::make-default-model-selector))
-         (start (get-internal-real-time))
-         (result (sibyl.llm::evaluate-classification-accuracy selector :verbose t))
-         (elapsed (/ (float (- (get-internal-real-time) start))
-                     internal-time-units-per-second)))
-    (format t "~%=== Benchmark Results ===~%")
+         (model-name (ignore-errors (sibyl.llm::client-model client)))
+         (context-window (when model-name
+                           (ignore-errors 
+                             (sibyl.llm::context-window-for-model model-name))))
+         (provider (type-of client)))
+    (format t "~%Current Model Information:~%")
     (if *use-colors*
         (progn
-          (format t "Overall: ")
-          (let ((pct (* 100.0 (getf result :accuracy))))
-            (format-colored-text
-             (format nil "~,1f%% (~a/~a)" pct (getf result :correct) (getf result :total))
-             (cond ((>= pct 90) :green) ((>= pct 70) :yellow) (t :red))))
+          (format t "  Model: ")
+          (if model-name
+              (format-colored-text model-name :green)
+              (format t "(unknown)"))
+          (format t "~%")
+          (when context-window
+            (format t "  Context Window: ")
+            (format-colored-text (format nil "~:d tokens" context-window) :cyan)
+            (format t "~%"))
+          (format t "  Provider: ")
+          (format-colored-text (symbol-name provider) :yellow)
           (format t "~%"))
-        (format t "Overall: ~,1f%% (~a/~a)~%"
-                (* 100.0 (getf result :accuracy))
-                (getf result :correct)
-                (getf result :total)))
-    (dolist (tier-result (getf result :by-tier))
-      (format t "  ~a: ~a/~a (~,1f%%)~%"
-              (getf tier-result :tier)
-              (getf tier-result :correct)
-              (getf tier-result :total)
-              (* 100.0 (getf tier-result :accuracy))))
-    (format t "~%Completed in ~,2fs~%" elapsed)))
-
-(defun %model-show-detailed-status (agent)
-  "Show detailed model status."
-  (%model-show-status agent)
-  (format t "~%Adaptive model selection history is not available.~%"))
-
-(defun format-tier-bar-chart (tier-distribution total-tasks &key (width 30))
-  "Render an ASCII horizontal bar chart for tier distribution.
-   TIER-DISTRIBUTION is an alist of (tier-name . count).
-   TOTAL-TASKS is the total number of tasks (for percentage calculation).
-   Returns a formatted string."
-  (with-output-to-string (s)
-    (format s "~%  Tier Distribution:~%")
-    (dolist (entry (sort (copy-list tier-distribution)
-                         #'string< :key #'car))
-      (let* ((tier (car entry))
-             (count (cdr entry))
-             (pct (if (zerop total-tasks)
-                      0.0
-                      (* 100.0 (/ count total-tasks))))
-             (bar-len (if (zerop total-tasks)
-                          0
-                          (round (* width (/ count total-tasks)))))
-             (bar (make-string bar-len :initial-element #\█))
-             (pad (make-string (- width bar-len) :initial-element #\ )))
-        (format s "  ~8a │~a~a ~3d (~,1f%%)~%"
-                tier bar pad count pct)))
-    (format s "~%")))
+        (progn
+          (format t "  Model: ~a~%" (or model-name "(unknown)"))
+          (when context-window
+            (format t "  Context Window: ~:d tokens~%" context-window))
+          (format t "  Provider: ~a~%" (symbol-name provider))))))
 
 (defun save-cost-log (report)
   "Persist a SESSION-COST-REPORT to ~/.sibyl/cost-log.json.
@@ -744,20 +656,16 @@ Returns TEXT unchanged when it is not a string."
 
 (defun handle-cost-report-command (agent input)
   "Handler for /cost-report command.
-   Displays a formatted session cost report with tier distribution bar chart.
+   Displays a formatted session cost report.
    Saves the report to ~/.sibyl/cost-log.json."
   (declare (ignore input))
   (let* ((records (sibyl.agent::agent-cost-records agent))
          (n (length records)))
     (if (zerop n)
         (format t "~%No cost data yet. Run some tasks first.~%")
-        (let* ((report (sibyl.llm::compute-session-report records))
-               (tier-dist (sibyl.llm::session-cost-report-tier-distribution report))
-               (total (sibyl.llm::session-cost-report-task-count report)))
+        (let ((report (sibyl.llm::compute-session-report records)))
           ;; Print the standard session report
           (sibyl.llm::format-session-report report)
-          ;; Append ASCII bar chart
-          (format t "~a" (format-tier-bar-chart tier-dist total))
           ;; Persist to disk
           (let ((saved-path (save-cost-log report)))
             (when saved-path
@@ -765,12 +673,7 @@ Returns TEXT unchanged when it is not a string."
           report)))
   nil)
 
-(defun handle-tier-stats-command (agent input)
-  "Handler for /tier-stats command (no longer available)."
-  (declare (ignore agent input))
-  (format t "~%Tier statistics are not available.~%~
-                Adaptive model selection has been removed from the REPL.~%")
-  nil)
+
 
 ;;; Command handler registry
 
@@ -786,8 +689,7 @@ Returns TEXT unchanged when it is not a string."
         (cons :review  #'handle-review-command-wrapper)
         (cons :tokens        #'handle-tokens-command)
         (cons :model         #'handle-model-command)
-        (cons :cost-report   #'handle-cost-report-command)
-        (cons :tier-stats    #'handle-tier-stats-command))
+        (cons :cost-report   #'handle-cost-report-command))
   "Mapping of command keywords to handler functions.")
 
 (defun handle-repl-command (command agent &optional original-input)
