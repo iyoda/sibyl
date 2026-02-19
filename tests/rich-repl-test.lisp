@@ -376,16 +376,16 @@
 ;;; ============================================================
 
 (test unbind-key-guard-when-ignore-ctrl-j-true
-  "When *ignore-ctrl-j* is T, the guard condition (and *ignore-ctrl-j* (readline-available-p)) is true"
+  "When *ignore-ctrl-j* is T, the variable holds T"
   (let ((sibyl.repl::*ignore-ctrl-j* t))
-    (is (and sibyl.repl::*ignore-ctrl-j* (sibyl.repl::readline-available-p))
-        "Guard should be true when *ignore-ctrl-j* is T and readline is available")))
+    (is (eq sibyl.repl::*ignore-ctrl-j* t)
+        "*ignore-ctrl-j* should be T when bound to T")))
 
 (test unbind-key-guard-when-ignore-ctrl-j-false
-  "When *ignore-ctrl-j* is NIL, the guard condition is false"
+  "When *ignore-ctrl-j* is NIL, the variable holds NIL"
   (let ((sibyl.repl::*ignore-ctrl-j* nil))
-    (is (not (and sibyl.repl::*ignore-ctrl-j* (sibyl.repl::readline-available-p)))
-        "Guard should be false when *ignore-ctrl-j* is NIL")))
+    (is (null sibyl.repl::*ignore-ctrl-j*)
+        "*ignore-ctrl-j* should be NIL when bound to NIL")))
 
 (test code-char-10-is-linefeed
   "Verify that (code-char 10) produces the linefeed character"

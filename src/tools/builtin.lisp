@@ -254,16 +254,3 @@
           (sibyl.agent:send-message coordinator from-id to-id (getf args :message) msg-type)
           (format nil "Message sent from ~a to ~a: ~a" from-id to-id (getf args :message)))
         "No active agent coordinator. Create a team first with create-agent-team.")))
-
-;;; ============================================================
-;;; Adaptive model selection
-;;; ============================================================
-
-(deftool "analyze-task-complexity"
-    (:description "Analyze the complexity of a task description"
-     :category :analysis
-     :parameters ((:name "task-description" :type "string" :required t
-                   :description "Description of the task to analyze")))
-  (let* ((analyzer (sibyl.llm:make-task-analyzer))
-         (analysis (sibyl.llm:analyze-task-complexity analyzer (getf args :task-description))))
-    (format nil "Task Complexity Analysis:~%~a" (sibyl.llm:complexity-reasoning analysis))))
