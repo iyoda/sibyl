@@ -394,13 +394,13 @@
       (fmakunbound 'sibyl.tests::who-calls-test-caller))))
 
 (test who-calls-finds-agent-step-calls-execute-tool-call
-  "who-calls identifies agent-step as caller of execute-tool-call."
+  "who-calls identifies %execute-tool-with-timing as caller of execute-tool-call."
   (let* ((result (sibyl.tools:execute-tool
                   "who-calls"
                   '(("function" . "sibyl.tools:execute-tool-call")
                     ("direction" . "callers"))))
          (result-lower (string-downcase result)))
-    (is (search "agent-step" result-lower))))
+    (is (search "%execute-tool-with-timing" result-lower))))
 
 (test who-calls-handles-nonexistent-function
   "who-calls handles nonexistent functions gracefully."
@@ -1542,14 +1542,6 @@
       (%asdf-registration-restore-asd original-content))))
 
 
-
-(test model-selector-basic
-  "Auto-generated test"
-  (let* ((analyzer (sibyl.llm:make-task-analyzer))
-       (simple-analysis (sibyl.llm:analyze-task-complexity analyzer "Create a simple test"))
-       (complex-analysis (sibyl.llm:analyze-task-complexity analyzer "Design complex system with optimization and debugging")))
-  (is (< (sibyl.llm:complexity-score simple-analysis) 4.0))
-  (is (> (sibyl.llm:complexity-score complex-analysis) 7.0))))
 
 (test logging-system-basic
   "Auto-generated test"

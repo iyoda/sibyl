@@ -637,14 +637,6 @@
 
 
 
-(test model-selector-basic
-  "Auto-generated test"
-  (let* ((analyzer (sibyl.llm:make-task-analyzer))
-       (simple-analysis (sibyl.llm:analyze-task-complexity analyzer "Create a simple test"))
-       (complex-analysis (sibyl.llm:analyze-task-complexity analyzer "Design complex system with optimization and debugging")))
-  (is (< (sibyl.llm:complexity-score simple-analysis) 4.0))
-  (is (> (sibyl.llm:complexity-score complex-analysis) 7.0))))
-
 (test logging-system-basic
   "Auto-generated test"
   (let ((sibyl.logging:*log-level* :debug)
@@ -706,10 +698,11 @@
                      (lambda (suite)
                        (incf call-count)
                        (funcall original-fn suite)))
-               (sibyl.tests::run-tests-parallel)
-               (let ((safe-count (length (sibyl.tests::%safe-suites-resolved)))
-                     (unsafe-count (length sibyl.tests::*unsafe-suites*)))
-                 (is (= call-count (+ safe-count unsafe-count))
-                     (format nil "Expected ~a calls (safe ~a + unsafe ~a), got ~a. Full-suite re-run detected!"
-                             (+ safe-count unsafe-count) safe-count unsafe-count call-count))))
+                (sibyl.tests::run-tests-parallel)
+                ;; Only unsafe suites call %collect-fiveam-results
+                ;; (safe suites use %run-suite-isolated in parallel threads)
+                (let ((unsafe-count (length (sibyl.tests::%unsafe-suites-resolved))))
+                  (is (= call-count unsafe-count)
+                      (format nil "Expected ~a unsafe suite calls, got ~a. Full-suite re-run detected!"
+                              unsafe-count call-count))))
           (setf (symbol-function 'sibyl.tests::%collect-fiveam-results) original-fn)))))

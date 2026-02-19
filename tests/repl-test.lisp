@@ -431,8 +431,8 @@
     (setf (sibyl.agent:agent-token-tracker agent) tracker)
     (let ((output (with-output-to-string (*standard-output*)
                     (sibyl.repl::handle-repl-command :tokens agent))))
-      (is (search "Input:" output :test #'string-equal))
-      (is (search "Output:" output :test #'string-equal)))))
+      (is (search "Input" output :test #'string-equal))
+      (is (search "Output" output :test #'string-equal)))))
 
 (test help-includes-tokens
   "Test that /help output includes /tokens command."

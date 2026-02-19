@@ -63,7 +63,6 @@
     tokens-tests                    ;; Token tracking: pure logic, no I/O, no sleep
     token-tracking-suite            ;; Token usage tracking: pure logic, hash table operations
     memory-compaction-suite         ;; Memory compaction: pure logic, no I/O, no sleep
-    phase6-tests                    ;; Cost calculation: pure logic, no I/O
     model-registry-tests            ;; Model registry and pricing: pure logic, no I/O
     mcp-tests                       ;; MCP protocol: JSON-RPC, schema conversion (pure logic, no I/O)
     openai-usage-tests              ;; OpenAI usage extraction: pure logic, no I/O
@@ -500,14 +499,16 @@ THUNK is a zero-argument function. elapsed-seconds is a float."
             (safe-suites-all (nth-value 0 (%validate-suites (%safe-suites-resolved) "SAFE")))
             (unsafe-suites-all (nth-value 0 (%validate-suites (%unsafe-suites-resolved) "UNSAFE")))
             (suite-run-order (%suite-run-order 'sibyl-tests))
-            (safe-suites (if suite-run-order
-                             (loop for name in suite-run-order
-                                   when (member name safe-suites-all) collect name)
-                             safe-suites-all))
-            (unsafe-suites (if suite-run-order
-                               (loop for name in suite-run-order
-                                     when (member name unsafe-suites-all) collect name)
-                               unsafe-suites-all))
+            (safe-suites (%dedupe-suites
+                          (if suite-run-order
+                              (loop for name in suite-run-order
+                                    when (member name safe-suites-all) collect name)
+                              safe-suites-all)))
+            (unsafe-suites (%dedupe-suites
+                            (if suite-run-order
+                                (loop for name in suite-run-order
+                                      when (member name unsafe-suites-all) collect name)
+                                unsafe-suites-all)))
             ;; Parallel phase: run first occurrences of SAFE suites in threads
             (safe-run-vector (coerce safe-suites 'vector))
             (n-safe (length safe-run-vector))

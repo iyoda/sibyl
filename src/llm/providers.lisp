@@ -231,6 +231,20 @@ Returns SYSTEM unchanged when caching is disabled or SYSTEM is not a list."
         (list (cons "thinking" '(("type" . "adaptive")))
               (cons "output_config" `(("effort" . ,effort))))))))
 
+(defun apply-anthropic-thinking (body model-name)
+  "Merge thinking params into BODY for MODEL-NAME, adjusting temperature.
+Anthropic requires temperature=1 when thinking/adaptive mode is active.
+Returns the (possibly modified) body alist."
+  (let ((thinking-params (anthropic-thinking-params model-name)))
+    (if thinking-params
+        (let ((adjusted (mapcar (lambda (pair)
+                                  (if (string= (car pair) "temperature")
+                                      (cons "temperature" 1.0)
+                                      pair))
+                                body)))
+          (append adjusted thinking-params))
+        body)))
+
 (defun parse-anthropic-response (response)
   "Parse Anthropic API response into a message struct.
 Returns (values message usage-plist) where usage-plist may be nil."
@@ -328,10 +342,7 @@ Returns a reconstructed assistant message."
            (final-body (if system-with-cache
                            (append `(("system" . ,system-with-cache)) body-with-tools)
                            body-with-tools))
-           (thinking-params (anthropic-thinking-params (client-model client)))
-           (final-body-with-thinking (if thinking-params
-                                         (append final-body thinking-params)
-                                         final-body))
+           (final-body-with-thinking (apply-anthropic-thinking final-body (client-model client)))
            (text-parts nil)
            (thinking-parts nil)
            (tool-calls nil)
@@ -450,9 +461,7 @@ Returns (values message usage-plist)."
                         ("messages" . ,api-messages))))
           (when system-with-cache
             (push (cons "system" system-with-cache) body))
-          (let ((thinking-params (anthropic-thinking-params (client-model client))))
-            (when thinking-params
-              (setf body (append body thinking-params))))
+          (setf body (apply-anthropic-thinking body (client-model client)))
           (let ((response (http-post-json
                            (anthropic-messages-url client)
                            (anthropic-headers client)
@@ -478,9 +487,7 @@ Returns (values message usage-plist)."
                         ("tools" . ,(tools-to-anthropic-format tools)))))
           (when system-with-cache
             (push (cons "system" system-with-cache) body))
-          (let ((thinking-params (anthropic-thinking-params (client-model client))))
-            (when thinking-params
-              (setf body (append body thinking-params))))
+          (setf body (apply-anthropic-thinking body (client-model client)))
           (let ((response (http-post-json
                            (anthropic-messages-url client)
                            (anthropic-headers client)

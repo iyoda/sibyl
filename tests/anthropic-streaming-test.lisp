@@ -172,21 +172,24 @@
 ;; Test 2: Opus 4-6 has :thinking capability
 (test opus-4-6-has-thinking-capability
   "Claude Opus 4-6 should have :thinking in capabilities"
-  (let ((opus-model (gethash "claude-opus-4-6" sibyl.llm::*model-registry*)))
+  (let ((opus-model (find "claude-opus-4-6" sibyl.llm::*model-registry*
+                              :key #'sibyl.llm::model-name :test #'string=)))
     (is (not (null opus-model)))
     (is (member :thinking (sibyl.llm::model-capabilities opus-model)))))
 
 ;; Test 3: Sonnet 4-6 has :thinking capability
 (test sonnet-4-6-has-thinking-capability
   "Claude Sonnet 4-6 should have :thinking in capabilities"
-  (let ((sonnet-model (gethash "claude-sonnet-4-6" sibyl.llm::*model-registry*)))
+  (let ((sonnet-model (find "claude-sonnet-4-6" sibyl.llm::*model-registry*
+                                :key #'sibyl.llm::model-name :test #'string=)))
     (is (not (null sonnet-model)))
     (is (member :thinking (sibyl.llm::model-capabilities sonnet-model)))))
 
 ;; Test 4: Haiku does NOT have :thinking capability
 (test haiku-no-thinking-capability
   "Claude Haiku should NOT have :thinking in capabilities"
-  (let ((haiku-model (gethash "claude-haiku-4-5-20251015" sibyl.llm::*model-registry*)))
+  (let ((haiku-model (find "claude-haiku-4-5-20251015" sibyl.llm::*model-registry*
+                               :key #'sibyl.llm::model-name :test #'string=)))
     (is (not (null haiku-model)))
     (is (not (member :thinking (sibyl.llm::model-capabilities haiku-model))))))
 
