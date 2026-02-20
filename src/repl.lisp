@@ -131,6 +131,18 @@ Returns TEXT unchanged when it is not a string."
                      (return)))))))
         (get-output-stream-string out)))))
 
+(defun strip-leading-newlines (text)
+  "Strip leading newline characters from TEXT.
+   Preserves other leading whitespace (spaces, tabs).
+   Used to clean up the first chunk of streamed LLM responses
+   which often start with spurious blank lines."
+  (if (or (null text) (string= text ""))
+      ""
+      (let ((start (position-if (lambda (ch) (char/= ch #\Newline)) text)))
+        (if start
+            (subseq text start)
+            ""))))
+
 (defvar *command-history* nil
   "List of command strings entered in the current REPL session, in reverse chronological order.")
 
@@ -1702,20 +1714,25 @@ Otherwise, use model-specific optimized prompt for Ollama models."
                                           ;; Handles both the initial spinner AND spinners restarted
                                           ;; by the tool-call hook between LLM calls.
                                           (when spinner-was-active
-                                            (stop-current-spinner)
-                                            (format t "~%"))
+                                            (stop-current-spinner))
                                           ;; Emit newline separator after thinking output.
-                                          ;; When a spinner was active, its stop + ~% already provides
-                                          ;; the line break; otherwise we need an explicit separator.
+                                          ;; Spinner stop clears the line (\r\e[2K), cursor is at col 0;
+                                          ;; no extra newline needed. Without spinner, emit separator.
                                           (when *thinking-output-active*
                                             (unless spinner-was-active
                                               (format t "~%"))
                                             (setf *thinking-output-active* nil))
-                                          (setf first-chunk-p nil)
-                                          (let ((clean (if stripper
-                                                           (funcall stripper text)
-                                                           text)))
+                                          (let* ((clean (if stripper
+                                                            (funcall stripper text)
+                                                            text))
+                                                 ;; Strip leading newlines from the very first
+                                                 ;; chunk to avoid spurious blank lines at the
+                                                 ;; start of the response.
+                                                 (clean (if first-chunk-p
+                                                            (strip-leading-newlines clean)
+                                                            clean)))
                                             (when (and clean (plusp (length clean)))
+                                              (setf first-chunk-p nil)
                                               (write-string clean *standard-output*)
                                               (force-output *standard-output*)))))))
                                     (sibyl.llm::*streaming-thinking-callback*

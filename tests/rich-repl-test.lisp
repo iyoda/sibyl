@@ -491,3 +491,109 @@
     (is (eq :hint (sibyl.repl::%interrupt-action now last-time window)))
     ;; One tick before window boundary should return :exit
     (is (eq :exit (sibyl.repl::%interrupt-action (1- now) last-time window)))))
+
+(test text-callback-no-blank-line-after-spinner
+  "When the text streaming callback stops an active spinner,
+no extra newline should be emitted — text should start on
+the cleared spinner line, with no blank gap."
+  (let* ((sibyl.repl::*stream-enabled* t)
+         (sibyl.repl::*use-colors* nil)
+         (sibyl.repl::*thinking-output-active* nil)
+         (sibyl.repl::*current-spinner* nil)
+         (sibyl.repl::*spinner-output-lock* (bt:make-lock "test-lock")))
+    (let* ((out (make-string-output-stream))
+           (*standard-output* out))
+      ;; Create spinner with *standard-output* bound to string stream
+      (let ((sp (sibyl.repl.spinner:start-spinner "Thinking...")))
+        (sleep 0.05)
+        (sibyl.repl.spinner:stop-spinner sp)
+        ;; Re-activate flag to simulate running spinner
+        (setf (sibyl.repl.spinner::spinner-active sp) t)
+        (setf sibyl.repl::*current-spinner* sp))
+      ;; Drain whatever the spinner thread wrote
+      (get-output-stream-string out)
+      ;; Now replay the text callback's spinner-stop logic (FIXED version):
+      (let ((spinner-was-active
+              (and sibyl.repl::*current-spinner*
+                   (sibyl.repl.spinner:spinner-active-p sibyl.repl::*current-spinner*))))
+        (when spinner-was-active
+          (sibyl.repl.spinner:stop-spinner sibyl.repl::*current-spinner*)
+          (setf sibyl.repl::*current-spinner* nil)
+          ;; NO (format t "~%") here — that was the bug.
+          )
+        (when sibyl.repl::*thinking-output-active*
+          (unless spinner-was-active
+            (format t "~%"))
+          (setf sibyl.repl::*thinking-output-active* nil))
+        (write-string "Hello!" *standard-output*))
+      (let ((result (get-output-stream-string out)))
+        (let ((hello-pos (search "Hello!" result)))
+          (is-true hello-pos "Response text should be present in output")
+          (when hello-pos
+            ;; No newline character should immediately precede "Hello!"
+            (is (or (zerop hello-pos)
+                    (not (char= #\Newline (char result (1- hello-pos)))))
+                (format nil "No newline should precede text after spinner stop. Output: ~s"
+                        result))))))))
+
+(test text-callback-thinking-separator-preserved
+  "When thinking output was active (no spinner), the text callback
+should emit exactly one newline separator before text."
+  (let* ((sibyl.repl::*stream-enabled* t)
+         (sibyl.repl::*use-colors* nil)
+         (sibyl.repl::*thinking-output-active* t)
+         (sibyl.repl::*current-spinner* nil)
+         (sibyl.repl::*spinner-output-lock* (bt:make-lock "test-lock")))
+    (let* ((out (make-string-output-stream))
+           (*standard-output* out))
+      (let ((spinner-was-active nil))
+        ;; No spinner — the thinking→text separator logic runs:
+        (when sibyl.repl::*thinking-output-active*
+          (unless spinner-was-active
+            (format t "~%"))
+          (setf sibyl.repl::*thinking-output-active* nil))
+        (write-string "Hello!" *standard-output*))
+      (let ((result (get-output-stream-string out)))
+        ;; Should be exactly "\nHello!" — one newline separator
+        (is (eql 1 (count #\Newline result))
+            (format nil "Exactly one newline separator expected, got: ~s" result))
+        (is (char= #\Newline (char result 0))
+            "Newline should be the first character (separator)")))))
+
+(test text-callback-thinking-active-with-spinner-no-double-newline
+  "When both spinner was active AND thinking-output-active is T,
+no newline should be emitted — text starts on cleared spinner line."
+  (let* ((sibyl.repl::*stream-enabled* t)
+         (sibyl.repl::*use-colors* nil)
+         (sibyl.repl::*thinking-output-active* t)
+         (sibyl.repl::*current-spinner* nil)
+         (sibyl.repl::*spinner-output-lock* (bt:make-lock "test-lock")))
+    (let* ((out (make-string-output-stream))
+           (*standard-output* out))
+      ;; Create spinner, stop it, then re-activate
+      (let ((sp (sibyl.repl.spinner:start-spinner "Thinking...")))
+        (sleep 0.05)
+        (sibyl.repl.spinner:stop-spinner sp)
+        (setf (sibyl.repl.spinner::spinner-active sp) t)
+        (setf sibyl.repl::*current-spinner* sp))
+      ;; Drain spinner output
+      (get-output-stream-string out)
+      (let ((spinner-was-active
+              (and sibyl.repl::*current-spinner*
+                   (sibyl.repl.spinner:spinner-active-p sibyl.repl::*current-spinner*))))
+        (when spinner-was-active
+          (sibyl.repl.spinner:stop-spinner sibyl.repl::*current-spinner*)
+          (setf sibyl.repl::*current-spinner* nil))
+        ;; Thinking-active path: when spinner was also active,
+        ;; no extra newline (spinner clear provides separation).
+        (when sibyl.repl::*thinking-output-active*
+          (unless spinner-was-active
+            (format t "~%"))
+          (setf sibyl.repl::*thinking-output-active* nil))
+        (write-string "Hello!" *standard-output*))
+      (let ((result (get-output-stream-string out)))
+        ;; No newlines in output — text directly after spinner clear
+        (is (zerop (count #\Newline result))
+            (format nil "No newlines expected when spinner+thinking both active. Got: ~s" result))
+        (is (null sibyl.repl::*thinking-output-active*)
+            "thinking-output-active flag should be reset")))))

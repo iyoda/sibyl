@@ -1934,3 +1934,71 @@
     (is (null sibyl.repl::*thinking-output-active*)
         "flag should be reset to NIL")))
 )
+
+(test strip-leading-newlines-basic
+  "Auto-generated test"
+  (is (string= "Hello" (sibyl.repl::strip-leading-newlines "Hello")))
+(is (string= "Hello" (sibyl.repl::strip-leading-newlines (format nil "~%~%Hello"))))
+(is (string= (format nil "Hello~%World") (sibyl.repl::strip-leading-newlines (format nil "~%~%Hello~%World"))))
+(is (string= "" (sibyl.repl::strip-leading-newlines "")))
+(is (string= "" (sibyl.repl::strip-leading-newlines (format nil "~%~%"))))
+(is (string= " Hello" (sibyl.repl::strip-leading-newlines " Hello"))))
+
+(test strip-leading-newlines-streaming
+  "Auto-generated test"
+  ;; Simulate the streaming callback's first-chunk stripping logic
+(let ((first-chunk-p t)
+      (output (make-string-output-stream)))
+  ;; First chunk with leading newlines (as LLMs often produce)
+  (let* ((text (format nil "~%~%Hello, how can I help?"))
+         (clean (if first-chunk-p
+                    (sibyl.repl::strip-leading-newlines text)
+                    text)))
+    (when (and clean (plusp (length clean)))
+      (setf first-chunk-p nil)
+      (write-string clean output)))
+  ;; Second chunk (no stripping)
+  (let* ((text (format nil "~%I'm here to assist."))
+         (clean (if first-chunk-p
+                    (sibyl.repl::strip-leading-newlines text)
+                    text)))
+    (when (and clean (plusp (length clean)))
+      (setf first-chunk-p nil)
+      (write-string clean output)))
+  (let ((result (get-output-stream-string output)))
+    ;; Should NOT start with newlines
+    (is (char/= (char result 0) #\Newline)
+        "First character should not be a newline")
+    ;; Should start with "Hello"
+    (is (search "Hello" result)
+        "Should contain Hello")
+    ;; Newlines in the second chunk should be preserved
+    (is (search (format nil "~%I'm here") result)
+        "Newlines in subsequent chunks should be preserved"))))
+
+(test strip-leading-newlines-all-newlines-chunk
+  "Auto-generated test"
+  ;; Edge case: first chunk is entirely newlines
+(let ((first-chunk-p t)
+      (output (make-string-output-stream)))
+  ;; First chunk: only newlines → stripped to empty → first-chunk-p stays T
+  (let* ((text (format nil "~%~%"))
+         (clean (if first-chunk-p
+                    (sibyl.repl::strip-leading-newlines text)
+                    text)))
+    (when (and clean (plusp (length clean)))
+      (setf first-chunk-p nil)
+      (write-string clean output)))
+  ;; first-chunk-p should still be T (nothing was written)
+  (is (eq first-chunk-p t)
+      "first-chunk-p should remain T when first chunk was all newlines")
+  ;; Second chunk also gets stripped since first-chunk-p is still T
+  (let* ((text (format nil "~%Content"))
+         (clean (if first-chunk-p
+                    (sibyl.repl::strip-leading-newlines text)
+                    text)))
+    (when (and clean (plusp (length clean)))
+      (setf first-chunk-p nil)
+      (write-string clean output)))
+  (is (string= "Content" (get-output-stream-string output))
+      "Output should be just 'Content' with no leading newlines")))

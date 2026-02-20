@@ -163,11 +163,11 @@
 
 (in-suite anthropic-thinking-config-tests)
 
-;; Test 1: thinking.effort config key defaults to "max"
+;; Test 1: thinking.effort config key defaults to "medium"
 (test thinking-effort-config-default
-  "thinking.effort config key should default to 'max'"
+  "thinking.effort config key should default to 'medium'"
   (sibyl:with-config ()
-    (is (string= "max" (sibyl:config-value "thinking.effort")))))
+    (is (string= "medium" (sibyl:config-value "thinking.effort")))))
 
 ;; Test 2: Opus 4-6 has :thinking capability
 (test opus-4-6-has-thinking-capability
@@ -204,24 +204,24 @@
 (in-suite anthropic-thinking-params-tests)
 
 (test anthropic-thinking-params-opus-4-6
-  "Opus 4-6 should include thinking params with max effort"
+  "Opus 4-6 should include thinking params with medium effort"
   (sibyl:with-config ()
     (let* ((params (sibyl.llm::anthropic-thinking-params "claude-opus-4-6"))
            (thinking (cdr (assoc "thinking" params :test #'string=)))
            (output-config (cdr (assoc "output_config" params :test #'string=))))
       (is (listp params))
       (is (string= "adaptive" (cdr (assoc "type" thinking :test #'string=))))
-      (is (string= "max" (cdr (assoc "effort" output-config :test #'string=)))))))
+      (is (string= "medium" (cdr (assoc "effort" output-config :test #'string=)))))))
 
 (test anthropic-thinking-params-sonnet-4-6
-  "Sonnet 4-6 should include thinking params with high effort"
+  "Sonnet 4-6 should include thinking params with medium effort"
   (sibyl:with-config ()
     (let* ((params (sibyl.llm::anthropic-thinking-params "claude-sonnet-4-6"))
            (thinking (cdr (assoc "thinking" params :test #'string=)))
            (output-config (cdr (assoc "output_config" params :test #'string=))))
       (is (listp params))
       (is (string= "adaptive" (cdr (assoc "type" thinking :test #'string=))))
-      (is (string= "high" (cdr (assoc "effort" output-config :test #'string=)))))))
+      (is (string= "medium" (cdr (assoc "effort" output-config :test #'string=)))))))
 
 (test anthropic-thinking-params-haiku
   "Haiku should not include thinking params"

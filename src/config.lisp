@@ -120,7 +120,7 @@ Convenience function equivalent to (setf (config-value KEY) VALUE)."
                      ;; REPL defaults
                      ("repl.ignore-ctrl-j" . nil)
                      ;; Thinking defaults
-                      ("thinking.effort" . "max"))))
+                     ("thinking.effort" . "medium"))))
     (dolist (pair defaults)
       (unless (config-value (car pair))
         (setf (config-value (car pair)) (cdr pair))))))
