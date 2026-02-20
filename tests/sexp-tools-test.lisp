@@ -2084,3 +2084,53 @@
         (is (every (lambda (s) (member (getf s :name) tool-list :test #'string=))
                    filtered))))))
 )
+
+(test role-tools-filter-schema
+  "Auto-generated test"
+  
+;; Verify that *allowed-tools* filters tools-as-schema output
+(let* ((all-tools (sibyl.tools:tools-as-schema))
+       (all-names (mapcar (lambda (s) (getf s :name)) all-tools)))
+  ;; There should be many tools normally
+  (is (> (length all-tools) 5) "Should have many tools without filter")
+  ;; Now filter to only "eval-form" and "read-file"
+  (let* ((sibyl.tools:*allowed-tools* (list "eval-form" "read-file"))
+         (filtered (sibyl.tools:tools-as-schema))
+         (filtered-names (mapcar (lambda (s) (getf s :name)) filtered)))
+    (is (= 2 (length filtered)) "Should have exactly 2 tools when filtered")
+    (is (member "eval-form" filtered-names :test #'string=))
+    (is (member "read-file" filtered-names :test #'string=))
+    (is (not (member "shell" filtered-names :test #'string=))
+        "shell should be excluded")))
+)
+
+(test execute-task-binds-role-tools
+  "Auto-generated test"
+  
+;; Verify that execute-agent-task binds *allowed-tools* from role-tools
+(let* ((captured-tools :not-set)
+       (role (make-instance 'sibyl.agent::agent-role
+                            :name "limited-coder"
+                            :description "Can only eval"
+                            :system-prompt "You are limited."
+                            :tools (list "eval-form" "read-file")))
+       (agent (make-instance 'sibyl.agent::specialized-agent
+                             :agent-id "bind-test"
+                             :role role))
+       (task (make-instance 'sibyl.agent::agent-task
+                            :id "task-bind"
+                            :description "test")))
+  ;; Mock agent-run to capture *allowed-tools*
+  (let ((orig-fn (symbol-function 'sibyl.agent::agent-run)))
+    (unwind-protect
+         (progn
+           (setf (symbol-function 'sibyl.agent::agent-run)
+                 (lambda (ag desc)
+                   (declare (ignore ag desc))
+                   (setf captured-tools (copy-list sibyl.tools:*allowed-tools*))
+                   "done"))
+           (sibyl.agent::execute-agent-task agent task)
+           (is (equal captured-tools (list "eval-form" "read-file"))
+               "Should bind *allowed-tools* to role's tool list"))
+      (setf (symbol-function 'sibyl.agent::agent-run) orig-fn))))
+)

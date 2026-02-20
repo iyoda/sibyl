@@ -470,3 +470,139 @@
   (is (not (member "write-file" captured-tools :test #'string=))
       "Tester role must NOT have write-file tool"))
 )
+
+(test role-tools-filtering
+  "Auto-generated test"
+  (let* ((coder-role (find "coder" sibyl.agent::*default-roles*
+                         :key #'sibyl.agent:role-name :test #'string=))
+       (tester-role (find "tester" sibyl.agent::*default-roles*
+                          :key #'sibyl.agent:role-name :test #'string=)))
+  ;; Coder role should include write-file but NOT run-tests
+  (let ((sibyl.tools:*allowed-tools* (sibyl.agent:role-tools coder-role)))
+    (let ((schemas (sibyl.tools:tools-as-schema)))
+      (is (find "write-file" schemas :key (lambda (s) (getf s :name)) :test #'string=)
+          "Coder should have access to write-file")
+      (is (not (find "run-tests" schemas :key (lambda (s) (getf s :name)) :test #'string=))
+          "Coder should NOT have access to run-tests")))
+  ;; Tester role should include run-tests but NOT write-file
+  (let ((sibyl.tools:*allowed-tools* (sibyl.agent:role-tools tester-role)))
+    (let ((schemas (sibyl.tools:tools-as-schema)))
+      (is (find "run-tests" schemas :key (lambda (s) (getf s :name)) :test #'string=)
+          "Tester should have access to run-tests")
+      (is (not (find "write-file" schemas :key (lambda (s) (getf s :name)) :test #'string=))
+          "Tester should NOT have access to write-file")))))
+
+(test find-suitable-agent-role-matching
+  "Auto-generated test"
+  (let* ((coordinator (sibyl.agent:make-agent-coordinator))
+       (coder-role (find "coder" sibyl.agent::*default-roles*
+                         :key #'sibyl.agent:role-name :test #'string=))
+       (tester-role (find "tester" sibyl.agent::*default-roles*
+                          :key #'sibyl.agent:role-name :test #'string=))
+       (mock-client (make-instance 'sibyl.llm:llm-client))
+       (coder-agent (sibyl.agent:make-specialized-agent coder-role mock-client
+                                                         :agent-id "coder-1"))
+       (tester-agent (sibyl.agent:make-specialized-agent tester-role mock-client
+                                                          :agent-id "tester-1")))
+  (sibyl.agent:add-agent coordinator coder-agent)
+  (sibyl.agent:add-agent coordinator tester-agent)
+  ;; Task requiring "coder" role should find the coder agent
+  (let ((task (sibyl.agent:create-task coordinator "Write code" :required-role "coder")))
+    (let ((found (sibyl.agent:find-suitable-agent coordinator task)))
+      (is (not (null found)) "Should find a suitable agent")
+      (is (string= "coder-1" (sibyl.agent:agent-id found))
+          "Should match coder agent")))
+  ;; Task requiring "tester" role should find the tester agent
+  (let ((task (sibyl.agent:create-task coordinator "Run tests" :required-role "tester")))
+    (let ((found (sibyl.agent:find-suitable-agent coordinator task)))
+      (is (not (null found)) "Should find a suitable agent")
+      (is (string= "tester-1" (sibyl.agent:agent-id found))
+          "Should match tester agent")))
+  ;; Task with no role requirement should find any idle agent
+  (let ((task (sibyl.agent:create-task coordinator "Generic task")))
+    (let ((found (sibyl.agent:find-suitable-agent coordinator task)))
+      (is (not (null found)) "Should find any idle agent")))
+  ;; Task with [role] annotation in description
+  (let ((task (sibyl.agent:create-task coordinator "[tester] Write unit tests")))
+    (let ((found (sibyl.agent:find-suitable-agent coordinator task)))
+      (is (string= "tester-1" (sibyl.agent:agent-id found))
+          "Should match tester via annotation")))))
+
+(test agent-inbox-receive
+  "Auto-generated test"
+  (let* ((coordinator (sibyl.agent:make-agent-coordinator))
+       (coder-role (find "coder" sibyl.agent::*default-roles*
+                         :key #'sibyl.agent:role-name :test #'string=))
+       (tester-role (find "tester" sibyl.agent::*default-roles*
+                          :key #'sibyl.agent:role-name :test #'string=))
+       (mock-client (make-instance 'sibyl.llm:llm-client))
+       (coder (sibyl.agent:make-specialized-agent coder-role mock-client
+                                                    :agent-id "coder-1"))
+       (tester (sibyl.agent:make-specialized-agent tester-role mock-client
+                                                     :agent-id "tester-1")))
+  (sibyl.agent:add-agent coordinator coder)
+  (sibyl.agent:add-agent coordinator tester)
+  ;; Send a message from coder to tester
+  (sibyl.agent:send-message coordinator "coder-1" "tester-1"
+                            "Please review my code" :request)
+  ;; Tester should have the message in inbox
+  (let ((inbox (sibyl.agent:agent-inbox tester)))
+    (is (= 1 (length inbox)) "Tester should have 1 message in inbox")
+    (when inbox
+      (is (string= "Please review my code" (sibyl.agent:msg-content (first inbox)))
+          "Message content should match")
+      (is (string= "coder-1" (sibyl.agent:msg-from (first inbox)))
+          "Message should be from coder")))
+  ;; Coder should have empty inbox
+  (is (= 0 (length (sibyl.agent:agent-inbox coder)))
+      "Coder should have no messages")))
+
+(test broadcast-delivers-to-all-inboxes
+  "Auto-generated test"
+  (let* ((coordinator (sibyl.agent:make-agent-coordinator))
+       (coder-role (find "coder" sibyl.agent::*default-roles*
+                         :key #'sibyl.agent:role-name :test #'string=))
+       (tester-role (find "tester" sibyl.agent::*default-roles*
+                          :key #'sibyl.agent:role-name :test #'string=))
+       (mock-client (make-instance 'sibyl.llm:llm-client))
+       (coder (sibyl.agent:make-specialized-agent coder-role mock-client
+                                                    :agent-id "coder-1"))
+       (tester (sibyl.agent:make-specialized-agent tester-role mock-client
+                                                     :agent-id "tester-1"))
+       (arch-role (find "architect" sibyl.agent::*default-roles*
+                         :key #'sibyl.agent:role-name :test #'string=))
+       (arch (sibyl.agent:make-specialized-agent arch-role mock-client
+                                                   :agent-id "arch-1")))
+  (sibyl.agent:add-agent coordinator coder)
+  (sibyl.agent:add-agent coordinator tester)
+  (sibyl.agent:add-agent coordinator arch)
+  ;; Broadcast from coder
+  (sibyl.agent:broadcast-message coordinator "coder-1" "Starting work")
+  ;; Tester and arch should each have 1 message, coder should have 0
+  (is (= 1 (length (sibyl.agent:agent-inbox tester))) "Tester gets broadcast")
+  (is (= 1 (length (sibyl.agent:agent-inbox arch))) "Architect gets broadcast")
+  (is (= 0 (length (sibyl.agent:agent-inbox coder))) "Sender doesn't get own broadcast")))
+
+(test execute-task-includes-inbox-context
+  "Auto-generated test"
+  (let* ((coordinator (sibyl.agent:make-agent-coordinator))
+       (coder-role (find "coder" sibyl.agent::*default-roles*
+                         :key #'sibyl.agent:role-name :test #'string=))
+       (tester-role (find "tester" sibyl.agent::*default-roles*
+                          :key #'sibyl.agent:role-name :test #'string=))
+       (mock-client (make-instance 'sibyl.llm:llm-client))
+       (coder (sibyl.agent:make-specialized-agent coder-role mock-client
+                                                    :agent-id "coder-1"))
+       (tester (sibyl.agent:make-specialized-agent tester-role mock-client
+                                                     :agent-id "tester-1")))
+  (sibyl.agent:add-agent coordinator coder)
+  (sibyl.agent:add-agent coordinator tester)
+  ;; Send message to tester
+  (sibyl.agent:send-message coordinator "coder-1" "tester-1"
+                            "The function is in utils.lisp" :notification)
+  ;; Verify format-inbox-context works
+  (let ((ctx (sibyl.agent::format-inbox-context tester)))
+    (is (search "coder-1" ctx) "Context should mention sender")
+    (is (search "utils.lisp" ctx) "Context should contain message content"))
+  ;; Verify inbox is populated before execute
+  (is (= 1 (length (sibyl.agent:agent-inbox tester))) "Should have 1 message before execute")))

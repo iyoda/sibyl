@@ -17,7 +17,9 @@
   ((role :initarg :role :accessor agent-role :type agent-role)
    (agent-id :initarg :agent-id :accessor agent-id :type string)
    (status :initarg :status :accessor agent-status :initform :idle
-           :type (member :idle :working :waiting :error))))
+           :type (member :idle :working :waiting :error))
+   (inbox :initarg :inbox :accessor agent-inbox :initform nil
+          :documentation "List of inter-agent-message objects received by this agent")))
 
 ;; Multi-agent coordinator
 (defclass agent-coordinator ()
@@ -186,15 +188,18 @@ in DESCRIPTION (e.g. \"[tester] Write tests\" → required-role \"tester\")."
   task)
 
 ;; Communication functions
-(defmethod send-message ((coordinator agent-coordinator) from-id to-id content message-type &key context)
-  "Send a message between agents"
-  (let ((message (make-instance 'inter-agent-message
-                                :from from-id
-                                :to to-id
-                                :content content
-                                :message-type message-type
-                                :context context)))
+(defmethod send-message
+           ((coordinator agent-coordinator) from-id to-id content message-type
+            &key context)
+  "Send a message between agents. Delivers to recipient's inbox."
+  (let ((message
+         (make-instance 'inter-agent-message :from from-id :to to-id :content
+                        content :message-type message-type :context context)))
     (push message (coordinator-communication-log coordinator))
+    ;; Deliver to recipient's inbox
+    (let ((recipient (find-agent coordinator to-id)))
+      (when (and recipient (typep recipient 'specialized-agent))
+        (push message (agent-inbox recipient))))
     message))
 
 (defmethod broadcast-message ((coordinator agent-coordinator) from-id content &key context)
@@ -207,6 +212,18 @@ in DESCRIPTION (e.g. \"[tester] Write tests\" → required-role \"tester\")."
                        messages)))
              (coordinator-agents coordinator))
     messages))
+
+(defun format-inbox-context (agent)
+  "Format inbox messages as context string for agent's system prompt."
+  (let ((inbox (agent-inbox agent)))
+    (when inbox
+      (with-output-to-string (s)
+        (format s "~%## Messages from other agents:~%")
+        (dolist (msg (reverse inbox))  ; oldest first
+          (format s "- From ~a (~a): ~a~%"
+                  (msg-from msg)
+                  (msg-type msg)
+                  (msg-content msg)))))))
 
 ;; Coordination strategies
 (defmethod execute-tasks ((coordinator agent-coordinator) &key (task-fn nil))
@@ -333,15 +350,20 @@ Falls back to any idle agent when no role match is found."
 (defmethod execute-agent-task ((agent specialized-agent) (task agent-task))
   "Execute a task by invoking agent-run with the task description.
 Binds *allowed-tools* to the role's tool list for runtime filtering.
-Marks the task :failed on error and records the condition message as the result."
+Injects inbox messages as context. Marks the task :failed on error."
   (setf (task-status task) :in-progress)
-  (let ((role-tool-list (role-tools (agent-role agent))))
+  (let ((role-tool-list (role-tools (agent-role agent)))
+        (inbox-context (format-inbox-context agent)))
     (handler-case
-        (let ((sibyl.tools:*allowed-tools* role-tool-list))
-          (agent-run agent (task-description task)))
-      (error (e)
-        (setf (task-status task) :failed)
-        (let ((msg (format nil "ERROR: ~a" e)))
-          (setf (task-result task) msg)
-          msg)))))
+     (let ((*allowed-tools* role-tool-list)
+           (description (if inbox-context
+                           (format nil "~a~%~a" (task-description task) inbox-context)
+                           (task-description task))))
+       ;; Clear inbox after reading
+       (setf (agent-inbox agent) nil)
+       (agent-run agent description))
+     (error (e) (setf (task-status task) :failed)
+            (let ((msg (format nil "ERROR: ~a" e)))
+              (setf (task-result task) msg)
+              msg)))))
 

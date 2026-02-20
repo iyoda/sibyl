@@ -359,6 +359,7 @@
    #:task-required-role
    #:parse-role-annotation
    #:memory-compaction-callback
+   #:agent-inbox
    #:agent-reset))
 
 (defpackage #:sibyl.mcp
