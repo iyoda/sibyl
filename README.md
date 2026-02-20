@@ -49,7 +49,7 @@ scripts/start-repl.sh gpt-5-mini
 # Opus-4.6
 scripts/start-repl.sh opus-4.6
 
-# Soonet-4.6 (Sonnet-4.6 alias)
+# soonet-4.6 (legacy alias; sonnet-4.6 も利用可)
 scripts/start-repl.sh soonet-4.6
 ```
 
@@ -100,37 +100,62 @@ OAuth tokens are automatically detected and authenticated using `Authorization: 
 
 | Command | Description |
 |---------|-------------|
+| `/quit`, `/exit` | Quit |
 | `/help` | Show help |
 | `/tools` | List registered tools |
-| `/reset` | Reset conversation |
+| `/reset`, `/new` | Reset conversation |
 | `/history` | Show conversation history |
-| `/quit` | Quit |
+| `/mcp` | Show MCP connection status |
+| `/plan` | Manage plans (`list`, `new`, `delete`, `status`) |
+| `/improve` | Run self-improvement workflow |
+| `/review` | Review/approve/reject suggestions |
+| `/tokens` | Show token usage stats |
+| `/model` | Show/switch model (`list`, `history` supported) |
+| `/cost-report` | Show session cost report |
+| `/cache-stats` | Show cache hit/miss stats |
+| `/sessions` | List saved sessions |
+| `/save` | Save current session |
+| `/load <session-id>` | Load a saved session |
+| `/colors [on|off]` | Toggle terminal colors |
+| `/log [on|off|status]` | Toggle/show log output |
 
 ## Project Structure
 
 ```
 sibyl/
-├── sibyl.asd                 # ASDF system definition
+├── sibyl.asd                     # ASDF system definition
+├── scripts/                      # Utility scripts (REPL launcher, git hooks, checks)
 ├── src/
-│   ├── packages.lisp         # Package definitions
-│   ├── conditions.lisp       # Condition hierarchy
-│   ├── config.lisp           # Configuration management
-│   ├── util.lisp             # Utilities
+│   ├── packages.lisp             # Package definitions
+│   ├── conditions.lisp           # Condition hierarchy
+│   ├── config.lisp               # Configuration management
+│   ├── util.lisp                 # Utilities
+│   ├── logging.lisp              # Logging utilities
+│   ├── system/                   # System-level helpers
 │   ├── llm/
-│   │   ├── message.lisp      # Message & conversation data structures
-│   │   ├── client.lisp       # LLM client protocol (CLOS)
-│   │   └── providers.lisp    # Anthropic / OpenAI implementations
+│   │   ├── client.lisp           # LLM client protocol (CLOS)
+│   │   ├── providers.lisp        # Anthropic / OpenAI implementations
+│   │   ├── model-selector.lisp   # Model selection heuristics
+│   │   ├── token-tracker.lisp    # Token/cost tracking
+│   │   └── ollama.lisp           # Ollama integration
 │   ├── tools/
-│   │   ├── protocol.lisp     # deftool macro, registry, execution
-│   │   └── builtin.lisp      # Built-in tools
+│   │   ├── protocol.lisp         # deftool macro, registry, execution
+│   │   ├── builtin.lisp          # Built-in tools
+│   │   ├── lisp-tools.lisp       # Lisp introspection/modification tools
+│   │   ├── analysis-tools.lisp   # Analysis/test generation tools
+│   │   └── planning-tools.lisp   # Planning helpers
 │   ├── agent/
-│   │   ├── memory.lisp       # Context window management
-│   │   └── core.lisp         # Agent loop
-│   └── repl.lisp             # REPL interface
+│   │   ├── memory.lisp           # Context window management
+│   │   ├── multi-agent.lisp      # Multi-agent orchestration
+│   │   └── core.lisp             # Agent loop
+│   ├── plan/                      # Plan data model and persistence
+│   ├── mcp/                       # MCP client and tool bridge
+│   ├── cache/                     # Provider cache adapters/telemetry
+│   ├── repl/                      # REPL submodules (display/spinner/session)
+│   └── repl.lisp                  # REPL entrypoint
 └── tests/
-    ├── suite.lisp            # Test suite (FiveAM)
-    ├── tools-test.lisp       # Tool tests
-    └── message-test.lisp     # Message tests
+    ├── suite.lisp                # FiveAM suite definitions/classification
+    └── *-test.lisp               # Domain-specific test files
 ```
 
 ## Tests
@@ -172,8 +197,10 @@ To extend forbidden package prefixes, edit `*forbidden-prefixes*` in
 | [yason](https://github.com/phmarek/yason) | JSON parser |
 | [cl-ppcre](https://edicl.github.io/cl-ppcre/) | Regular expressions |
 | [bordeaux-threads](https://github.com/sionescu/bordeaux-threads) | Threading |
+| [uiop](https://common-lisp.net/project/asdf/uiop.html) | Portable OS/file utilities |
 | [local-time](https://common-lisp.net/project/local-time/) | Time handling |
-| [fiveam](https://common-lisp.net/project/fiveam/) | Test framework |
+| [ironclad](https://github.com/sharplispers/ironclad) | Cryptographic utilities |
+| [fiveam](https://common-lisp.net/project/fiveam/) | Test framework (`:sibyl/tests`) |
 
 ## License
 

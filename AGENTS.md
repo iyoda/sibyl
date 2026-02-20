@@ -1,7 +1,8 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `src/` holds the Common Lisp implementation, organized by domain: `llm/`, `tools/`, `agent/`, `plan/`, `mcp/`, and `repl/`.
+- `src/` holds the Common Lisp implementation, organized by domain: `llm/`, `tools/`, `agent/`, `plan/`, `mcp/`, `cache/`, `repl/`, and `system/`.
+- `scripts/` contains helper scripts (e.g., REPL launcher and git-hook installers/checkers).
 - `tests/` contains FiveAM test suites (e.g., `tests/suite.lisp`).
 - `sibyl.asd` defines the ASDF system; keep it updated when adding files.
 - `docs/` hosts design notes (see `docs/design-vision-ja.md`).
@@ -14,6 +15,10 @@
 - Start the REPL (Anthropic example):
   ```bash
   sbcl --eval '(ql:quickload :sibyl :silent t)' --eval '(sibyl:with-config () (sibyl:start-repl :client (sibyl:make-anthropic-client)))'
+  ```
+- Start the REPL via helper script (model-selectable):
+  ```bash
+  scripts/start-repl.sh gpt-5.2-codex
   ```
 - Run tests:
   ```lisp
