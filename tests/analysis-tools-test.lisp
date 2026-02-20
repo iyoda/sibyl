@@ -160,8 +160,8 @@
       (is (<= coverage 1.0)))))
 
 (test self-assess-does-not-rerun-full-suite
-  "*self-assess-running* が t の時、self-assess は run-tests をスキップしキャッシュを返すべき。"
-  (with-self-assess-guard
+   "When *self-assess-running* is t, self-assess should skip run-tests and return cached result."
+   (with-self-assess-guard
     (let ((result (sibyl.tools:execute-tool "self-assess" nil)))
       (is (stringp result))
       (is (search "test_coverage" result)))))
@@ -618,30 +618,30 @@
   (is (string= (gethash "src/agent/core.lisp" mapping) "agent-tests"))))
 
 (test test-smart-suite-selection
-  "Auto-generated test"
-  ;; %suites-for-files が変更ファイルから関連スイートを返すことを確認
+   "Auto-generated test"
+   ;; Verify %suites-for-files returns related suites from changed files
 (let ((suites (sibyl.tools::%suites-for-files
                '("src/tools/lisp-tools.lisp" "src/agent/core.lisp"))))
   (is (listp suites))
   (is (member "read-sexp-tests" suites :test #'string=))
-  (is (member "agent-tests" suites :test #'string=)))
+   (is (member "agent-tests" suites :test #'string=)))
 
-;; 未知のファイルは無視される
+;; Unknown files are ignored
 (let ((suites (sibyl.tools::%suites-for-files '("src/unknown/file.lisp"))))
   (is (null suites))))
 
 (test test-run-tests-with-files
-  "Auto-generated test"
-  ;; :files オプションで関連スイートのみ実行できることを確認
-;; (実際のテスト実行は行わず、ツールが :files を受け付けることを確認)
+   "Auto-generated test"
+   ;; Verify :files option allows running only related suites
+;; (Verify tool accepts :files without actually running tests)
 (let ((tool (sibyl.tools:find-tool "run-tests")))
   (is (not (null tool)))
   (let ((params (getf (sibyl.tools::tool-spec tool) :parameters)))
     (is (some (lambda (p) (string= (getf p :name) "files")) params)))))
 
 (test test-run-tests-files-option
-  "Auto-generated test"
-  ;; :files オプションで analysis-tools-test スイートが実行されることを確認
+   "Auto-generated test"
+   ;; Verify analysis-tools-test suite is executed with :files option
 (let* ((result-json (sibyl.tools:execute-tool
                      "run-tests"
                      '(("files" . "src/tools/analysis-tools.lisp"))))
@@ -651,8 +651,8 @@
   (is (> (gethash "total" result) 0))))
 
 (test test-file-to-suite-mapping-multi-suite
-  "Auto-generated test"
-  ;; analysis-tools.lisp は複数スイートを返す
+   "Auto-generated test"
+   ;; analysis-tools.lisp returns multiple suites
 (let* ((suites (sibyl.tools::%suites-for-files
                 '("src/tools/analysis-tools.lisp"))))
   (is (listp suites))

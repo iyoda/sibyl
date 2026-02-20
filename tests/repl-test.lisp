@@ -459,13 +459,13 @@
   "Auto-generated test"
   
 (let* ((tracker (sibyl.llm::make-token-tracker)))
-  ;; 最初に100トークン追加
-  (sibyl.llm::tracker-add-usage tracker '(:input-tokens 100 :output-tokens 50
+   ;; Add 100 tokens initially
+   (sibyl.llm::tracker-add-usage tracker '(:input-tokens 100 :output-tokens 50
                                            :cache-read-tokens 0 :cache-write-tokens 0))
-  (let ((before-total (+ (sibyl.llm::token-tracker-input-tokens tracker)
-                         (sibyl.llm::token-tracker-output-tokens tracker))))
-    ;; さらに200トークン追加
-    (sibyl.llm::tracker-add-usage tracker '(:input-tokens 200 :output-tokens 80
+     (let ((before-total (+ (sibyl.llm::token-tracker-input-tokens tracker)
+                          (sibyl.llm::token-tracker-output-tokens tracker))))
+     ;; Add 200 more tokens
+     (sibyl.llm::tracker-add-usage tracker '(:input-tokens 200 :output-tokens 80
                                              :cache-read-tokens 0 :cache-write-tokens 0))
     (let ((after-total (+ (sibyl.llm::token-tracker-input-tokens tracker)
                           (sibyl.llm::token-tracker-output-tokens tracker))))
@@ -485,9 +485,9 @@
 )
 
 (test format-tool-call-summary-eval-form
-  "Auto-generated test"
-  
-;; eval-form: Lispフォームは括弧なしでそのまま表示
+   "Auto-generated test"
+   
+;; eval-form: Lisp forms are displayed as-is without parentheses
 (let ((tc (sibyl.llm:make-tool-call
            :name "eval-form"
            :arguments '(("form" . "(defun foo () 42)") ("package" . "SIBYL")))))
@@ -496,9 +496,9 @@
 )
 
 (test format-tool-call-summary-grep
-  "Auto-generated test"
-  
-;; grep: pattern と path を両方表示
+   "Auto-generated test"
+   
+;; grep: display both pattern and path
 (let ((tc (sibyl.llm:make-tool-call
            :name "grep"
            :arguments '(("pattern" . "spinner") ("path" . "src/")))))
@@ -507,9 +507,9 @@
 )
 
 (test format-tool-call-summary-truncate
-  "Auto-generated test"
-  
-;; 長い引数は max-length で切り詰め
+   "Auto-generated test"
+   
+;; Long arguments are truncated by max-length
 (let ((tc (sibyl.llm:make-tool-call
            :name "shell"
            :arguments '(("command" . "find . -name '*.lisp' -exec grep -l 'defun' {} \\; | sort | head -20")))))
@@ -519,9 +519,9 @@
 )
 
 (test format-tool-call-summary-no-args
-  "Auto-generated test"
-  
-;; 引数なしのツールは空文字列を返す
+   "Auto-generated test"
+   
+;; Tools with no arguments return empty string
  (let ((tc (sibyl.llm:make-tool-call
             :name "shell"
             :arguments nil)))
@@ -535,10 +535,10 @@
 (in-suite repl-hooks-tests)
 
 (test make-tool-call-hook-force-output
-  "make-tool-call-hook の出力が即座に取得できることを確認する"
-  ;; force-output を SBCL パッケージロックの制約でモックできないため、
-  ;; with-output-to-string で出力が即座に取得できることで間接的に検証する
-  (let* ((output (with-output-to-string (s)
+   "Verify make-tool-call-hook output is immediately available"
+   ;; Cannot mock force-output due to SBCL package lock constraints,
+   ;; so verify indirectly that output is immediately available via with-output-to-string
+   (let* ((output (with-output-to-string (s)
                    (let ((*standard-output* s)
                          (sibyl.repl::*current-spinner* nil)
                          (sibyl.repl::*use-colors* nil))
@@ -551,8 +551,8 @@
 )
 
 (test tool-call-hook-outputs-before-execution
-  "Auto-generated test"
-  ;; スピナーなし状態でフックが即座に出力することを確認
+   "Auto-generated test"
+   ;; Verify hook outputs immediately when spinner is not active
 (let* ((output (with-output-to-string (s)
                  (let ((*standard-output* s)
                        (sibyl.repl::*current-spinner* nil)

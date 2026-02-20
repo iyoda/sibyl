@@ -503,8 +503,8 @@
         "*current-agent* must be propagated to each thread")))
 
 (test agent-step-parallel-threshold-respected
-  "Auto-generated test"
-  ;; *parallel-tool-threshold* が定義されており、デフォルト値が 2 であることを確認
+   "Auto-generated test"
+   ;; Verify *parallel-tool-threshold* is defined with default value of 2
 (is (boundp 'sibyl.tools:*parallel-tool-threshold*)
     "*parallel-tool-threshold* must be defined")
 (is (integerp sibyl.tools:*parallel-tool-threshold*)
@@ -513,12 +513,12 @@
     "Default threshold must be 2"))
 
 (test agent-step-parallel-dispatch-function
-  "Auto-generated test"
-  ;; agent-step が並列実行を使うためのヘルパー関数が存在することを確認
-;; (将来的に agent-step から呼ばれる dispatch 関数)
+   "Auto-generated test"
+   ;; Verify helper function exists for agent-step to use parallel execution
+;; (dispatch function to be called by agent-step in the future)
 (is (fboundp 'sibyl.tools:execute-tool-calls-parallel)
-    "execute-tool-calls-parallel must exist")
-;; threshold=1 のとき、1件でも並列パスを通ることを確認
+     "execute-tool-calls-parallel must exist")
+;; Verify single tool call goes through parallel path when threshold=1
 (let* ((sibyl.tools:*parallel-tool-threshold* 1)
        (tc-list (list (sibyl.llm:make-tool-call :id "x" :name "t" :arguments nil)))
        (results (sibyl.tools:execute-tool-calls-parallel
@@ -527,11 +527,11 @@
       "Single tool call via parallel path must return correct result")))
 
 (test agent-step-calls-parallel-when-multiple-tool-calls
-  "Auto-generated test"
-  ;; agent-step が複数ツールコール時に並列実行することを時間で検証。
-;; 2つのツールがそれぞれ 0.1s かかる場合:
-;;   シリアル実行 → 0.2s 以上
-;;   並列実行     → 0.15s 未満
+   "Auto-generated test"
+   ;; Verify agent-step uses parallel execution for multiple tool calls via timing.
+;; When 2 tools each take 0.1s:
+;;   Serial execution → 0.2s or more
+;;   Parallel execution → less than 0.15s
 (let* ((tc1 (sibyl.llm:make-tool-call :id "p-id-1" :name "slow-1" :arguments "{}"))
        (tc2 (sibyl.llm:make-tool-call :id "p-id-2" :name "slow-2" :arguments "{}"))
        (tool-response (sibyl.llm:make-message

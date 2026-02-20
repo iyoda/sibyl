@@ -1588,27 +1588,27 @@
       (is (search "\"timestamp\":" result)))))
 
 (test call-llm-no-agent-error
-  "Auto-generated test"
-  
-;; *current-agent* が NIL のとき call-llm はエラーを投げる
+   "Auto-generated test"
+   
+;; call-llm throws error when *current-agent* is NIL
 (signals error
   (sibyl.llm:call-llm '()))
 )
 
 
 (test generate-unified-diff-no-change
-  "Auto-generated test"
-  (let ((result (sibyl.tools::%generate-unified-diff "test.lisp" "hello" "hello")))
-  (is (null result) "同一内容の場合はnilを返す")))
+   "Auto-generated test"
+   (let ((result (sibyl.tools::%generate-unified-diff "test.lisp" "hello" "hello")))
+   (is (null result) "returns nil when content is identical")))
 
 (test generate-unified-diff-with-change
-  "Auto-generated test"
-  (let ((result (sibyl.tools::%generate-unified-diff "test.lisp" "hello" "world")))
-  (is (stringp result) "変更がある場合は文字列を返す")
-  (is (search "---" result) "--- ヘッダが含まれる")
-  (is (search "+++" result) "+++ ヘッダが含まれる")
-  (is (search "-hello" result) "削除行が含まれる")
-  (is (search "+world" result) "追加行が含まれる")))
+   "Auto-generated test"
+   (let ((result (sibyl.tools::%generate-unified-diff "test.lisp" "hello" "world")))
+   (is (stringp result) "returns string when content differs")
+   (is (search "---" result) "--- header is included")
+   (is (search "+++" result) "+++ header is included")
+   (is (search "-hello" result) "deleted line is included")
+   (is (search "+world" result) "added line is included")))
 
 (test sync-to-file-includes-diff-in-result
   "Auto-generated test"
@@ -1621,30 +1621,30 @@
        (progn
          (with-open-file (s path :direction :output :if-does-not-exist :create)
            (write-string original s))
-         (let ((result (sibyl.tools:execute-tool
-                        "sync-to-file"
-                        (list (cons "name" "foo")
-                              (cons "file" path)
-                              (cons "new-source" new-source)))))
-           (is (search "```diff" result) "diff ブロックが含まれる")
-           (is (search "-" result) "削除行が含まれる")
-           (is (search "+" result) "追加行が含まれる")))
+          (let ((result (sibyl.tools:execute-tool
+                         "sync-to-file"
+                         (list (cons "name" "foo")
+                               (cons "file" path)
+                               (cons "new-source" new-source)))))
+            (is (search "```diff" result) "diff block is included")
+            (is (search "-" result) "deleted line is included")
+            (is (search "+" result) "added line is included")))
     (when (probe-file path) (delete-file path)))))
 
 (test write-file-includes-diff-in-result
   "Auto-generated test"
   (let* ((path (format nil "/tmp/sibyl-write-diff-test-~a.txt" (get-universal-time))))
-  (unwind-protect
-       (progn
-         ;; 既存ファイルを作成
-         (with-open-file (s path :direction :output :if-does-not-exist :create)
-           (write-string "line1\nline2\n" s))
-         ;; 上書き
-         (let ((result (sibyl.tools:execute-tool
-                        "write-file"
-                        (list (cons "path" path)
-                              (cons "content" "line1\nline2-modified\n")))))
-           (is (search "```diff" result) "上書き時に diff ブロックが含まれる")))
+   (unwind-protect
+        (progn
+          ;; Create existing file
+          (with-open-file (s path :direction :output :if-does-not-exist :create)
+            (write-string "line1\nline2\n" s))
+          ;; Overwrite
+          (let ((result (sibyl.tools:execute-tool
+                         "write-file"
+                         (list (cons "path" path)
+                               (cons "content" "line1\nline2-modified\n")))))
+            (is (search "```diff" result) "diff block is included when overwriting")))
     (when (probe-file path) (delete-file path)))))
 
 (test suggest-improvements-tests-index-fast
@@ -1657,3 +1657,82 @@
   (is (gethash "another-fn" index))
   (is (not (gethash "missing" index)))
   (is (not (gethash "quux2" index)))))
+
+(test format-tool-result-line-error-detection
+   "Auto-generated test"
+   
+(let* ((dummy-tc (make-instance 'sibyl.llm:tool-call
+                                 :id "test-id"
+                                 :name "shell"
+                                 :arguments '(("command" . "sed -n '1,10p' src/repl.lisp"))))
+        ;; Lisp code containing "Error:" text mixed in output (false positive bug)
+        (result-with-error-text "(format t \"[LLM Error: ~a]\" e)")
+        ;; Actual error (starts with "Error:")
+        (result-real-error "Error: command not found")
+        ;; Normal output
+        (result-ok "Exit code: 0\nhello world"))
+   ;; Normal output with "Error:" text should NOT show ✗
+   (let ((line (sibyl.repl.display:format-tool-result-line dummy-tc result-with-error-text 0.03 50)))
+     (is (not (search "✗" line))
+         "should NOT be ✗ when 'Error:' appears inside output content, got: ~a" line))
+   ;; Actual error should show ✗
+   (let ((line (sibyl.repl.display:format-tool-result-line dummy-tc result-real-error 1.0 0)))
+     (is (search "✗" line)
+         "should be ✗ when result starts with 'Error:', got: ~a" line))
+   ;; Normal output should show ✓
+   (let ((line (sibyl.repl.display:format-tool-result-line dummy-tc result-ok 0.05 100)))
+     (is (search "✓" line)
+         "should be ✓ for normal output, got: ~a" line)))
+)
+
+(test tool-result-hook-restarts-spinner
+   "Auto-generated test"
+   
+;; Verify make-tool-result-hook restarts spinner after displaying tool result
+(let* ((dummy-tc (make-instance 'sibyl.llm:tool-call
+                                :id "t1" :name "shell"
+                                :arguments '(("command" . "ls"))))
+       (hook (sibyl.repl:make-tool-result-hook)))
+  (setf sibyl.repl:*current-spinner* nil)
+  (funcall hook dummy-tc "Exit code: 0\nhello" 0.05)
+  (let ((sp sibyl.repl:*current-spinner*))
+    (unwind-protect
+         (progn
+           (is (not (null sp))
+               "spinner should be restarted after tool-result hook")
+           (is (sibyl.repl.spinner:spinner-active-p sp)
+               "restarted spinner should be active"))
+      (when (and sp (sibyl.repl.spinner:spinner-active-p sp))
+        (sibyl.repl.spinner:stop-spinner sp))
+      (setf sibyl.repl:*current-spinner* nil))))
+)
+
+(test safe-redefine-allows-exit-in-defun-body
+  "Auto-generated test"
+  
+;; Regression test: safe-redefine should succeed even when the new definition
+;; contains sb-ext:exit or cl:quit in the function body.
+;; Previously, %safe-redefine-eval-definition called eval-form which
+;; blocked any form containing "EXIT" or "QUIT" symbol names,
+;; causing safe-redefine to fail with a false positive.
+(eval '(defun sibyl.tests::safe-redefine-test-fn-exit-003 ()
+         "original"))
+(compile 'sibyl.tests::safe-redefine-test-fn-exit-003)
+(unwind-protect
+    (let ((result (sibyl.tools:execute-tool
+                   "safe-redefine"
+                   '(("name" . "sibyl.tests::safe-redefine-test-fn-exit-003")
+                     ("new-definition" .
+                      ;; Definition contains sb-ext:exit in its body
+                      "(defun sibyl.tests::safe-redefine-test-fn-exit-003 ()
+                         (when nil #+sbcl (sb-ext:exit :code 0))
+                         \"modified-with-exit\")")))))
+      ;; Must succeed - "Exit" in defun body is NOT unsafe
+      (is (search "redefined" (string-downcase result))
+          "safe-redefine should succeed; got: ~a" result)
+      (is (string= "modified-with-exit"
+                   (sibyl.tests::safe-redefine-test-fn-exit-003))
+          "Function should be updated to new definition"))
+  (when (fboundp 'sibyl.tests::safe-redefine-test-fn-exit-003)
+    (fmakunbound 'sibyl.tests::safe-redefine-test-fn-exit-003)))
+)

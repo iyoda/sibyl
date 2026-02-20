@@ -310,14 +310,14 @@
                 :arguments (list (cons "command" "ls")))))
       (unwind-protect
            (progn
-             (funcall hook tc)
-             ;; フック呼び出し後、*current-spinner* が再起動されているか確認
-             (is (not (null sibyl.repl::*current-spinner*))
+              (funcall hook tc)
+              ;; Verify *current-spinner* is restarted after hook invocation
+              (is (not (null sibyl.repl::*current-spinner*))
                  "spinner should be restarted after tool call display")
              (is (sibyl.repl.spinner:spinner-active-p sibyl.repl::*current-spinner*)
-                 "restarted spinner should be active"))
-        ;; クリーンアップ
-        (when sibyl.repl::*current-spinner*
+                  "restarted spinner should be active"))
+         ;; Cleanup
+         (when sibyl.repl::*current-spinner*
           (sibyl.repl.spinner:stop-spinner sibyl.repl::*current-spinner*)
           (setf sibyl.repl::*current-spinner* nil))))))
 
@@ -351,16 +351,16 @@
     (let* ((out (make-string-output-stream))
            (*standard-output* out)
            (hook (sibyl.repl::make-tool-call-hook)))
-      (unwind-protect
-           (progn
-             ;; 1回目のツール呼び出し
-             (funcall hook (sibyl.llm:make-tool-call
+       (unwind-protect
+            (progn
+              ;; First tool call
+              (funcall hook (sibyl.llm:make-tool-call
                             :id "tc-1" :name "shell"
                             :arguments (list (cons "command" "ls"))))
-             (is (not (null sibyl.repl::*current-spinner*))
-                 "spinner should exist after first tool call")
-             ;; 2回目のツール呼び出し（スピナーが既にある状態）
-             (funcall hook (sibyl.llm:make-tool-call
+              (is (not (null sibyl.repl::*current-spinner*))
+                  "spinner should exist after first tool call")
+              ;; Second tool call (spinner already active)
+              (funcall hook (sibyl.llm:make-tool-call
                             :id "tc-2" :name "read-file"
                             :arguments (list (cons "path" "src/"))))
              (is (not (null sibyl.repl::*current-spinner*))
