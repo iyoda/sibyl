@@ -1500,10 +1500,16 @@ Otherwise, use model-specific optimized prompt for Ollama models."
      (start-repl :client my-client)"
   
   (let* ((effective-prompt (%select-system-prompt client system-prompt))
+         (max-steps-config (sibyl.config:config-value "agent.max-steps" 50))
+         (max-steps (typecase max-steps-config
+                      (integer max-steps-config)
+                      (string (or (parse-integer max-steps-config :junk-allowed t) 50))
+                      (t 50)))
          (agent (sibyl.agent:make-agent
                  :client client
                  :name name
-                 :system-prompt effective-prompt)))
+                 :system-prompt effective-prompt
+                 :max-steps max-steps)))
     (let ((model (and client (ignore-errors (sibyl.llm::client-model client)))))
       (if model
           (log-info "repl" "Starting REPL (model: ~a)" model)

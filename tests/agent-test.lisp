@@ -139,6 +139,52 @@
     (is (string= custom-prompt (agent-system-prompt agent))
         "Agent should use custom system prompt when provided")))
 
+(test infer-tool-categories-fallback-to-all-tools
+  "When heuristics cannot classify the input, infer-tool-categories returns NIL.
+This allows agent-step to pass all tools instead of over-filtering."
+  (is (null (sibyl.agent::infer-tool-categories "日本語の依頼です"))
+      "Unclassified input should return NIL categories")
+  (is (null (sibyl.agent::infer-tool-categories "do something please"))
+      "Generic input should return NIL categories")
+  (is (member :analysis
+              (sibyl.agent::infer-tool-categories "please analyze this")
+              :test #'eq)
+      "Recognized keywords should still infer specific categories"))
+
+(test agent-step-retries-on-empty-text-response
+  "agent-step should retry when the model returns empty text without tool calls."
+  (let* ((client (make-instance 'sibyl.llm:llm-client))
+         (agent (sibyl.agent:make-agent :client client :max-steps 5))
+         (orig-complete (symbol-function 'sibyl.llm:complete))
+         (orig-complete-with-tools (symbol-function 'sibyl.llm:complete-with-tools))
+         (call-n 0))
+    (setf (symbol-function 'sibyl.llm:complete)
+          (lambda (c ctx)
+            (declare (ignore c ctx))
+            (incf call-n)
+            (if (= call-n 1)
+                (values (sibyl.llm:make-message :role :assistant :content "" :tool-calls nil)
+                        nil)
+                (values (sibyl.llm:make-message :role :assistant :content "done" :tool-calls nil)
+                        nil))))
+    (setf (symbol-function 'sibyl.llm:complete-with-tools)
+          (lambda (c ctx tools)
+            (declare (ignore c ctx tools))
+            (incf call-n)
+            (if (= call-n 1)
+                (values (sibyl.llm:make-message :role :assistant :content "" :tool-calls nil)
+                        nil)
+                (values (sibyl.llm:make-message :role :assistant :content "done" :tool-calls nil)
+                        nil))))
+    (unwind-protect
+         (let ((result (sibyl.agent:agent-step agent "just do it")))
+           (is (string= "done" result)
+               "agent-step should continue until non-empty text is returned")
+           (is (= 2 call-n)
+               "LLM should be called twice (empty response + retry)"))
+      (setf (symbol-function 'sibyl.llm:complete) orig-complete)
+      (setf (symbol-function 'sibyl.llm:complete-with-tools) orig-complete-with-tools))))
+
 ;;; ============================================================
 ;;; run-hook Tests
 ;;; ============================================================

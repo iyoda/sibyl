@@ -201,9 +201,10 @@ Returns the result string."
 
 (defun infer-tool-categories (user-input)
   "Infer relevant tool categories from user input using simple heuristics.
-Always includes :general. Adds :file if input mentions file paths or file ops.
-Adds :code if input has code-related keywords. Adds :analysis for analysis keywords."
-  (let ((cats '(:general)))
+Adds :file if input mentions file paths or file ops.
+Adds :code if input has code-related keywords. Adds :analysis for analysis keywords.
+Returns NIL when no specific category can be inferred, so all tools stay available."
+  (let ((cats nil))
     (when (and user-input (stringp user-input))
       ;; File-related: file extensions or file operation keywords
       (when (or (cl-ppcre:scan "\\.(lisp|py|js|ts|rb|go|rs|c|h|cpp|java|txt|json|yaml)" user-input)
@@ -214,7 +215,10 @@ Adds :code if input has code-related keywords. Adds :analysis for analysis keywo
         (pushnew :code cats))
       ;; Analysis-related
       (when (cl-ppcre:scan "(?i)\\banalyze\\b|\\banalysis\\b|\\bsearch\\b|\\bfind\\b|\\bgrep\\b|\\btest\\b|\\bassess\\b|\\bimprove\\b" user-input)
-        (pushnew :analysis cats)))
+        (pushnew :analysis cats))
+      ;; If any specific category is inferred, include :general as well.
+      (when cats
+        (pushnew :general cats)))
     cats))
 
 ;;; ============================================================
@@ -294,10 +298,9 @@ Returns (values response usage) on success."
       (when user-input
         (memory-push (agent-memory agent) (user-message user-input)))
       (let* ((inferred-cats (when user-input (infer-tool-categories user-input)))
-             (tools-schema
-              (if inferred-cats
-                  (tools-as-schema :categories inferred-cats)
-                  (tools-as-schema))))
+             (tools-schema (if inferred-cats
+                               (tools-as-schema :categories inferred-cats)
+                               (tools-as-schema))))
         (log-debug "agent" "Calling LLM: tools=~a" (length tools-schema))
         (multiple-value-bind (response usage)
             (%call-with-context-recovery agent
@@ -323,25 +326,25 @@ Returns (values response usage) on success."
             (let* ((tc-list (message-tool-calls response))
                    (use-parallel (>= (length tc-list)
                                      sibyl.tools:*parallel-tool-threshold*)))
-               (log-info "agent" "LLM response: tool-calls=~a" (length tc-list))
-                (if use-parallel
-                    ;; --- Parallel execution path ---
-                    (let ((results
+              (log-info "agent" "LLM response: tool-calls=~a" (length tc-list))
+              (if use-parallel
+                  ;; --- Parallel execution path ---
+                  (let ((results
                           (sibyl.tools:execute-tool-calls-parallel
                            tc-list
                            (lambda (tc)
                              (run-hook agent :on-tool-call tc)
                              (%execute-tool-with-timing agent tc)))))
-                     (loop for tc in tc-list
-                           for result in results
-                           do (memory-push (agent-memory agent)
-                                            (tool-result-message (tool-call-id tc) result))))
-                    ;; --- Serial execution path (below threshold) ---
-                    (dolist (tc tc-list)
-                     (run-hook agent :on-tool-call tc)
-                     (let ((result (%execute-tool-with-timing agent tc)))
-                       (memory-push (agent-memory agent)
-                                    (tool-result-message (tool-call-id tc) result))))))
+                    (loop for tc in tc-list
+                          for result in results
+                          do (memory-push (agent-memory agent)
+                                          (tool-result-message (tool-call-id tc) result))))
+                  ;; --- Serial execution path (below threshold) ---
+                  (dolist (tc tc-list)
+                    (run-hook agent :on-tool-call tc)
+                    (let ((result (%execute-tool-with-timing agent tc)))
+                      (memory-push (agent-memory agent)
+                                   (tool-result-message (tool-call-id tc) result))))))
             (if (< (agent-step-count agent) (agent-max-steps agent))
                 (progn
                   (log-debug "agent" "Recursive step: step=~a" (agent-step-count agent))
@@ -352,10 +355,18 @@ Returns (values response usage) on success."
                   (format nil "[Sibyl: max steps (~a) reached]"
                           (agent-max-steps agent)))))
            (t
-            (log-info "agent" "LLM response: text-length=~a"
-                      (length (or (message-content response) "")))
-            (run-hook agent :after-step response)
-            (message-content response))))))))
+            (let ((content (or (message-content response) "")))
+              (if (and (zerop (length (string-trim '(#\Space #\Tab #\Newline #\Return) content)))
+                       (< (agent-step-count agent) (agent-max-steps agent)))
+                  (progn
+                    (log-warn "agent" "Empty text response at step ~a/~a; retrying"
+                              (agent-step-count agent) (agent-max-steps agent))
+                    (agent-step agent nil))
+                  (progn
+                    (log-info "agent" "LLM response: text-length=~a"
+                              (length content))
+                    (run-hook agent :after-step response)
+                    content))))))))))
 
 ;;; ============================================================
 ;;; Multi-turn run: process input until final text response
