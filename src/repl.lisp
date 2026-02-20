@@ -1129,10 +1129,12 @@ Returns TEXT unchanged when it is not a string."
 (defun make-tool-call-hook-v2 (&optional spinner)
   "Return a closure suitable for the :on-tool-call agent hook (v2).
    Displays '🔧 tool-name ...' during execution.
-   
-   If a spinner is active, it is stopped first. After displaying the tool start line,
-   a fresh spinner is started with 'Thinking...' message.
-   
+
+   If a spinner is active, it is stopped first. After displaying the tool start
+   line (without a trailing newline), a fresh spinner is started with
+   'Thinking...' message.  The spinner and the result hook both use \\r\\e[2K
+   to overwrite the same terminal line, so only one line per tool call appears.
+
    Usage:
      (cons :on-tool-call (make-tool-call-hook-v2 spinner))"
   (lambda (tc)
@@ -1140,17 +1142,15 @@ Returns TEXT unchanged when it is not a string."
       (log-info "agent" "Tool call: ~a" (sibyl.llm:tool-call-name tc))
       (bt:with-lock-held (*spinner-output-lock*)
         (let ((active-spinner (or spinner *current-spinner*)))
-          ;; Stop spinner before printing
           (when (and active-spinner
                      (sibyl.repl.spinner:spinner-active-p active-spinner))
             (sibyl.repl.spinner:stop-spinner active-spinner)
             (setf *current-spinner* nil))
-          ;; Display tool start line
+          ;; No newline — spinner and result hook will overwrite this line.
           (if *use-colors*
-              (progn (format-colored-text display :cyan) (format t "~%"))
-              (format t "~a~%" display))
+              (format-colored-text display :cyan)
+              (format t "~a" display))
           (force-output)
-          ;; Restart spinner
           (let ((new-spinner (sibyl.repl.spinner:start-spinner "Thinking...")))
             (setf *current-spinner* new-spinner)))))))
 
