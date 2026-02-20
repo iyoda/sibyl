@@ -35,6 +35,11 @@ When nil and strategy is :llm, falls back to :simple text summarization.")
                          :initform nil
                          :type (or function null)
                          :documentation "Optional callback invoked after compaction with the summary text.")
+   (compaction-count :initarg :compaction-count
+                     :accessor memory-compaction-count
+                     :initform 0
+                     :type integer
+                     :documentation "Number of compactions performed.")
    (context-window-size :initarg :context-window-size
                         :accessor memory-context-window-size
                         :initform nil
@@ -214,8 +219,13 @@ tool_result messages from their corresponding assistant tool_use messages."
                   (handler-case
                       (let* ((summary-prompt
                                (format nil
-                                       "Summarize the following conversation in 200 tokens or less. ~
-Focus on key decisions, facts, and context needed for continuity.~%~%~
+                                       "Summarize the following conversation in 200 tokens or less.~%~
+Preserve continuity for in-progress work.~%~
+Include these sections explicitly:~%~
+- Current state~%~
+- Unfinished tasks~%~
+- Next actions~%~
+- Important constraints/decisions~%~%~
 ~{~a: ~a~^~%~}"
                                        (loop for msg in to-summarize
                                              collect (string (message-role msg))
@@ -233,6 +243,7 @@ Focus on key decisions, facts, and context needed for continuity.~%~%~
                   ;; Simple text summarization (:simple strategy or :llm without client)
                   (simple-compaction-summary mem to-summarize))))
         (setf (memory-summary mem) summary-text)
+        (incf (memory-compaction-count mem))
         ;; Replace conversation with only the most recent messages
         (conversation-clear (memory-conversation mem))
         (dolist (msg to-keep)

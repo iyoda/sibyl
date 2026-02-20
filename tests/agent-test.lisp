@@ -185,6 +185,43 @@ This allows agent-step to pass all tools instead of over-filtering."
       (setf (symbol-function 'sibyl.llm:complete) orig-complete)
       (setf (symbol-function 'sibyl.llm:complete-with-tools) orig-complete-with-tools))))
 
+(test agent-step-grace-retry-after-compaction
+  "When max-steps is reached right after compaction, agent-step allows one grace retry."
+  (let* ((client (make-instance 'sibyl.llm:llm-client))
+         (agent (sibyl.agent:make-agent :client client
+                                        :max-steps 1
+                                        :max-memory-messages 2))
+         (orig-complete (symbol-function 'sibyl.llm:complete))
+         (orig-complete-with-tools (symbol-function 'sibyl.llm:complete-with-tools))
+         (call-n 0))
+    (setf (symbol-function 'sibyl.llm:complete-with-tools)
+          (lambda (c ctx tools)
+            (declare (ignore c ctx tools))
+            (incf call-n)
+            (if (= call-n 1)
+                (values (sibyl.llm:make-message
+                         :role :assistant
+                         :tool-calls (list (sibyl.llm:make-tool-call
+                                            :id "tc-grace-001"
+                                            :name "eval-form"
+                                            :arguments '(("form" . "(+ 1 1)")))))
+                        nil)
+                (values (sibyl.llm:make-message :role :assistant :content "done" :tool-calls nil)
+                        nil))))
+    ;; Keep non-tools path deterministic in case category filtering changes.
+    (setf (symbol-function 'sibyl.llm:complete)
+          (lambda (c ctx)
+            (declare (ignore c ctx))
+            (values (sibyl.llm:make-message :role :assistant :content "done" :tool-calls nil)
+                    nil)))
+    (unwind-protect
+         (let ((result (sibyl.agent:agent-run agent "trigger compaction")))
+           (is (string= "done" result))
+           (is (= 2 call-n)
+               "Should perform exactly one retry after compaction at max-steps"))
+      (setf (symbol-function 'sibyl.llm:complete) orig-complete)
+      (setf (symbol-function 'sibyl.llm:complete-with-tools) orig-complete-with-tools))))
+
 ;;; ============================================================
 ;;; run-hook Tests
 ;;; ============================================================

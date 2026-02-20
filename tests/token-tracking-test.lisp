@@ -203,6 +203,15 @@
 
 (in-suite memory-compaction-suite)
 
+(defclass mock-compaction-client (sibyl.llm:llm-client)
+  ((last-summary-prompt :initform nil
+                        :accessor mock-last-summary-prompt)))
+
+(defmethod sibyl.llm:complete ((client mock-compaction-client) messages &key)
+  (setf (mock-last-summary-prompt client)
+        (sibyl.llm:message-content (first messages)))
+  (values (sibyl.llm:assistant-message "mock summary") nil))
+
 ;; Test 18: :simple compaction strategy preserves existing behavior
 (test memory-compact-simple-strategy
   ":simple strategy produces a text summary containing 'Compacted'"
@@ -226,6 +235,22 @@
     (is (not (null (sibyl.agent::memory-summary mem))))
     ;; Fallback simple summary also contains "Compacted"
     (is (search "Compacted" (sibyl.agent::memory-summary mem)))))
+
+(test memory-compact-llm-summary-prompt-preserves-continuity
+  ":llm compaction prompt should preserve unfinished work context."
+  (let* ((mem (sibyl.agent::make-memory :max-messages 5 :compaction-strategy :llm))
+         (client (make-instance 'mock-compaction-client
+                                :api-key ""
+                                :model "mock-model"
+                                :base-url "")))
+    (setf (sibyl.agent::memory-compaction-client mem) client)
+    (dotimes (i 6)
+      (sibyl.agent::memory-push mem (sibyl.llm:user-message (format nil "Task message ~a" i))))
+    (is (string= "mock summary" (sibyl.agent::memory-summary mem)))
+    (let ((prompt (mock-last-summary-prompt client)))
+      (is (search "Unfinished tasks" prompt))
+      (is (search "Next actions" prompt))
+      (is (search "Important constraints/decisions" prompt)))))
 
 ;; Test 20: default max-messages for new memory is 50
 (test memory-default-max-messages
@@ -406,5 +431,3 @@ Uses max-messages=2 so split-idx=1 allows actual compaction."
          (report (sibyl.llm:compute-session-report (list rec1))))
     (is (= 1 (sibyl.llm:session-cost-report-task-count report)))
     (is (> (sibyl.llm:session-cost-report-total-actual-cost-usd report) 0))))
-
-

@@ -43,6 +43,9 @@
                  :documentation "List of task-cost-record instances for this session."))
   (:documentation "The central agent that orchestrates LLM and tools."))
 
+(defvar *compaction-grace-retry-used* nil
+  "When true, the one-time post-compaction grace retry has been consumed.")
+
 ;;; ============================================================
 ;;; Default system prompt
 ;;; ============================================================
@@ -295,24 +298,26 @@ Returns (values response usage) on success."
                (if user-input (length user-input) 0))
     (with-request-context (:step-number (agent-step-count agent))
       (run-hook agent :before-step (agent-step-count agent))
-      (when user-input
+      (let ((compaction-count-before
+              (memory-compaction-count (agent-memory agent))))
+        (when user-input
         (memory-push (agent-memory agent) (user-message user-input)))
-      (let* ((inferred-cats (when user-input (infer-tool-categories user-input)))
-             (tools-schema (if inferred-cats
-                               (tools-as-schema :categories inferred-cats)
-                               (tools-as-schema))))
-        (log-debug "agent" "Calling LLM: tools=~a" (length tools-schema))
-        (multiple-value-bind (response usage)
-            (%call-with-context-recovery agent
-              (lambda ()
-                (let ((context
-                        (memory-context-window (agent-memory agent)
-                          :system-prompt (agent-system-prompt agent))))
-                  (log-debug "agent" "LLM call: context-messages=~a"
-                             (length context))
-                  (if tools-schema
-                      (complete-with-tools (agent-client agent) context tools-schema)
-                      (complete (agent-client agent) context)))))
+        (let* ((inferred-cats (when user-input (infer-tool-categories user-input)))
+               (tools-schema (if inferred-cats
+                                 (tools-as-schema :categories inferred-cats)
+                                 (tools-as-schema))))
+          (log-debug "agent" "Calling LLM: tools=~a" (length tools-schema))
+          (multiple-value-bind (response usage)
+              (%call-with-context-recovery agent
+                (lambda ()
+                  (let ((context
+                          (memory-context-window (agent-memory agent)
+                            :system-prompt (agent-system-prompt agent))))
+                    (log-debug "agent" "LLM call: context-messages=~a"
+                               (length context))
+                    (if tools-schema
+                        (complete-with-tools (agent-client agent) context tools-schema)
+                        (complete (agent-client agent) context)))))
           (sibyl.llm:tracker-add-usage (agent-token-tracker agent) usage)
           ;; Estimate thinking tokens if present (API doesn't return them separately)
           (let ((thinking-text (sibyl.llm:message-thinking response)))
@@ -349,11 +354,21 @@ Returns (values response usage) on success."
                 (progn
                   (log-debug "agent" "Recursive step: step=~a" (agent-step-count agent))
                   (agent-step agent nil))
-                (progn
-                  (log-warn "agent" "Max steps reached: ~a/~a"
-                            (agent-step-count agent) (agent-max-steps agent))
-                  (format nil "[Sibyl: max steps (~a) reached]"
-                          (agent-max-steps agent)))))
+                (let ((compaction-happened
+                        (> (memory-compaction-count (agent-memory agent))
+                           compaction-count-before)))
+                  (if (and compaction-happened
+                           (not (and (boundp '*compaction-grace-retry-used*)
+                                     *compaction-grace-retry-used*)))
+                      (let ((*compaction-grace-retry-used* t))
+                        (log-warn "agent"
+                                  "Max steps reached after compaction; applying one grace retry")
+                        (agent-step agent nil))
+                      (progn
+                        (log-warn "agent" "Max steps reached: ~a/~a"
+                                  (agent-step-count agent) (agent-max-steps agent))
+                        (format nil "[Sibyl: max steps (~a) reached]"
+                                (agent-max-steps agent)))))))
            (t
             (let ((content (or (message-content response) "")))
               (if (and (zerop (length (string-trim '(#\Space #\Tab #\Newline #\Return) content)))
@@ -366,7 +381,7 @@ Returns (values response usage) on success."
                     (log-info "agent" "LLM response: text-length=~a"
                               (length content))
                     (run-hook agent :after-step response)
-                    content))))))))))
+                    content)))))))))))
 
 ;;; ============================================================
 ;;; Multi-turn run: process input until final text response
@@ -378,10 +393,11 @@ Returns (values response usage) on success."
 (defmethod agent-run ((agent agent) input)
   "High-level entry point. Resets step counter and runs."
   (setf (agent-step-count agent) 0)
-  (with-request-context (:agent-name (agent-name agent)
-                         :step-number 0
-                         :user-input input)
-    (agent-step agent input)))
+  (let ((*compaction-grace-retry-used* nil))
+    (with-request-context (:agent-name (agent-name agent)
+                           :step-number 0
+                           :user-input input)
+      (agent-step agent input))))
 
 ;;; ============================================================
 ;;; Reset
