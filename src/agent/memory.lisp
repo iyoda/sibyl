@@ -31,27 +31,57 @@
                        :documentation "LLM client for :llm compaction strategy (optional).
 When nil and strategy is :llm, falls back to :simple text summarization.")
    (compaction-callback :initarg :compaction-callback
-                        :accessor memory-compaction-callback
+                         :accessor memory-compaction-callback
+                         :initform nil
+                         :type (or function null)
+                         :documentation "Optional callback invoked after compaction with the summary text.")
+   (context-window-size :initarg :context-window-size
+                        :accessor memory-context-window-size
                         :initform nil
-                        :type (or function null)
-                        :documentation "Optional callback invoked after compaction with the summary text."))
+                        :type (or integer null)
+                        :documentation "Maximum context window size in tokens.
+When set, enables token-based proactive compaction.")
+   (compaction-threshold :initarg :compaction-threshold
+                         :accessor memory-compaction-threshold
+                         :initform 0.80
+                         :type number
+                         :documentation "Token usage ratio (0.0–1.0) at which proactive compaction triggers."))
   (:documentation "Manages conversation history with context window limits."))
 
-(defun make-memory (&key (max-messages 50) (compaction-strategy :llm))
-  "Create a new memory instance."
+(defun make-memory (&key (max-messages 50) (compaction-strategy :llm)
+                    context-window-size (compaction-threshold 0.80))
+  "Create a new memory instance.
+CONTEXT-WINDOW-SIZE enables token-based proactive compaction when non-nil.
+COMPACTION-THRESHOLD is the ratio (0.0–1.0) at which compaction triggers."
   (make-instance 'memory
                  :max-messages max-messages
-                 :compaction-strategy compaction-strategy))
+                 :compaction-strategy compaction-strategy
+                 :context-window-size context-window-size
+                 :compaction-threshold compaction-threshold))
 
 (defgeneric memory-push (memory message)
   (:documentation "Add a message to memory, respecting context limits."))
 
 (defmethod memory-push ((mem memory) message)
-  "Add MESSAGE to memory. If over limit, compact older messages."
+  "Add MESSAGE to memory. Triggers compaction if:
+1. Message count exceeds max-messages (existing behavior)
+2. Estimated token usage exceeds context-window-size * compaction-threshold (new)"
   (conversation-push (memory-conversation mem) message)
+  ;; Message-count based compaction (existing)
   (when (> (conversation-length (memory-conversation mem))
            (memory-max-messages mem))
     (memory-compact mem))
+  ;; Token-based proactive compaction (new)
+  (when (memory-context-window-size mem)
+    (let ((estimated (estimate-context-tokens mem))
+          (threshold (floor (* (memory-context-window-size mem)
+                               (memory-compaction-threshold mem)))))
+      (when (> estimated threshold)
+        (log-warn "agent" "Token-based compaction: ~a est. tokens > ~a threshold (~d% of ~a)"
+                  estimated threshold
+                  (round (* 100 (memory-compaction-threshold mem)))
+                  (memory-context-window-size mem))
+        (memory-compact mem))))
   message)
 
 (defgeneric memory-context-window (memory &key system-prompt)
@@ -84,6 +114,54 @@ When nil and strategy is :llm, falls back to :simple text summarization.")
     messages))
 
 ;;; ============================================================
+;;; Token estimation
+;;; ============================================================
+
+(defun %message-estimated-tokens (msg)
+  "Estimate token count for a single message.
+Uses rough heuristic of ~4 characters per token."
+  (let ((total 0))
+    ;; Content
+    (let ((content (message-content msg)))
+      (typecase content
+        (string (incf total (ceiling (length content) 4)))
+        (list   ; list of content blocks (system message format)
+         (dolist (block content)
+           (when (consp block)
+             (let ((text (cdr (assoc "text" block :test #'string=))))
+               (when (and text (stringp text))
+                 (incf total (ceiling (length text) 4)))))))))
+    ;; Tool calls (assistant messages with tool_use)
+    (dolist (tc (message-tool-calls msg))
+      (incf total (ceiling (length (tool-call-name tc)) 4))
+      (let ((args (tool-call-arguments tc)))
+        (when args
+          (incf total (ceiling (length (princ-to-string args)) 4)))))
+    ;; Thinking (extended thinking content)
+    (let ((thinking (message-thinking msg)))
+      (when (and thinking (stringp thinking) (plusp (length thinking)))
+        (incf total (ceiling (length thinking) 4))))
+    total))
+
+(defgeneric estimate-context-tokens (memory &key system-prompt)
+  (:documentation "Estimate the total token count of the current context window.
+Returns an approximate count using ~4 characters per token heuristic."))
+
+(defmethod estimate-context-tokens ((mem memory) &key system-prompt)
+  "Estimate total tokens including system prompt, summary, and all conversation messages."
+  (let ((total 0))
+    ;; System prompt
+    (when (and system-prompt (stringp system-prompt))
+      (incf total (ceiling (length system-prompt) 4)))
+    ;; Summary
+    (when (memory-summary mem)
+      (incf total (ceiling (length (memory-summary mem)) 4)))
+    ;; Conversation messages
+    (dolist (msg (conversation-to-list (memory-conversation mem)))
+      (incf total (%message-estimated-tokens msg)))
+    total))
+
+;;; ============================================================
 ;;; Compaction helpers
 ;;; ============================================================
 
@@ -113,6 +191,9 @@ tool_result messages from their corresponding assistant tool_use messages."
          (total (length messages))
          (keep-count (ceiling (memory-max-messages mem) 2))
          (split-idx (- total keep-count)))
+    ;; Guard: can't compact when fewer messages than keep-count
+    (when (<= split-idx 0)
+      (return-from memory-compact nil))
     ;; Adjust split-idx forward past any :tool messages at the boundary.
     ;; A :tool message (tool_result) requires its preceding assistant
     ;; (tool_use) to be present in the conversation. If the assistant
@@ -192,6 +273,72 @@ from rejecting the conversation with HTTP 400."
        (memory-conversation mem)
        (tool-result-message id "[interrupted — no result available]"))
       (incf count))))
+
+;;; ============================================================
+;;; Context overflow recovery — Phase 1: Deduplication
+;;; ============================================================
+
+(defgeneric memory-deduplicate-tool-results (memory)
+  (:documentation "Replace duplicate tool result contents with a short placeholder.
+Preserves tool_use/tool_result pairing (IDs are untouched).
+Only deduplicates results whose content exceeds 200 characters.
+Returns the number of deduplicated messages."))
+
+(defmethod memory-deduplicate-tool-results ((mem memory))
+  "Walk messages oldest→newest, replacing duplicate tool result content."
+  (let* ((messages (conversation-to-list (memory-conversation mem)))
+         (seen (make-hash-table :test 'equal))
+         (deduped 0))
+    (dolist (msg messages)
+      (when (and (eq :tool (message-role msg))
+                 (stringp (message-content msg))
+                 (> (length (message-content msg)) 200))
+        (let ((content (message-content msg)))
+          (if (gethash content seen)
+              (progn
+                (setf (message-content msg) "[duplicate tool output removed]")
+                (incf deduped))
+              (setf (gethash content seen) t)))))
+    (log-info "agent" "Deduplication: removed ~a duplicate(s)" deduped)
+    deduped))
+
+;;; ============================================================
+;;; Context overflow recovery — Phase 2: Aggressive truncation
+;;; ============================================================
+
+(defgeneric memory-truncate-largest-outputs (memory &key target-ratio max-iterations)
+  (:documentation "Truncate the largest tool output to TARGET-RATIO of its current size.
+Repeats up to MAX-ITERATIONS times, stopping early when no output exceeds
+200 characters. Returns the number of truncation passes performed."))
+
+(defmethod memory-truncate-largest-outputs ((mem memory)
+                                            &key (target-ratio 0.5)
+                                                 (max-iterations 20))
+  "Iteratively halve the largest tool result until under budget or exhausted."
+  (let ((truncated 0))
+    (dotimes (i max-iterations truncated)
+      (let* ((messages (conversation-to-list (memory-conversation mem)))
+             (max-len 0)
+             (max-msg nil))
+        ;; Find the largest tool result
+        (dolist (msg messages)
+          (when (and (eq :tool (message-role msg))
+                     (stringp (message-content msg))
+                     (> (length (message-content msg)) max-len))
+            (setf max-len (length (message-content msg))
+                  max-msg msg)))
+        ;; Stop if nothing large enough to truncate
+        (when (or (null max-msg) (<= max-len 200))
+          (return truncated))
+        ;; Truncate to target-ratio of current size (minimum 100 chars)
+        (let ((new-len (max 100 (floor (* max-len target-ratio)))))
+          (setf (message-content max-msg)
+                (concatenate 'string
+                             (subseq (message-content max-msg) 0 new-len)
+                             "... [truncated]"))
+          (incf truncated))))
+    (log-info "agent" "Truncation: ~a pass(es) performed" truncated)
+    truncated))
 
 ;;; ============================================================
 ;;; Reset

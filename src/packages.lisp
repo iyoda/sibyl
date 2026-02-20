@@ -284,6 +284,11 @@
    #:memory-compact
    #:memory-compaction-strategy
     #:memory-compaction-client
+    #:memory-context-window-size
+    #:memory-compaction-threshold
+    #:estimate-context-tokens
+    #:memory-deduplicate-tool-results
+    #:memory-truncate-largest-outputs
     #:memory-sanitize
     ;; Agent
    #:agent
