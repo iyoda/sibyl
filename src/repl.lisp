@@ -1201,6 +1201,33 @@ Returns TEXT unchanged when it is not a string."
           (let ((new-spinner (sibyl.repl.spinner:start-spinner "Thinking...")))
             (setf *current-spinner* new-spinner)))))))
 
+(defun make-thinking-display-callback ()
+  "Return a lambda suitable for *streaming-thinking-callback*.
+Displays thinking chunks in magenta ANSI style, prefixed with '💭 ' on the first chunk.
+Stops any active spinner before writing the first chunk.
+Returns NIL when *stream-enabled* is NIL (streaming disabled)."
+  (when *stream-enabled*
+    (let ((first-thinking-chunk-p t))
+      (lambda (thinking-chunk)
+        (when (and thinking-chunk (plusp (length thinking-chunk)))
+          ;; On first thinking chunk: stop spinner and emit header
+          (when first-thinking-chunk-p
+            (setf first-thinking-chunk-p nil)
+            (when (and *current-spinner*
+                       (sibyl.repl.spinner:spinner-active-p *current-spinner*))
+              (bt:with-lock-held (*spinner-output-lock*)
+                (sibyl.repl.spinner:stop-spinner *current-spinner*)
+                (setf *current-spinner* nil)))
+            (if *use-colors*
+                (format t "~%~C[35m💭 ~C[0m" #\Escape #\Escape)
+                (format t "~%[thinking] "))
+            (force-output))
+          ;; Write each chunk in magenta
+          (if *use-colors*
+              (format t "~C[35m~a~C[0m" #\Escape thinking-chunk #\Escape)
+              (write-string thinking-chunk *standard-output*))
+          (force-output *standard-output*))))))
+
 (defun make-tool-result-hook ()
   "Return a closure suitable for the :on-tool-result agent hook.
    Overwrites the current line with a result line showing ✓/✗, tool name, args, time, size.
@@ -1629,6 +1656,8 @@ Otherwise, use model-specific optimized prompt for Ollama models."
                                             (when (and clean (plusp (length clean)))
                                               (write-string clean *standard-output*)
                                               (force-output *standard-output*))))))
+                                    (sibyl.llm::*streaming-thinking-callback*
+                                      (make-thinking-display-callback))
                                     (tracker (sibyl.agent:agent-token-tracker agent))
                                     (in-before (sibyl.llm::token-tracker-input-tokens tracker))
                                     (out-before (sibyl.llm::token-tracker-output-tokens tracker))

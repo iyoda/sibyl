@@ -13,6 +13,13 @@
 (defparameter *oauth-beta-flag* "oauth-2025-04-20"
   "Anthropic beta flag required for OAuth authentication.")
 
+
+(defparameter *token-efficient-beta-flag*
+  "token-efficient-tools-2025-02-19"
+  "Anthropic beta flag for token-efficient tool use.
+   Reduces token usage for tool calls by ~14% on average.
+   See https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/token-efficient-tool-use")
+
 (defclass anthropic-client (llm-client)
   ((api-version :initarg :api-version
                 :accessor anthropic-api-version
@@ -56,16 +63,21 @@
 
 (defun anthropic-headers (client)
   "Build Anthropic-specific headers.
-   Uses Bearer auth for OAuth tokens, x-api-key for standard API keys."
+   Uses Bearer auth for OAuth tokens, x-api-key for standard API keys.
+   Always includes token-efficient-tools beta flag to reduce tool-use token costs."
   (let ((headers (list (cons "anthropic-version" (anthropic-api-version client))
                        (cons "User-Agent" "sibyl/0.1.0"))))
     (if (anthropic-oauth-p client)
         (cons (cons "Authorization"
                     (format nil "Bearer ~a" (client-api-key client)))
-              (cons (cons "anthropic-beta" *oauth-beta-flag*)
+              (cons (cons "anthropic-beta"
+                          (format nil "~a,~a"
+                                  *oauth-beta-flag*
+                                  *token-efficient-beta-flag*))
                     headers))
         (cons (cons "x-api-key" (client-api-key client))
-              headers))))
+              (cons (cons "anthropic-beta" *token-efficient-beta-flag*)
+                    headers)))))
 
 (defun anthropic-content-blocks-p (content)
   "Return T when CONTENT is a list of Anthropic content-block alists."
@@ -195,6 +207,51 @@ last tool so the entire tools prefix is cached by the Anthropic API."
                                  '(("cache_control" . (("type" . "ephemeral")))))))
         (setf (car last-cons) with-cache)))
     formatted-tools))
+
+(defun add-cache-control-to-last-block (content-blocks)
+  "Destructively add cache_control ephemeral to the last content block in
+CONTENT-BLOCKS.  Skips if cache_control is already present.
+Returns CONTENT-BLOCKS."
+  (when (and (listp content-blocks) content-blocks)
+    (let* ((last-cons  (last content-blocks))
+           (last-block (car last-cons)))
+      (unless (assoc "cache_control" last-block :test #'equal)
+        (setf (car last-cons)
+              (append last-block
+                      (list (cons "cache_control"
+                                  (list (cons "type" "ephemeral")))))))))
+  content-blocks)
+
+(defun add-conversation-cache-points (messages)
+  "Add cache_control ephemeral markers to conversation history messages.
+Marks the last content block of the oldest user turn and the last content
+block of the second-oldest user turn, giving Anthropic two cache anchors
+within the conversation (per the multi-turn caching best practice).
+Returns MESSAGES unchanged when caching is disabled or history is too short."
+  (when (or (not (config-value "optimization.cache-enabled"))
+            (< (length messages) 3))
+    (return-from add-conversation-cache-points messages))
+  (let ((user-turns (remove-if-not
+                     (lambda (m)
+                       (equal (cdr (assoc "role" m :test #'equal)) "user"))
+                     messages)))
+    (when (>= (length user-turns) 2)
+      (let ((oldest      (nth (- (length user-turns) 2) user-turns))
+            (second-last (nth (- (length user-turns) 1) user-turns)))
+        (add-cache-control-to-last-block
+         (cdr (assoc "content" oldest :test #'equal)))
+        (add-cache-control-to-last-block
+         (cdr (assoc "content" second-last :test #'equal))))))
+  messages)
+
+(defun prepare-anthropic-messages (messages)
+  "Extract system prompt and format conversation messages for the Anthropic API.
+Applies conversation-level cache markers before returning.
+Returns (values system-content-blocks api-messages)."
+  (multiple-value-bind (system api-messages)
+      (messages-to-anthropic-format messages)
+    (values system
+            (add-conversation-cache-points api-messages))))
 
 (defun add-cache-control-to-system (system)
   "Add cache_control ephemeral to the first block of a system content list.
@@ -346,7 +403,7 @@ Returns NIL when parsing fails."
   "Stream Anthropic responses, invoking *streaming-text-callback* per text delta.
 Returns a reconstructed assistant message."
   (multiple-value-bind (system api-messages)
-      (messages-to-anthropic-format messages)
+      (prepare-anthropic-messages messages)
     (let* ((system-with-cache (add-cache-control-to-system system))
            (body `(("model" . ,(client-model client))
                    ("max_tokens" . ,(client-max-tokens client))
@@ -481,7 +538,7 @@ Returns (values message usage-plist)."
   (if *streaming-text-callback*
       (complete-anthropic-streaming client messages nil)
       (multiple-value-bind (system api-messages)
-          (messages-to-anthropic-format messages)
+          (prepare-anthropic-messages messages)
         (let* ((system-with-cache (add-cache-control-to-system system))
                 (body `(("model" . ,(client-model client))
                         ("max_tokens" . ,(client-max-tokens client))
@@ -506,7 +563,7 @@ Returns (values message usage-plist)."
   (if *streaming-text-callback*
       (complete-anthropic-streaming client messages tools)
       (multiple-value-bind (system api-messages)
-          (messages-to-anthropic-format messages)
+          (prepare-anthropic-messages messages)
         (let* ((system-with-cache (add-cache-control-to-system system))
                 (body `(("model" . ,(client-model client))
                         ("max_tokens" . ,(client-max-tokens client))

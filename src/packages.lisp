@@ -204,6 +204,7 @@
     #:*default-connect-timeout*
     #:*default-read-timeout*
     ;; Retry
+   #:*streaming-thinking-callback*
     #:call-with-retry))
 
 (defpackage #:sibyl.plan

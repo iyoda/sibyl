@@ -1736,3 +1736,79 @@
   (when (fboundp 'sibyl.tests::safe-redefine-test-fn-exit-003)
     (fmakunbound 'sibyl.tests::safe-redefine-test-fn-exit-003)))
 )
+
+(test token-efficient-beta-header-present
+  "Auto-generated test"
+  (let* ((client (sibyl.llm::make-anthropic-client :api-key "sk-ant-test-key"))
+       (headers (sibyl.llm::anthropic-headers client))
+       (beta-header (cdr (assoc "anthropic-beta" headers :test #'equal))))
+  (is (and beta-header
+           (search "token-efficient-tools-2025-02-19" beta-header))
+      "anthropic-beta header should include token-efficient-tools-2025-02-19")))
+
+(test add-conversation-cache-points-basic
+  "Auto-generated test"
+  
+;; Build a fake api-messages list with 3 turns
+(let* ((msgs (list
+              '(("role" . "user")    ("content" . ((("type" . "text") ("text" . "Hello")))))
+              '(("role" . "assistant") ("content" . ((("type" . "text") ("text" . "Hi")))))
+              '(("role" . "user")    ("content" . ((("type" . "text") ("text" . "What is 2+2?")))))
+              '(("role" . "assistant") ("content" . ((("type" . "text") ("text" . "4")))))
+              '(("role" . "user")    ("content" . ((("type" . "text") ("text" . "And 3+3?")))))))
+       ;; Stub cache-enabled
+       (result (let ((sibyl.config::*config*
+                      (alexandria:alist-hash-table
+                       '(("optimization.cache-enabled" . t)) :test #'equal)))
+                 (sibyl.llm::add-conversation-cache-points msgs)))
+       ;; The second-to-last user message (index 2) should have cache_control
+       (marked-msg (nth 2 result))
+       (marked-content (cdr (assoc "content" marked-msg :test #'equal)))
+       (last-block (car (last marked-content)))
+       (cache-ctrl (cdr (assoc "cache_control" last-block :test #'equal)))
+       ;; The last user message (index 4) should NOT have cache_control
+       (last-msg (nth 4 result))
+       (last-content (cdr (assoc "content" last-msg :test #'equal)))
+       (last-block-last (car (last last-content)))
+       (no-cache (assoc "cache_control" last-block-last :test #'equal)))
+  (is (and cache-ctrl
+           (equal "ephemeral" (cdr (assoc "type" cache-ctrl :test #'equal))))
+      "second-to-last user msg should have cache_control ephemeral")
+  (is (null no-cache)
+      "last user message should NOT have cache_control")))
+
+(test add-conversation-cache-points-short-history
+  "Auto-generated test"
+  
+;; With fewer than 3 messages, nothing should be cached
+(let* ((msgs (list
+              '(("role" . "user") ("content" . ((("type" . "text") ("text" . "Hello")))))))
+       (result (let ((sibyl.config::*config*
+                      (alexandria:alist-hash-table
+                       '(("optimization.cache-enabled" . t)) :test #'equal)))
+                 (sibyl.llm::add-conversation-cache-points msgs)))
+       (content (cdr (assoc "content" (first result) :test #'equal)))
+       (last-block (car (last content)))
+       (no-cache (assoc "cache_control" last-block :test #'equal)))
+  (is (null no-cache)
+      "Single-message history should not get cache_control")
+  (is (eq msgs result)
+      "Should return the same list object when skipping")))
+
+(test add-conversation-cache-points-cache-disabled
+  "Auto-generated test"
+  
+;; When optimization.cache-enabled is nil, no markers should be added
+(let* ((msgs (list
+              '(("role" . "user")      ("content" . ((("type" . "text") ("text" . "A")))))
+              '(("role" . "assistant") ("content" . ((("type" . "text") ("text" . "B")))))
+              '(("role" . "user")      ("content" . ((("type" . "text") ("text" . "C")))))))
+       (result (let ((sibyl.config::*config*
+                      (alexandria:alist-hash-table
+                       '(("optimization.cache-enabled" . nil)) :test #'equal)))
+                 (sibyl.llm::add-conversation-cache-points msgs)))
+       (first-user-content (cdr (assoc "content" (first result) :test #'equal)))
+       (last-block (car (last first-user-content)))
+       (no-cache (assoc "cache_control" last-block :test #'equal)))
+  (is (null no-cache)
+      "Should not add cache_control when caching is disabled")))

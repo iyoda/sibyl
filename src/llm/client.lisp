@@ -15,6 +15,20 @@
      (let ((*streaming-text-callback* #'write-token))
        (agent-run agent input))")
 
+(defvar *streaming-thinking-callback*
+  nil
+  "When non-nil, a function (lambda (thinking-text) ...) called with each
+   thinking chunk during streaming LLM responses with extended thinking enabled.
+
+   The REPL binds this around agent-run to display thinking content in real-time:
+     (let ((*streaming-thinking-callback* (make-thinking-display-callback)))
+       (agent-run agent input))
+
+   Providers call this inside the streaming event loop when a thinking_delta
+   SSE event arrives:
+     (when *streaming-thinking-callback*
+       (funcall *streaming-thinking-callback* thinking-chunk))")
+
 ;;; ============================================================
 ;;; Client protocol (CLOS generic functions)
 ;;; ============================================================
