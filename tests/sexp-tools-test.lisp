@@ -2320,6 +2320,13 @@
   (is (not (null config)))
   (is (search "sonnet" (string-downcase (sibyl.llm:model-name config))))))
 
+(test resolve-model-spec-soonet-alias
+  "Auto-generated test"
+  ;; "soonet" typo alias should resolve to claude-sonnet-4-6
+  (let ((config (sibyl.llm::resolve-model-spec "soonet")))
+    (is (not (null config)))
+    (is (string= "claude-sonnet-4-6" (sibyl.llm:model-name config)))))
+
 (test agent-switch-client-basic
   "Auto-generated test"
   ;; Test that agent-switch-client changes the client slot
@@ -2351,6 +2358,15 @@
   (is (not (null config)))
   (is (string= "claude-opus-4-6" (sibyl.llm:model-name config)))
   (is (eq :anthropic (sibyl.llm:model-provider config)))))
+
+(test model-switch-rejects-non-target-model
+  "Auto-generated test"
+  ;; gpt-5.2 exists in registry but is not an allowed /model switch target.
+  (let* ((mock-agent (sibyl.agent:make-agent))
+         (output (with-output-to-string (*standard-output*)
+                   (sibyl.repl::%model-switch mock-agent "gpt-5.2"))))
+    (is (search "Unknown model" output))
+    (is (search "gpt-5.2" output))))
 
 (test suggest-similar-models-basic
   "Auto-generated test"

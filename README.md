@@ -40,12 +40,20 @@ ln -s /path/to/sibyl ~/quicklisp/local-projects/sibyl
 ## Quick Start
 
 ```bash
-# Anthropic
-sbcl --eval '(ql:quickload :sibyl :silent t)' --eval '(sibyl:with-config () (sibyl:start-repl :client (sibyl:make-anthropic-client)))'
+# GPT-5.2-Codex
+scripts/start-repl.sh gpt-5.2-codex
 
-# OpenAI
-sbcl --eval '(ql:quickload :sibyl :silent t)' --eval '(sibyl:with-config () (sibyl:start-repl :client (sibyl:make-openai-client)))'
+# GPT-5-mini
+scripts/start-repl.sh gpt-5-mini
+
+# Opus-4.6
+scripts/start-repl.sh opus-4.6
+
+# Soonet-4.6 (Sonnet-4.6 alias)
+scripts/start-repl.sh soonet-4.6
 ```
+
+`scripts/start-repl.sh` のデフォルトは `gpt-5.2-codex` です。
 
 ## Usage
 

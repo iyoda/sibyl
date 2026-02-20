@@ -273,11 +273,17 @@ Returns NIL for providers that don't need an API key (e.g. :ollama)."
 
 (defparameter *model-aliases*
   '(("opus"    . "claude-opus")
+    ("opus-4.6" . "claude-opus-4-6")
     ("sonnet"  . "claude-sonnet")
+    ("sonnet-4.6" . "claude-sonnet-4-6")
+    ("soonet"  . "claude-sonnet-4-6")
+    ("soonet-4.6" . "claude-sonnet-4-6")
     ("haiku"   . "claude-haiku")
     ("codex"   . "gpt-5.2-codex")
+    ("gpt-5.2-codex" . "gpt-5.2-codex")
     ("nano"    . "gpt-5-nano")
-    ("mini"    . "gpt-5-mini"))
+    ("mini"    . "gpt-5-mini")
+    ("gpt-5-mini" . "gpt-5-mini"))
   "Short aliases for model families. Each (alias . prefix) pair maps
 a user-friendly name to a model-name prefix in *model-registry*.")
 

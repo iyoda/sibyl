@@ -69,6 +69,10 @@
   "List of model switch records, most recent first.
 Each entry is a plist (:model name :provider provider :timestamp time).")
 
+(defparameter *model-switch-targets*
+  '("gpt-5.2-codex" "gpt-5-mini" "claude-opus-4-6" "claude-sonnet-4-6")
+  "Allowed switch targets for /model.")
+
 (defvar *current-session-id* nil
   "The session ID for the current REPL session.")
 
@@ -677,7 +681,11 @@ tests) can trigger SBCL stream corruption warnings."
      /model list     — List all available models grouped by provider
      /model history  — Show model switch history for this session
      /model <name>   — Switch to a model by name, prefix, or alias (sonnet, opus, haiku, etc.)"
-  (let ((arg (string-trim '(#\Space #\Tab) input)))
+  (let* ((trimmed (string-trim '(#\Space #\Tab) (or input "")))
+         (arg (if (search "/model" trimmed :test #'string-equal)
+                  (string-trim '(#\Space #\Tab)
+                               (subseq trimmed (length "/model")))
+                  trimmed)))
     (cond ((string= arg "") (%model-show-status agent))
           ((string-equal arg "list") (%model-list-all agent))
           ((string-equal arg "history") (%model-show-history agent))
@@ -721,19 +729,32 @@ tests) can trigger SBCL stream corruption warnings."
     (format t "~%Available models:~%")
     (dolist (group groups)
       (let ((provider (car group))
-            (configs (cdr group)))
-        (format t "~%  ~a:~%" (string-capitalize (symbol-name provider)))
-        (dolist (config configs)
-          (let* ((name (sibyl.llm:model-name config))
-                 (active-p (and current-model (string-equal name current-model))))
-            (format t "    ~a ~a  (ctx: ~dk, max-out: ~dk)~%"
-                    (if active-p "→" " ")
-                    name
-                    (round (sibyl.llm:model-context-window config) 1000)
-                    (round (sibyl.llm::model-max-tokens config) 1000))))))
-    ;; Show aliases
-    (format t "~%  Aliases: ~{~a~^, ~}~%"
-            (mapcar #'car sibyl.llm:*model-aliases*))))
+            (configs (remove-if-not
+                      (lambda (config)
+                        (member (sibyl.llm:model-name config)
+                                *model-switch-targets*
+                                :test #'string-equal))
+                      (cdr group))))
+        (when configs
+          (format t "~%  ~a:~%" (string-capitalize (symbol-name provider)))
+          (dolist (config configs)
+            (let* ((name (sibyl.llm:model-name config))
+                   (active-p (and current-model (string-equal name current-model))))
+              (format t "    ~a ~a  (ctx: ~dk, max-out: ~dk)~%"
+                      (if active-p "→" " ")
+                      name
+                      (round (sibyl.llm:model-context-window config) 1000)
+                      (round (sibyl.llm::model-max-tokens config) 1000)))))))
+    ;; Show aliases that resolve to allowed switch targets
+    (let ((aliases
+            (loop for (alias . target) in sibyl.llm:*model-aliases*
+                  for resolved = (sibyl.llm:resolve-model-spec target)
+                  when (and resolved
+                            (member (sibyl.llm:model-name resolved)
+                                    *model-switch-targets*
+                                    :test #'string-equal))
+                  collect alias)))
+      (format t "~%  Aliases: ~{~a~^, ~}~%" aliases))))
 
 (defun %record-model-switch (model-name provider)
   "Record a model switch in the history."
@@ -769,12 +790,19 @@ Records successful switches in *model-switch-history*.
 Shows did-you-mean suggestions when no match is found.
 Handles errors during client creation and switching gracefully."
   (let ((config (sibyl.llm:resolve-model-spec spec)))
-    (if (null config)
+    (if (or (null config)
+            (not (member (sibyl.llm:model-name config)
+                         *model-switch-targets*
+                         :test #'string-equal)))
         (progn
           (format t "~%")
           (format-colored-text "✗ " :red)
           (format t "Unknown model: ~a~%" spec)
-          (let ((suggestions (sibyl.llm::suggest-similar-models spec)))
+          (let ((suggestions
+                  (remove-if-not
+                   (lambda (name)
+                     (member name *model-switch-targets* :test #'string-equal))
+                   (sibyl.llm::suggest-similar-models spec))))
             (if suggestions
                 (progn
                   (format t "Did you mean:~%")

@@ -676,6 +676,83 @@ Returns the (possibly modified) body alist."
         (append body reasoning-params)
         body)))
 
+(defun openai-chat-model-p (model-name)
+  "Return T when MODEL-NAME should use /chat/completions.
+Models like gpt-5.2-codex are routed to /responses for compatibility."
+  (let ((name (string-downcase (or model-name ""))))
+    (not (search "codex" name))))
+
+(defun messages-to-openai-responses-input (messages &optional tools)
+  "Render chat MESSAGES into a plain-text input for /responses.
+When TOOLS are provided, include a compact tool summary for context."
+  (with-output-to-string (out)
+    (dolist (msg messages)
+      (let ((role (string-upcase (symbol-name (message-role msg))))
+            (content (flatten-content-to-string (message-content msg))))
+        (format out "~a: ~a~%~%" role content)))
+    (when tools
+      (format out "TOOLS AVAILABLE (reference):~%")
+      (dolist (ts tools)
+        (format out "- ~a: ~a~%"
+                (or (getf ts :name) "unknown")
+                (or (getf ts :description) "")))
+      (format out "~%"))
+    (format out "ASSISTANT: ")))
+
+(defun parse-openai-responses-response (response)
+  "Parse OpenAI /responses response into (values message usage-plist)."
+  (labels ((extract-output-text (resp)
+             (or (gethash "output_text" resp)
+                 (let ((chunks nil))
+                   (labels ((collect-text (content-items)
+                              (when content-items
+                                (dolist (item (if (listp content-items)
+                                                  content-items
+                                                  (coerce content-items 'list)))
+                                  (let ((text (or (gethash "text" item)
+                                                  (gethash "output_text" item))))
+                                    (when (stringp text)
+                                      (push text chunks)))))))
+                     (let ((output (gethash "output" resp)))
+                       (when output
+                         (dolist (entry (if (listp output) output (coerce output 'list)))
+                           (let ((content (gethash "content" entry)))
+                             (collect-text content)))))
+                     (when chunks
+                       (apply #'concatenate 'string (nreverse chunks))))))))
+    (let* ((text (or (extract-output-text response) ""))
+           (usage-ht (gethash "usage" response))
+           (usage-plist (when usage-ht
+                          (let* ((input (or (gethash "input_tokens" usage-ht)
+                                            (gethash "prompt_tokens" usage-ht)
+                                            0))
+                                 (output (or (gethash "output_tokens" usage-ht)
+                                             (gethash "completion_tokens" usage-ht)
+                                             0))
+                                 (input-details (or (gethash "input_tokens_details" usage-ht)
+                                                    (gethash "prompt_tokens_details" usage-ht)))
+                                 (cached (if input-details
+                                             (or (gethash "cached_tokens" input-details) 0)
+                                             0)))
+                            (list :input-tokens input
+                                  :output-tokens output
+                                  :cache-read-tokens cached
+                                  :cache-write-tokens 0)))))
+      (log-and-track-usage usage-plist)
+      (values (assistant-message text) usage-plist))))
+
+(defun complete-openai-responses-api (client messages &optional tools)
+  "Compatibility path for models that require /responses."
+  (let* ((input (messages-to-openai-responses-input messages tools))
+         (body `(("model" . ,(client-model client))
+                 ("max_output_tokens" . ,(client-max-tokens client))
+                 ("input" . ,input)))
+         (response (http-post-json
+                    (format nil "~a/responses" (client-base-url client))
+                    (openai-headers client)
+                    (alist-to-hash body))))
+    (parse-openai-responses-response response)))
+
 (defclass openai-client (llm-client)
   ()
    (:default-initargs
@@ -917,20 +994,35 @@ Returns a reconstructed assistant message."
             (client-model client)
             (if *streaming-text-callback* "yes" "no"))
   (if *streaming-text-callback*
-      (complete-openai-streaming client messages nil)
+      (if (openai-chat-model-p (client-model client))
+          (complete-openai-streaming client messages nil)
+          (progn
+            (log-warn "llm" "Model ~a is not chat-completions compatible; using /responses fallback (non-streaming)."
+                      (client-model client))
+            (multiple-value-bind (msg usage)
+                (complete-openai-responses-api client messages)
+              (when (and *streaming-text-callback* (message-content msg))
+                (funcall *streaming-text-callback* (message-content msg)))
+              (values msg usage))))
       (let* ((body `(("model" . ,(client-model client))
                      ("max_completion_tokens" . ,(client-max-tokens client))
                      ("store" . t)
                      ("messages" . ,(messages-to-openai-format messages))))
              (temp-pair (openai-temperature-pair client)))
-        (when temp-pair
-          (push temp-pair body))
-        (let ((response (http-post-json
-                         (format nil "~a/chat/completions"
-                                 (client-base-url client))
-                         (openai-headers client)
-                         (alist-to-hash body))))
-          (parse-openai-response response)))))
+        (if (openai-chat-model-p (client-model client))
+            (progn
+              (when temp-pair
+                (push temp-pair body))
+              (let ((response (http-post-json
+                               (format nil "~a/chat/completions"
+                                       (client-base-url client))
+                               (openai-headers client)
+                               (alist-to-hash body))))
+                (parse-openai-response response)))
+            (progn
+              (log-warn "llm" "Model ~a is not chat-completions compatible; using /responses fallback."
+                        (client-model client))
+              (complete-openai-responses-api client messages))))))
 
 (defmethod complete-with-tools ((client openai-client) messages tools &key)
   "Send messages with tools to OpenAI GPT API."
@@ -939,7 +1031,16 @@ Returns a reconstructed assistant message."
             (length tools)
             (if *streaming-text-callback* "yes" "no"))
   (if *streaming-text-callback*
-      (complete-openai-streaming client messages tools)
+      (if (openai-chat-model-p (client-model client))
+          (complete-openai-streaming client messages tools)
+          (progn
+            (log-warn "llm" "Model ~a is not chat-completions compatible; tools are prompt-described via /responses fallback."
+                      (client-model client))
+            (multiple-value-bind (msg usage)
+                (complete-openai-responses-api client messages tools)
+              (when (and *streaming-text-callback* (message-content msg))
+                (funcall *streaming-text-callback* (message-content msg)))
+              (values msg usage))))
       (let* ((openai-tools
                (mapcar (lambda (ts)
                          `(("type" . "function")
@@ -955,11 +1056,17 @@ Returns a reconstructed assistant message."
                      ("store" . t)
                      ("tools" . ,openai-tools)))
              (temp-pair (openai-temperature-pair client)))
-        (when temp-pair
-          (push temp-pair body))
-        (let ((response (http-post-json
-                         (format nil "~a/chat/completions"
-                                 (client-base-url client))
-                         (openai-headers client)
-                         (alist-to-hash body))))
-          (parse-openai-response response)))))
+        (if (openai-chat-model-p (client-model client))
+            (progn
+              (when temp-pair
+                (push temp-pair body))
+              (let ((response (http-post-json
+                               (format nil "~a/chat/completions"
+                                       (client-base-url client))
+                               (openai-headers client)
+                               (alist-to-hash body))))
+                (parse-openai-response response)))
+            (progn
+              (log-warn "llm" "Model ~a is not chat-completions compatible; tools are prompt-described via /responses fallback."
+                        (client-model client))
+              (complete-openai-responses-api client messages tools))))))

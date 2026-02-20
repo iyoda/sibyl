@@ -88,6 +88,58 @@
       (is (= 0 (getf usage :cache-read-tokens)))
       (is (= 0 (getf usage :cache-write-tokens))))))
 
+(test parse-openai-responses-response-returns-usage
+  "parse-openai-responses-response returns (values message usage-plist)"
+  (let* ((resp (make-hash-table :test 'equal))
+         (message (make-hash-table :test 'equal))
+         (content (make-hash-table :test 'equal))
+         (usage (make-hash-table :test 'equal)))
+    (setf (gethash "text" content) "Hello from responses"
+          (gethash "content" message) (vector content)
+          (gethash "output" resp) (vector message)
+          (gethash "input_tokens" usage) 33
+          (gethash "output_tokens" usage) 11
+          (gethash "usage" resp) usage)
+    (multiple-value-bind (msg usage-plist)
+        (sibyl.llm::parse-openai-responses-response resp)
+      (is (string= "Hello from responses" (sibyl.llm:message-content msg)))
+      (is (= 33 (getf usage-plist :input-tokens)))
+      (is (= 11 (getf usage-plist :output-tokens))))))
+
+(test codex-model-uses-responses-endpoint
+  "complete routes codex model to /responses endpoint."
+  (let* ((client (make-instance 'sibyl.llm::openai-client
+                                :api-key "mock-key"
+                                :model "gpt-5.2-codex"
+                                :max-tokens 128
+                                :base-url "http://mock-openai"))
+         (messages (list (sibyl.llm:user-message "hello")))
+         (captured-url nil)
+         (captured-body nil))
+    (flet ((mock-http-post-json (url headers body &key connect-timeout read-timeout)
+             (declare (ignore headers connect-timeout read-timeout))
+             (setf captured-url url)
+             (setf captured-body body)
+             (let ((resp (make-hash-table :test 'equal))
+                   (message (make-hash-table :test 'equal))
+                   (content (make-hash-table :test 'equal))
+                   (usage (make-hash-table :test 'equal)))
+               (setf (gethash "text" content) "ok"
+                     (gethash "content" message) (vector content)
+                     (gethash "output" resp) (vector message)
+                     (gethash "input_tokens" usage) 1
+                     (gethash "output_tokens" usage) 1
+                     (gethash "usage" resp) usage)
+               resp)))
+      (let ((original-fn (symbol-function 'sibyl.llm::http-post-json)))
+        (unwind-protect
+             (progn
+               (setf (symbol-function 'sibyl.llm::http-post-json) #'mock-http-post-json)
+               (sibyl.llm:complete client messages)
+               (is (search "/responses" captured-url))
+               (is (null (gethash "temperature" captured-body))))
+          (setf (symbol-function 'sibyl.llm::http-post-json) original-fn))))))
+
 ;;; ============================================================
 ;;; GPT-5 mini pricing tests (TDD: RED phase)
 ;;; ============================================================
