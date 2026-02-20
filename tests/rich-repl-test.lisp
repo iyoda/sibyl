@@ -267,6 +267,65 @@
   (let ((input (concatenate 'string "hi" (string (code-char 10)) "there")))
     (is (string= "hithere" (sibyl.repl::%strip-ctrl-j input)))))
 
+(test escape-char-p-detects-esc
+  "%escape-char-p returns T only for ESC (ASCII 27)."
+  (is (eq t (sibyl.repl::%escape-char-p (code-char 27))))
+  (is (null (sibyl.repl::%escape-char-p #\A)))
+  (is (null (sibyl.repl::%escape-char-p nil))))
+
+(test readline-insert-newline-callback
+  "%readline-insert-newline inserts newline and requests redisplay."
+  (when (sibyl.repl::readline-available-p)
+    (let ((inserted-text nil)
+          (redisplay-called nil)
+          (insert-sym (find-symbol "INSERT-TEXT" :cl-readline))
+          (redisplay-sym (find-symbol "REDISPLAY" :cl-readline)))
+      (when (and insert-sym redisplay-sym)
+        (let ((orig-insert (symbol-function insert-sym))
+              (orig-redisplay (symbol-function redisplay-sym)))
+          (unwind-protect
+              (progn
+                (setf (symbol-function insert-sym)
+                      (lambda (text)
+                        (setf inserted-text text)
+                        1))
+                (setf (symbol-function redisplay-sym)
+                      (lambda ()
+                        (setf redisplay-called t)
+                        nil))
+                (is (null (sibyl.repl::%readline-insert-newline 1 #\Return)))
+                (is (string= (string #\Newline) inserted-text))
+                (is (eq t redisplay-called)))
+            (setf (symbol-function insert-sym) orig-insert)
+            (setf (symbol-function redisplay-sym) orig-redisplay)))))))
+
+(test bind-shift-enter-newline-binds-known-sequences
+  "%bind-shift-enter-newline binds all configured key sequences."
+  (when (sibyl.repl::readline-available-p)
+    (let ((captured nil)
+          (bind-sym (find-symbol "BIND-KEYSEQ" :cl-readline)))
+      (when bind-sym
+        (let ((orig-bind (symbol-function bind-sym)))
+          (unwind-protect
+              (progn
+                (setf (symbol-function bind-sym)
+                      (lambda (keyseq function &key keymap if-unbound)
+                        (declare (ignore keymap))
+                        (push (list keyseq function if-unbound) captured)
+                        nil))
+                (sibyl.repl::%bind-shift-enter-newline)
+                (is (= (length sibyl.repl::*shift-enter-keyseqs*)
+                       (length captured)))
+                (is (every (lambda (entry)
+                             (and (member (first entry)
+                                          sibyl.repl::*shift-enter-keyseqs*
+                                          :test #'string=)
+                                  (eq (second entry)
+                                      #'sibyl.repl::%readline-insert-newline)
+                                  (eq (third entry) t)))
+                           captured)))
+            (setf (symbol-function bind-sym) orig-bind)))))))
+
 ;;; ============================================================
 ;;; streaming defaults
 ;;; ============================================================

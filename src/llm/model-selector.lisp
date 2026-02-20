@@ -256,3 +256,166 @@ Dispatches on the provider slot (:anthropic, :openai, :ollama)."
     (:ollama    (make-ollama-client :model (model-name config)
                                    :max-tokens (model-max-tokens config)
                                    :temperature (model-temperature config)))))
+
+(defun api-key-for-provider (provider)
+  "Return (ENV-VAR-NAME . VALUE-OR-NIL) for a provider's API key.
+Returns NIL for providers that don't need an API key (e.g. :ollama)."
+  (let ((env-var (case provider
+                   (:anthropic "ANTHROPIC_API_KEY")
+                   (:openai "OPENAI_API_KEY")
+                   (otherwise nil))))
+    (when env-var
+      (cons env-var (uiop:getenv env-var)))))
+
+;;; ============================================================
+;;; Model resolution: fuzzy spec → model-config
+;;; ============================================================
+
+(defparameter *model-aliases*
+  '(("opus"    . "claude-opus")
+    ("sonnet"  . "claude-sonnet")
+    ("haiku"   . "claude-haiku")
+    ("codex"   . "gpt-5.2-codex")
+    ("nano"    . "gpt-5-nano")
+    ("mini"    . "gpt-5-mini"))
+  "Short aliases for model families. Each (alias . prefix) pair maps
+a user-friendly name to a model-name prefix in *model-registry*.")
+
+(defun resolve-model-spec (spec)
+  "Resolve a user-supplied model SPEC string to an enhanced-model-config.
+Matching strategy (first match wins):
+  1. Exact match on model-name (case-insensitive)
+  2. Prefix match: spec is a prefix of model-name
+  3. Substring match: spec appears anywhere in model-name
+  4. Alias expansion: look up *model-aliases*, then retry prefix match
+Returns NIL if no match found."
+  (when (or (null spec) (string= spec ""))
+    (return-from resolve-model-spec nil))
+  (let ((spec-lower (string-downcase (string-trim '(#\Space #\Tab) spec))))
+    ;; 1. Exact match
+    (dolist (config *model-registry*)
+      (when (string-equal spec-lower (string-downcase (model-name config)))
+        (return-from resolve-model-spec config)))
+    ;; 2. Prefix match (spec is prefix of model-name)
+    (dolist (config *model-registry*)
+      (let ((name-lower (string-downcase (model-name config))))
+        (when (alexandria:starts-with-subseq spec-lower name-lower)
+          (return-from resolve-model-spec config))))
+    ;; 3. Substring match
+    (dolist (config *model-registry*)
+      (let ((name-lower (string-downcase (model-name config))))
+        (when (search spec-lower name-lower)
+          (return-from resolve-model-spec config))))
+    ;; 4. Alias expansion
+    (let ((alias-match (cdr (assoc spec-lower *model-aliases* :test #'string-equal))))
+      (when alias-match
+        (let ((alias-lower (string-downcase alias-match)))
+          ;; Prefix match with expanded alias
+          (dolist (config *model-registry*)
+            (let ((name-lower (string-downcase (model-name config))))
+              (when (alexandria:starts-with-subseq alias-lower name-lower)
+                (return-from resolve-model-spec config)))))))
+    ;; No match
+    nil))
+
+(defun edit-distance (a b)
+  "Compute Levenshtein edit distance between strings A and B."
+  (let* ((la (length a))
+         (lb (length b))
+         (d (make-array (list (1+ la) (1+ lb)) :element-type 'fixnum)))
+    (loop for i from 0 to la do (setf (aref d i 0) i))
+    (loop for j from 0 to lb do (setf (aref d 0 j) j))
+    (loop for i from 1 to la do
+      (loop for j from 1 to lb do
+        (setf (aref d i j)
+              (min (1+ (aref d (1- i) j))
+                   (1+ (aref d i (1- j)))
+                   (+ (aref d (1- i) (1- j))
+                      (if (char= (char a (1- i)) (char b (1- j))) 0 1))))))
+    (aref d la lb)))
+
+(defun suggest-similar-models (spec &key (max-suggestions 3))
+  "Return up to MAX-SUGGESTIONS model names similar to SPEC.
+Uses edit distance on both full model names and short aliases.
+Returns a list of model-name strings sorted by similarity."
+  (let* ((spec-lower (string-downcase (string-trim '(#\Space #\Tab) spec)))
+         (candidates nil))
+    ;; Score all registered models
+    (dolist (config *model-registry*)
+      (let* ((name (model-name config))
+             (name-lower (string-downcase name))
+             ;; Use shortest meaningful part for distance
+             (dist (min (edit-distance spec-lower name-lower)
+                        ;; Also compare against each dash-separated segment
+                        (loop for part in (cl-ppcre:split "-" name-lower)
+                              when (> (length part) 2)
+                              minimize (edit-distance spec-lower part)))))
+        (push (cons dist name) candidates)))
+    ;; Score aliases too
+    (dolist (alias-pair *model-aliases*)
+      (let ((alias-dist (edit-distance spec-lower (string-downcase (car alias-pair)))))
+        (when (<= alias-dist 2)
+          (let ((resolved (resolve-model-spec (cdr alias-pair))))
+            (when resolved
+              (push (cons alias-dist (model-name resolved)) candidates))))))
+    ;; Sort by distance, deduplicate, take top N
+    (let ((sorted (sort candidates #'< :key #'car)))
+      (loop for (dist . name) in sorted
+            with seen = nil
+            when (and (<= dist (max 4 (floor (length spec-lower) 2)))
+                      (not (member name seen :test #'string=)))
+            collect name into result
+            and do (push name seen)
+            when (>= (length result) max-suggestions)
+            return result
+            finally (return result)))))
+
+(defun list-available-models ()
+  "Return *model-registry* grouped by provider as an alist.
+Each entry is (provider-keyword . list-of-enhanced-model-config)."
+  (let ((groups nil))
+    (dolist (config *model-registry*)
+      (let* ((provider (model-provider config))
+             (existing (assoc provider groups)))
+        (if existing
+            (push config (cdr existing))
+            (push (cons provider (list config)) groups))))
+    ;; Reverse inner lists to maintain registry order
+    (mapcar (lambda (group)
+              (cons (car group) (nreverse (cdr group))))
+            (nreverse groups))))
+
+;;; ============================================================
+;;; Client switching for agents
+;;; ============================================================
+
+(defun agent-switch-client (agent new-client)
+  "Switch AGENT's LLM client to NEW-CLIENT.
+Preserves token-tracker and cost-records. Adjusts system-prompt for Ollama models.
+Returns the new client."
+  (let ((old-client (sibyl.agent:agent-client agent))
+        (new-model (ignore-errors (client-model new-client))))
+    (log-info "llm" "Switching model: ~a → ~a"
+              (ignore-errors (client-model old-client))
+              new-model)
+    ;; Switch the client slot
+    (setf (sibyl.agent:agent-client agent) new-client)
+    ;; Adjust system prompt for Ollama
+    (when (typep new-client 'sibyl.llm::ollama-client)
+      (setf (sibyl.agent:agent-system-prompt agent)
+            (sibyl.agent:select-ollama-system-prompt (or new-model ""))))
+    ;; If switching away from Ollama, restore default system prompt
+    (when (and (typep old-client 'sibyl.llm::ollama-client)
+               (not (typep new-client 'sibyl.llm::ollama-client)))
+      (setf (sibyl.agent:agent-system-prompt agent)
+            sibyl.agent::*default-system-prompt*))
+    ;; Check if context window might be too small for current conversation
+    (when new-model
+      (let* ((context-window (context-window-for-model new-model))
+             (memory (sibyl.agent:agent-memory agent))
+             (estimated-tokens (ignore-errors
+                                 (sibyl.agent:estimate-context-tokens memory))))
+        (when (and estimated-tokens (> estimated-tokens (* 0.9 context-window)))
+          (log-warn "llm" "Current conversation (~d tokens) may exceed new model's context window (~d). Consider /compact."
+                    estimated-tokens context-window))))
+    new-client))

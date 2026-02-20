@@ -205,6 +205,17 @@
     #:*default-read-timeout*
     ;; Retry
    #:*streaming-thinking-callback*
+   #:flatten-content-to-string
+   #:messages-to-openai-format
+   #:*cache-stats*
+   #:track-cache-stats
+   #:format-cache-stats
+   #:reset-cache-stats
+   #:*model-aliases*
+   #:resolve-model-spec
+   #:list-available-models
+   #:agent-switch-client
+   #:create-client-for-model
     #:call-with-retry))
 
 (defpackage #:sibyl.plan

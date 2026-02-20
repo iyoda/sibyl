@@ -151,29 +151,30 @@ Bumps the schema generation counter to invalidate cached schemas."
         :category (tool-category tool)))
 
 (defun %ensure-schema-cache ()
-  "Return the current schema cache, rebuilding it if the generation has advanced."
+  "Return the current schema cache, rebuilding it if the generation has advanced.
+   Schemas are sorted by name to ensure deterministic ordering for LLM prompt caching."
   (let ((cache *tool-schema-cache*)
         (gen *tool-schema-generation*)
         (registry *tool-registry*))
-    (when (or (null cache)
-              (/= (getf cache :generation) gen)
-              (not (eq (getf cache :registry) registry)))
-      ;; Rebuild: compute the full schema and a per-category index
-      (let* ((all-schemas (mapcar #'tool-to-schema (list-tools)))
+    (when
+        (or (null cache) (/= (getf cache :generation) gen)
+            (not (eq (getf cache :registry) registry)))
+      (let* ((all-schemas (sort (mapcar #'tool-to-schema (list-tools))
+                                #'string< :key (lambda (s) (getf s :name))))
              (all-tools (list-tools))
              (cat-index (make-hash-table :test 'eq)))
-        ;; Build category→schemas mapping
         (loop for tool in all-tools
-              for schema in all-schemas
+              for schema in (mapcar (lambda (tool)
+                                     (find (tool-name tool) all-schemas
+                                           :key (lambda (s) (getf s :name))
+                                           :test #'string=))
+                                   all-tools)
               do (push schema (gethash (tool-category tool) cat-index)))
-        ;; Reverse each bucket to preserve registration order
-        (maphash (lambda (k v)
-                   (setf (gethash k cat-index) (nreverse v)))
+        (maphash (lambda (k v) (setf (gethash k cat-index) (nreverse v)))
                  cat-index)
-        (setf cache (list :generation gen
-                          :registry registry
-                          :all all-schemas
-                          :by-cats cat-index)
+        (setf cache
+                (list :generation gen :registry registry :all all-schemas
+                      :by-cats cat-index)
               *tool-schema-cache* cache)))
     cache))
 

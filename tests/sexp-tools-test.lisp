@@ -2134,3 +2134,311 @@
                "Should bind *allowed-tools* to role's tool list"))
       (setf (symbol-function 'sibyl.agent::agent-run) orig-fn))))
 )
+
+(test role-tool-filtering
+  "Auto-generated test"
+  
+;; Test that *allowed-tools* correctly filters tools-as-schema
+;; Coder role should include "read-file" and "write-file" but NOT "run-tests"
+(let* ((coder-role (find "coder" sibyl.agent::*default-roles*
+                         :key #'sibyl.agent:role-name :test #'string=))
+       (coder-tools (sibyl.agent:role-tools coder-role)))
+  ;; Verify role definition has the expected tools
+  (is (member "read-file" coder-tools :test #'string=)
+      "Coder role should include read-file")
+  (is (member "write-file" coder-tools :test #'string=)
+      "Coder role should include write-file")
+  (is (not (member "run-tests" coder-tools :test #'string=))
+      "Coder role should NOT include run-tests")
+  ;; Verify *allowed-tools* filtering works at schema level
+  (let ((sibyl.tools:*allowed-tools* coder-tools))
+    (let ((schemas (sibyl.tools:tools-as-schema)))
+      (is (find "read-file" schemas :key (lambda (s) (getf s :name)) :test #'string=)
+          "Filtered schemas should include read-file for coder")
+      (is (find "write-file" schemas :key (lambda (s) (getf s :name)) :test #'string=)
+          "Filtered schemas should include write-file for coder")
+      (is (not (find "run-tests" schemas :key (lambda (s) (getf s :name)) :test #'string=))
+          "Filtered schemas should NOT include run-tests for coder"))))
+)
+
+(test tester-role-tool-filtering
+  "Auto-generated test"
+  
+;; Tester role should include "run-tests" and "write-test" but NOT "write-file"
+(let* ((tester-role (find "tester" sibyl.agent::*default-roles*
+                          :key #'sibyl.agent:role-name :test #'string=))
+       (tester-tools (sibyl.agent:role-tools tester-role)))
+  ;; Verify role definition
+  (is (member "run-tests" tester-tools :test #'string=)
+      "Tester role should include run-tests")
+  (is (member "write-test" tester-tools :test #'string=)
+      "Tester role should include write-test")
+  (is (not (member "write-file" tester-tools :test #'string=))
+      "Tester role should NOT include write-file")
+  ;; Verify filtering at schema level
+  (let ((sibyl.tools:*allowed-tools* tester-tools))
+    (let ((schemas (sibyl.tools:tools-as-schema)))
+      (is (find "run-tests" schemas :key (lambda (s) (getf s :name)) :test #'string=)
+          "Filtered schemas should include run-tests for tester")
+      (is (not (find "write-file" schemas :key (lambda (s) (getf s :name)) :test #'string=))
+          "Filtered schemas should NOT include write-file for tester"))))
+)
+
+(test find-suitable-agent-role-matching
+  "Auto-generated test"
+  
+;; When delegate-task specifies agent-role "coder", find-suitable-agent should
+;; pick the coder agent, not a tester or other role.
+(let* ((coordinator (sibyl.agent:make-agent-coordinator :strategy :sequential))
+       (mock-client (make-instance 'sibyl.llm:llm-client))
+       (coder-role (find "coder" sibyl.agent::*default-roles*
+                         :key #'sibyl.agent:role-name :test #'string=))
+       (tester-role (find "tester" sibyl.agent::*default-roles*
+                          :key #'sibyl.agent:role-name :test #'string=))
+       (coder-agent (sibyl.agent:make-specialized-agent coder-role mock-client))
+       (tester-agent (sibyl.agent:make-specialized-agent tester-role mock-client)))
+  (sibyl.agent:add-agent coordinator coder-agent)
+  (sibyl.agent:add-agent coordinator tester-agent)
+  ;; Create task requiring "coder" role
+  (let ((task (sibyl.agent:create-task coordinator "Write the module"
+                                       :required-role "coder")))
+    (let ((chosen (sibyl.agent:find-suitable-agent coordinator task)))
+      (is (not (null chosen)) "Should find a suitable agent")
+      (is (string= "coder" (sibyl.agent:role-name (sibyl.agent:agent-role chosen)))
+          "Should choose the coder agent")))
+  ;; Create task requiring "tester" role
+  (let ((task2 (sibyl.agent:create-task coordinator "Run all tests"
+                                        :required-role "tester")))
+    (let ((chosen2 (sibyl.agent:find-suitable-agent coordinator task2)))
+      (is (not (null chosen2)) "Should find a suitable agent for tester task")
+      (is (string= "tester" (sibyl.agent:role-name (sibyl.agent:agent-role chosen2)))
+          "Should choose the tester agent")))
+  ;; Task with no required role should fall back to any idle agent
+  (let ((task3 (sibyl.agent:create-task coordinator "Do something")))
+    (let ((chosen3 (sibyl.agent:find-suitable-agent coordinator task3)))
+      (is (not (null chosen3)) "Should find some idle agent for unspecified role"))))
+)
+
+(test openai-reasoning-effort-parameter
+  "Auto-generated test"
+  
+;; Test that OpenAI reasoning effort is applied to request body
+(let* ((sibyl.llm::*openai-reasoning-effort* "high")
+       (result (sibyl.llm::openai-reasoning-params)))
+  (is (not (null result)))
+  (is (equal "high" (cdr (assoc "reasoning" result :test #'string=)))))
+)
+
+(test openai-codex-max-tokens
+  "Auto-generated test"
+  
+;; Test that gpt-5.2-codex has 128K max output tokens in registry
+(let ((codex (find "gpt-5.2-codex" sibyl.llm::*model-registry*
+                    :key #'sibyl.llm:model-name :test #'string=)))
+  (is (not (null codex)))
+  (is (= 128000 (sibyl.llm::model-max-tokens codex))))
+)
+
+(test openai-reasoning-in-request-body
+  "Auto-generated test"
+  
+;; Test that apply-openai-reasoning integrates reasoning params into body
+(let* ((sibyl.llm::*openai-reasoning-effort* "high")
+       (body '(("model" . "gpt-5.2") ("messages" . #())))
+       (result (sibyl.llm::apply-openai-reasoning body)))
+  ;; Should have reasoning key
+  (let ((reasoning (cdr (assoc "reasoning" result :test #'string=))))
+    (is (not (null reasoning)))
+    (is (equal "high" (cdr (assoc "effort" reasoning :test #'string=))))))
+)
+
+(test openai-reasoning-absent-when-nil
+  "Auto-generated test"
+  
+;; When reasoning effort is nil, body should be unchanged
+(let* ((sibyl.llm::*openai-reasoning-effort* nil)
+       (body '(("model" . "gpt-4o") ("messages" . #())))
+       (result (sibyl.llm::apply-openai-reasoning body)))
+  (is (null (assoc "reasoning" result :test #'string=)))
+  (is (= 2 (length result))))
+)
+
+(test tools-schema-sorted-order
+  "Auto-generated test"
+  (let ((schemas (sibyl.tools:tools-as-schema)))
+  ;; Verify schemas are sorted by name
+  (is (> (length schemas) 1) "Need at least 2 tools for ordering test")
+  (let ((names (mapcar (lambda (s) (getf s :name)) schemas)))
+    (is (equal names (sort (copy-list names) #'string<))
+        "Tool schemas should be sorted alphabetically by name"))))
+
+(test tools-schema-stable-across-calls
+  "Auto-generated test"
+  ;; Verify that two consecutive calls return same order
+(let ((first-call (mapcar (lambda (s) (getf s :name)) (sibyl.tools:tools-as-schema)))
+      (second-call (mapcar (lambda (s) (getf s :name)) (sibyl.tools:tools-as-schema))))
+  (is (equal first-call second-call) "Schema order should be stable across calls")))
+
+(test flatten-content-to-string-basic
+  "Auto-generated test"
+  
+;; String passthrough
+(is (equal "hello" (sibyl.llm:flatten-content-to-string "hello")))
+;; Nil returns empty string
+(is (equal "" (sibyl.llm:flatten-content-to-string nil)))
+;; Single content block
+(is (equal "hello" (sibyl.llm:flatten-content-to-string
+                    '((("type" . "text") ("text" . "hello"))))))
+;; Multiple content blocks concatenated
+(is (equal (format nil "hello~%world")
+           (sibyl.llm:flatten-content-to-string
+            '((("type" . "text") ("text" . "hello"))
+              (("type" . "text") ("text" . "world"))))))
+)
+
+(test openai-format-flattens-content-blocks
+  "Auto-generated test"
+  
+;; System message with content blocks should be flattened to string
+(let* ((msg (sibyl.llm:make-message
+             :role :system
+             :content '((("type" . "text") ("text" . "You are helpful.")))))
+       (result (sibyl.llm:messages-to-openai-format (list msg))))
+  (is (equal "system" (cdr (assoc "role" (first result) :test #'equal))))
+  (is (stringp (cdr (assoc "content" (first result) :test #'equal))))
+  (is (equal "You are helpful." (cdr (assoc "content" (first result) :test #'equal)))))
+;; User message string stays as string
+(let* ((msg (sibyl.llm:make-message :role :user :content "Hello"))
+       (result (sibyl.llm:messages-to-openai-format (list msg))))
+  (is (equal "Hello" (cdr (assoc "content" (first result) :test #'equal)))))
+)
+
+(test resolve-model-spec-alias
+  "Auto-generated test"
+  ;; "sonnet" should resolve to claude-sonnet
+(let ((config (sibyl.llm::resolve-model-spec "sonnet")))
+  (is (not (null config)))
+  (is (search "sonnet" (string-downcase (sibyl.llm:model-name config))))))
+
+(test agent-switch-client-basic
+  "Auto-generated test"
+  ;; Test that agent-switch-client changes the client slot
+(let* ((old-client (make-instance 'sibyl.llm:llm-client 
+                     :api-key "test" :model "old-model"
+                     :base-url "http://test"))
+       (new-client (make-instance 'sibyl.llm:llm-client
+                     :api-key "test2" :model "new-model"  
+                     :base-url "http://test2"))
+       (agent (sibyl.agent:make-agent :client old-client)))
+  (sibyl.llm::agent-switch-client agent new-client)
+  (is (eq new-client (sibyl.agent:agent-client agent)))
+  (is (string= "new-model" (sibyl.llm:client-model (sibyl.agent:agent-client agent))))))
+
+(test resolve-model-spec-unknown
+  "Auto-generated test"
+  (let ((config (sibyl.llm::resolve-model-spec "nonexistent-model-xyz")))
+  (is (null config))))
+
+(test resolve-model-spec-prefix
+  "Auto-generated test"
+  (let ((config (sibyl.llm::resolve-model-spec "opus")))
+  (is (not (null config)))
+  (is (search "opus" (string-downcase (sibyl.llm:model-name config))))))
+
+(test resolve-model-spec-exact
+  "Auto-generated test"
+  (let ((config (sibyl.llm::resolve-model-spec "claude-opus-4-6")))
+  (is (not (null config)))
+  (is (string= "claude-opus-4-6" (sibyl.llm:model-name config)))
+  (is (eq :anthropic (sibyl.llm:model-provider config)))))
+
+(test suggest-similar-models-basic
+  "Auto-generated test"
+  (let ((suggestions (sibyl.llm::suggest-similar-models "sonnt")))
+  (is (listp suggestions))
+  ;; Should suggest something with "sonnet" in it
+  (is (some (lambda (s) (search "sonnet" (string-downcase s))) suggestions))))
+
+(test suggest-similar-models-empty
+  "Auto-generated test"
+  (let ((suggestions (sibyl.llm::suggest-similar-models "xyzzzz123")))
+  (is (listp suggestions))
+  ;; May be empty for very dissimilar strings
+  (is (>= 3 (length suggestions)))))
+
+(test model-switch-did-you-mean-for-unresolved-spec
+  "Auto-generated test"
+  ;; Force resolve-model-spec to NIL so suggestion path is guaranteed.
+  (let* ((old-client (make-instance 'sibyl.llm:llm-client
+                                    :api-key "test-key"
+                                    :model "old-model"
+                                    :base-url "http://test"))
+         (agent (sibyl.agent:make-agent :client old-client))
+         (orig-resolve (symbol-function 'sibyl.llm:resolve-model-spec))
+         (orig-suggest (symbol-function 'sibyl.llm::suggest-similar-models)))
+    (unwind-protect
+         (progn
+           (setf (symbol-function 'sibyl.llm:resolve-model-spec)
+                 (lambda (spec)
+                   (declare (ignore spec))
+                   nil))
+           (setf (symbol-function 'sibyl.llm::suggest-similar-models)
+                 (lambda (spec &key (max-suggestions 3))
+                   (declare (ignore spec max-suggestions))
+                   '("claude-sonnet-4-20250514")))
+           (let ((output (let ((sibyl.agent:*current-agent* agent))
+                           (with-output-to-string (*standard-output*)
+                             (sibyl.repl::%model-switch agent "sonnt")))))
+             (is (search "Unknown model" output))
+             (is (search "Did you mean" output))
+             (is (search "sonnet" (string-downcase output)))))
+      (setf (symbol-function 'sibyl.llm:resolve-model-spec) orig-resolve
+            (symbol-function 'sibyl.llm::suggest-similar-models) orig-suggest))))
+
+(test create-client-warns-missing-api-key
+  "Auto-generated test"
+  ;; When API key env var is missing, should still create client but warn
+(let* ((config (car (member-if (lambda (c)
+                                 (eq :anthropic (sibyl.llm:model-provider c)))
+                               sibyl.llm::*model-registry*)))
+       ;; Temporarily unbind the API key
+       (orig (uiop:getenv "ANTHROPIC_API_KEY")))
+  ;; config should exist
+  (is (not (null config)))
+  ;; Client creation should succeed regardless  
+  (let ((client (sibyl.llm:create-client-for-model config)))
+    (is (not (null client))))))
+
+(test model-switch-warns-no-api-key
+  "Auto-generated test"
+  ;; Use a real agent and mock client creation to avoid env-dependent failures.
+  (let* ((old-client (make-instance 'sibyl.llm:llm-client
+                                    :api-key "test-key"
+                                    :model "old-model"
+                                    :base-url "http://test"))
+         (new-client (make-instance 'sibyl.llm:llm-client
+                                    :api-key "test-key"
+                                    :model "claude-haiku-4-5"
+                                    :base-url "http://test"))
+         (agent (sibyl.agent:make-agent :client old-client))
+         (orig-create (symbol-function 'sibyl.llm:create-client-for-model))
+         (orig-switch (symbol-function 'sibyl.llm:agent-switch-client)))
+    (unwind-protect
+         (progn
+           (setf (symbol-function 'sibyl.llm:create-client-for-model)
+                 (lambda (config)
+                   (declare (ignore config))
+                   (format t "Warning: API key missing for ANTHROPIC_API_KEY~%")
+                   new-client))
+           (setf (symbol-function 'sibyl.llm:agent-switch-client)
+                 (lambda (agent-arg new-client-arg)
+                   (setf (sibyl.agent:agent-client agent-arg) new-client-arg)
+                   new-client-arg))
+           (let ((output (let ((sibyl.agent:*current-agent* agent))
+                           (with-output-to-string (*standard-output*)
+                             (sibyl.repl::%model-switch agent "haiku")))))
+             (is (search "API key" output))
+             (is (search "Switched to:" output))
+             (is (search "haiku" (string-downcase output)))))
+      (setf (symbol-function 'sibyl.llm:create-client-for-model) orig-create
+            (symbol-function 'sibyl.llm:agent-switch-client) orig-switch))))

@@ -606,3 +606,28 @@
     (is (search "utils.lisp" ctx) "Context should contain message content"))
   ;; Verify inbox is populated before execute
   (is (= 1 (length (sibyl.agent:agent-inbox tester))) "Should have 1 message before execute")))
+
+(test agent-message-receive
+  "An agent should receive messages in their inbox via send-message through coordinator."
+  (let* ((coordinator (sibyl.agent:make-agent-coordinator))
+         (mock-client (make-instance 'sibyl.llm:llm-client))
+         (coder-role (find "coder" sibyl.agent::*default-roles*
+                           :key #'sibyl.agent:role-name :test #'string=))
+         (tester-role (find "tester" sibyl.agent::*default-roles*
+                            :key #'sibyl.agent:role-name :test #'string=))
+         (coder (sibyl.agent:make-specialized-agent coder-role mock-client
+                                                      :agent-id "coder-42"))
+         (tester (sibyl.agent:make-specialized-agent tester-role mock-client
+                                                       :agent-id "tester-42")))
+    (sibyl.agent:add-agent coordinator coder)
+    (sibyl.agent:add-agent coordinator tester)
+    ;; Send message from coder to tester via coordinator
+    (sibyl.agent:send-message coordinator "coder-42" "tester-42"
+                              "Please review this code" :notification)
+    ;; Verify tester received it in inbox
+    (let ((inbox (sibyl.agent:agent-inbox tester)))
+      (is (= 1 (length inbox)) "Tester should have 1 message")
+      (is (search "review" (sibyl.agent:msg-content (first inbox)))
+          "Message content should contain 'review'")
+      (is (string= "coder-42" (sibyl.agent:msg-from (first inbox)))
+          "Message should be from coder"))))

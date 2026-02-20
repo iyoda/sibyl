@@ -618,11 +618,23 @@ tests) can trigger SBCL stream corruption warnings."
 
 
 (defun handle-model-command (agent input)
-  "Handler for :model command. Shows current model information.
+  "Handler for :model command. Shows current model, lists models, or switches.
 
-   Usage: /model — Show current model name, context window, and provider"
-  (declare (ignore input))
-  (%model-show-status agent)
+   Usage:
+     /model        — Show current model name, context window, and provider
+     /model list   — List all available models grouped by provider
+     /model <name> — Switch to a model by name, prefix, or alias (sonnet, opus, haiku, etc.)"
+  (let ((arg (string-trim '(#\Space #\Tab) input)))
+    (cond
+      ;; /model (no args) — show current status
+      ((string= arg "")
+       (%model-show-status agent))
+      ;; /model list — show all available models
+      ((string-equal arg "list")
+       (%model-list-all agent))
+      ;; /model <name> — switch model
+      (t
+       (%model-switch agent arg))))
   nil)
 
 (defun %model-show-status (agent)
@@ -653,6 +665,47 @@ tests) can trigger SBCL stream corruption warnings."
           (when context-window
             (format t "  Context Window: ~:d tokens~%" context-window))
           (format t "  Provider: ~a~%" (symbol-name provider))))))
+
+(defun %model-list-all (agent)
+  "List all available models grouped by provider with active marker."
+  (let* ((client (sibyl.agent:agent-client agent))
+         (current-model (ignore-errors (sibyl.llm::client-model client)))
+         (groups (sibyl.llm:list-available-models)))
+    (format t "~%Available models:~%")
+    (dolist (group groups)
+      (let ((provider (car group))
+            (configs (cdr group)))
+        (format t "~%  ~a:~%" (string-capitalize (symbol-name provider)))
+        (dolist (config configs)
+          (let* ((name (sibyl.llm:model-name config))
+                 (active-p (and current-model (string-equal name current-model))))
+            (format t "    ~a ~a  (ctx: ~dk, max-out: ~dk)~%"
+                    (if active-p "→" " ")
+                    name
+                    (round (sibyl.llm:model-context-window config) 1000)
+                    (round (sibyl.llm::model-max-tokens config) 1000))))))
+    ;; Show aliases
+    (format t "~%  Aliases: ~{~a~^, ~}~%"
+            (mapcar #'car sibyl.llm:*model-aliases*))))
+
+(defun %model-switch (agent spec)
+  "Switch agent's model based on user SPEC string.
+Uses resolve-model-spec for fuzzy matching, then creates client and switches.
+Shows did-you-mean suggestions when no match is found."
+  (let ((config (sibyl.llm:resolve-model-spec spec)))
+    (if (null config)
+        (progn
+          (format t "~%Unknown model: ~a~%" spec)
+          (let ((suggestions (sibyl.llm::suggest-similar-models spec)))
+            (if suggestions
+                (format t "Did you mean:~%~{  ~a~%~}~%" suggestions)
+                (format t "Try /model list to see available models.~%"))))
+        (let* ((new-client (sibyl.llm:create-client-for-model config))
+               (new-name (sibyl.llm:model-name config)))
+          (sibyl.llm:agent-switch-client agent new-client)
+          (format t "~%Switched to: ~a (~a)~%" new-name
+                  (string-downcase
+                   (symbol-name (sibyl.llm:model-provider config))))))))
 
 (defun save-cost-log (report)
   "Persist a SESSION-COST-REPORT to ~/.sibyl/cost-log.json.
@@ -1470,6 +1523,52 @@ Returns NIL when *stream-enabled* is NIL (streaming disabled)."
   (when input
     (remove-if (lambda (ch) (= (char-code ch) 10)) input)))
 
+(defun %escape-char-p (ch)
+  "Return T when CH is the ESC character (ASCII 27)."
+  (and ch (= (char-code ch) 27)))
+
+#+sbcl
+(defun %interrupt-repl-thread-for-cancel (thread)
+  "Interrupt THREAD and request cancellation of the current REPL turn."
+  (when thread
+    (sb-thread:interrupt-thread
+     thread
+     (lambda ()
+       (setf *cancel-requested* t)
+       ;; If no matching catch is active yet/anymore, ignore control errors.
+       (ignore-errors (throw 'repl-cancelled :cancelled))))))
+
+#+sbcl
+(defun %start-escape-cancel-monitor (&key (stream *standard-input*) (poll-interval 0.05))
+  "Start a lightweight ESC monitor while an agent turn is running.
+Returns a stop function that terminates the monitor thread."
+  (if (and (streamp stream)
+           (input-stream-p stream)
+           (interactive-stream-p stream))
+      (let ((running t)
+            (repl-thread sb-thread:*current-thread*)
+            (monitor-thread nil))
+        (setf monitor-thread
+              (bt:make-thread
+               (lambda ()
+                 (loop while running
+                       do (handler-case
+                              (let ((ch (read-char-no-hang stream nil nil)))
+                                (when (%escape-char-p ch)
+                                  (%interrupt-repl-thread-for-cancel repl-thread)
+                                  (return)))
+                            (error ()
+                              ;; Stream is unavailable; stop monitoring.
+                              (return)))
+                          (sleep poll-interval)))
+               :name "sibyl-escape-cancel-monitor"))
+        (lambda ()
+          (setf running nil)
+          (when (and monitor-thread (bt:thread-alive-p monitor-thread))
+            (handler-case (bt:join-thread monitor-thread)
+              (error () nil)))))
+      (lambda () nil)))
+
 (defun %readline-insert-newline (count key)
   "Readline callback: insert a literal newline into the edit buffer."
   (declare (ignore count key))
@@ -1774,22 +1873,26 @@ Otherwise, use model-specific optimized prompt for Ollama models."
                                  (let ((result nil))
                                    (setf result
                                          (catch 'repl-cancelled
-                                           (handler-bind
-                                               #+sbcl ((sb-sys:interactive-interrupt
-                                                         (lambda (c)
-                                                           (declare (ignore c))
-                                                           (let ((now (get-internal-real-time))
-                                                                 (window (* 2 internal-time-units-per-second)))
-                                                             (if (< (- now *last-interrupt-time*) window)
-                                                                 (progn
-                                                                   (stop-current-spinner)
-                                                                   (exit-repl))
-                                                                 (progn
-                                                                   (setf *cancel-requested* t
-                                                                         *last-interrupt-time* now)
-                                                                   (throw 'repl-cancelled :cancelled)))))))
-                                              (handler-case
-                                                  (progn
+                                           (let ((stop-escape-monitor
+                                                   #+sbcl (%start-escape-cancel-monitor)
+                                                   #-sbcl (lambda () nil)))
+                                             (unwind-protect
+                                                  (handler-bind
+                                                      #+sbcl ((sb-sys:interactive-interrupt
+                                                                (lambda (c)
+                                                                  (declare (ignore c))
+                                                                  (let ((now (get-internal-real-time))
+                                                                        (window (* 2 internal-time-units-per-second)))
+                                                                    (if (< (- now *last-interrupt-time*) window)
+                                                                        (progn
+                                                                          (stop-current-spinner)
+                                                                          (exit-repl))
+                                                                        (progn
+                                                                          (setf *cancel-requested* t
+                                                                                *last-interrupt-time* now)
+                                                                          (throw 'repl-cancelled :cancelled)))))))
+                                                     (handler-case
+                                                         (progn
                                                     (setf start-time (get-internal-real-time)
                                                           spinner (sibyl.repl.spinner:start-spinner "Thinking...")
                                                           *current-spinner* spinner
@@ -1917,7 +2020,8 @@ Otherwise, use model-specific optimized prompt for Ollama models."
                                                    (sibyl.agent:memory-sanitize
                                                     (sibyl.agent:agent-memory agent))
                                                    (log-error "repl" "Error: ~a" e)
-                                                   (format t "~%[Error: ~a]~%~%" e))))))
+                                                   (format t "~%[Error: ~a]~%~%" e))))
+                                               (funcall stop-escape-monitor)))))
                                     (when (eq result :cancelled)
                                       (stop-current-spinner)
                                       (sibyl.agent:memory-sanitize

@@ -97,6 +97,21 @@
     (t
      (list `(("type" . "text") ("text" . ,(prin1-to-string content)))))))
 
+(defun flatten-content-to-string (content)
+  "Flatten CONTENT to a plain string for OpenAI.
+CONTENT may be a string (returned as-is), NIL (returns \"\"),
+or a list of Anthropic-style content-block alists whose \"text\"
+values are joined with newlines."
+  (cond ((stringp content) content)
+        ((null content) "")
+        ((listp content)
+         (format nil "~{~A~^~%~}"
+                 (loop for block in content
+                       when (and (listp block)
+                                 (equal (cdr (assoc "type" block :test #'equal)) "text"))
+                       collect (cdr (assoc "text" block :test #'equal)))))
+        (t (princ-to-string content))))
+
 (defun messages-to-anthropic-format (messages)
   "Convert message structs to Anthropic API format.
    Returns (values system-prompt api-messages).
@@ -310,6 +325,56 @@ Returns the (possibly modified) body alist."
           (append adjusted thinking-params))
         body)))
 
+
+(defvar *cache-stats*
+  '(:total-input-tokens 0 :total-cached-tokens 0
+    :total-output-tokens 0 :request-count 0)
+  "Cumulative cache statistics for the session.")
+
+(defun track-cache-stats (usage-plist)
+  "Accumulate cache statistics from a single request's usage-plist."
+  (when usage-plist
+    (incf (getf *cache-stats* :total-input-tokens)
+          (or (getf usage-plist :input-tokens) 0))
+    (incf (getf *cache-stats* :total-cached-tokens)
+          (or (getf usage-plist :cache-read-tokens) 0))
+    (incf (getf *cache-stats* :total-output-tokens)
+          (or (getf usage-plist :output-tokens) 0))
+    (incf (getf *cache-stats* :request-count))))
+
+(defun format-cache-stats ()
+  "Return a formatted string of cumulative cache statistics."
+  (let* ((input (getf *cache-stats* :total-input-tokens))
+         (cached (getf *cache-stats* :total-cached-tokens))
+         (output (getf *cache-stats* :total-output-tokens))
+         (requests (getf *cache-stats* :request-count))
+         (pct (if (and input (> input 0))
+                  (round (* 100 cached) input)
+                  0)))
+    (format nil "Cache Statistics (session):~%  Requests: ~a~%  Total input tokens: ~:d~%  Cached tokens: ~:d (~a%)~%  Output tokens: ~:d"
+            requests input cached pct output)))
+
+(defun reset-cache-stats ()
+  "Reset cumulative cache statistics."
+  (setf (getf *cache-stats* :total-input-tokens) 0
+        (getf *cache-stats* :total-cached-tokens) 0
+        (getf *cache-stats* :total-output-tokens) 0
+        (getf *cache-stats* :request-count) 0))
+
+(defun log-and-track-usage (usage-plist &optional (prefix ""))
+  "Log usage with cache percentage and accumulate stats."
+  (when usage-plist
+    (let* ((input (getf usage-plist :input-tokens))
+           (cached (getf usage-plist :cache-read-tokens))
+           (pct (if (and input (> input 0))
+                    (round (* 100 cached) input)
+                    0)))
+      (log-info "llm"
+       "Tokens~a: input=~a output=~a cache-read=~a (~a%) cache-write=~a"
+       prefix input (getf usage-plist :output-tokens)
+       cached pct (getf usage-plist :cache-write-tokens)))
+    (track-cache-stats usage-plist)))
+
 (defun parse-anthropic-response (response)
   "Parse Anthropic API response into a message struct.
 Returns (values message usage-plist) where usage-plist may be nil."
@@ -318,46 +383,42 @@ Returns (values message usage-plist) where usage-plist may be nil."
                              raw-blocks
                              (coerce raw-blocks 'list)))
          (text-parts nil)
-          (thinking-parts nil)
-          (thinking-signature nil)
-          (tool-calls nil)
-          ;; Extract usage
-          (usage-ht (gethash "usage" response))
-          (usage-plist (when usage-ht
-                         (list :input-tokens (or (gethash "input_tokens" usage-ht) 0)
-                               :output-tokens (or (gethash "output_tokens" usage-ht) 0)
-                               :cache-read-tokens (or (gethash "cache_read_input_tokens" usage-ht) 0)
-                               :cache-write-tokens (or (gethash "cache_creation_input_tokens" usage-ht) 0)))))
-     (when content-blocks
-       (loop for block in content-blocks
-             for block-type = (gethash "type" block)
-             do (cond
-                  ((string= block-type "text")
-                   (push (gethash "text" block) text-parts))
-                  ((string= block-type "thinking")
-                   (push (gethash "thinking" block) thinking-parts)
-                   (let ((sig (gethash "signature" block)))
-                     (when sig (setf thinking-signature sig))))
-                  ((string= block-type "tool_use")
-                   (push (make-tool-call
-                          :id (gethash "id" block)
-                          :name (gethash "name" block)
-                          :arguments (hash-to-alist
-                                      (gethash "input" block)))
-                         tool-calls)))))
-     (when usage-plist
-       (log-info "llm" "Tokens: input=~a output=~a cache-read=~a cache-write=~a"
-                 (getf usage-plist :input-tokens) (getf usage-plist :output-tokens)
-                 (getf usage-plist :cache-read-tokens) (getf usage-plist :cache-write-tokens)))
-     (values
-      (assistant-message
-       (when text-parts
-         (string-join "" (nreverse text-parts)))
-       :tool-calls (nreverse tool-calls)
-       :thinking (when thinking-parts
-                   (string-join "" (nreverse thinking-parts)))
-       :thinking-signature thinking-signature)
-      usage-plist)))
+         (thinking-parts nil)
+         (thinking-signature nil)
+         (tool-calls nil)
+         (usage-ht (gethash "usage" response))
+         (usage-plist (when usage-ht
+                        (list :input-tokens (or (gethash "input_tokens" usage-ht) 0)
+                              :output-tokens (or (gethash "output_tokens" usage-ht) 0)
+                              :cache-read-tokens (or (gethash "cache_read_input_tokens" usage-ht) 0)
+                              :cache-write-tokens (or (gethash "cache_creation_input_tokens" usage-ht) 0)))))
+    (when content-blocks
+      (loop for block in content-blocks
+            for block-type = (gethash "type" block)
+            do (cond
+                 ((string= block-type "text")
+                  (push (gethash "text" block) text-parts))
+                 ((string= block-type "thinking")
+                  (push (gethash "thinking" block) thinking-parts)
+                  (let ((sig (gethash "signature" block)))
+                    (when sig (setf thinking-signature sig))))
+                 ((string= block-type "tool_use")
+                  (push (make-tool-call
+                         :id (gethash "id" block)
+                         :name (gethash "name" block)
+                         :arguments (hash-to-alist
+                                     (gethash "input" block)))
+                        tool-calls)))))
+    (log-and-track-usage usage-plist)
+    (values
+     (assistant-message
+      (when text-parts
+        (string-join "" (nreverse text-parts)))
+      :tool-calls (nreverse tool-calls)
+      :thinking (when thinking-parts
+                  (string-join "" (nreverse thinking-parts)))
+      :thinking-signature thinking-signature)
+     usage-plist)))
 
 (defun parse-anthropic-sse-events (event-type data-str)
   "Parse an Anthropic SSE event into a normalized plist.
@@ -504,10 +565,7 @@ Returns a reconstructed assistant message."
                                    :output-tokens (or output-tokens-from-delta 0)
                                    :cache-read-tokens (or cache-read-tokens-from-start 0)
                                    :cache-write-tokens (or cache-write-tokens-from-start 0)))))
-          (when usage-plist
-            (log-info "llm" "Tokens (streaming): input=~a output=~a cache-read=~a cache-write=~a"
-                      (getf usage-plist :input-tokens) (getf usage-plist :output-tokens)
-                      (getf usage-plist :cache-read-tokens) (getf usage-plist :cache-write-tokens)))
+          (log-and-track-usage usage-plist " (streaming)")
           (when usage-plist
             (handler-case
                 (let ((total-cache-tokens (+ (or cache-read-tokens-from-start 0)
@@ -587,6 +645,11 @@ Returns (values message usage-plist)."
 ;;; OpenAI (GPT)
 ;;; ============================================================
 
+
+(defvar *openai-reasoning-effort* nil
+  "When non-nil, a string like \"low\", \"medium\", \"high\", or \"xhigh\"
+specifying the reasoning effort level for OpenAI models that support it.")
+
 (defun openai-temperature-pair (client)
   "Return a (\"temperature\" . value) pair when supported for CLIENT, else NIL."
   (let* ((temp (client-temperature client))
@@ -598,6 +661,20 @@ Returns (values message usage-plist)."
       ((null temp) nil)
       (gpt5-p (when (= temp 1) `("temperature" . ,temp)))
       (t `("temperature" . ,temp)))))
+
+(defun openai-reasoning-params ()
+  "Return an alist entry for the OpenAI 'reasoning' parameter when configured.
+Returns a list like ((\"reasoning\" (\"effort\" . \"high\"))) or NIL."
+  (when *openai-reasoning-effort*
+    `(("reasoning" . (("effort" . ,*openai-reasoning-effort*))))))
+
+(defun apply-openai-reasoning (body)
+  "Merge OpenAI reasoning effort params into BODY alist if configured.
+Returns the (possibly modified) body alist."
+  (let ((reasoning-params (openai-reasoning-params)))
+    (if reasoning-params
+        (append body reasoning-params)
+        body)))
 
 (defclass openai-client (llm-client)
   ()
@@ -628,37 +705,35 @@ Returns (values message usage-plist)."
         (cons "User-Agent" "sibyl/0.1.0")))
 
 (defun messages-to-openai-format (messages)
-  "Convert message structs to OpenAI API format."
-  (mapcar (lambda (msg)
-            (case (message-role msg)
-              (:system
-               `(("role" . "system") ("content" . ,(message-content msg))))
-              (:user
-               `(("role" . "user") ("content" . ,(message-content msg))))
-              (:assistant
-               (if (message-tool-calls msg)
-                   `(("role" . "assistant")
-                     ("content" . ,(or (message-content msg) :null))
-                     ("tool_calls"
-                      . ,(mapcar (lambda (tc)
-                                   `(("id" . ,(tool-call-id tc))
-                                     ("type" . "function")
-                                     ("function"
-                                      . (("name" . ,(tool-call-name tc))
-                                         ("arguments"
-                                          . ,(with-output-to-string (s)
-                                               (yason:encode
-                                                (alist-to-hash
-                                                 (tool-call-arguments tc))
-                                                s)))))))
-                                 (message-tool-calls msg))))
-                   `(("role" . "assistant")
-                     ("content" . ,(message-content msg)))))
-              (:tool
-               `(("role" . "tool")
-                 ("tool_call_id" . ,(message-tool-call-id msg))
-                 ("content" . ,(message-content msg))))))
-          messages))
+  "Convert message structs to OpenAI API format.
+Content is flattened to plain strings for optimal prefix caching."
+  (mapcar
+   (lambda (msg)
+     (case (message-role msg)
+       (:system `(("role" . "system")
+                  ("content" . ,(flatten-content-to-string (message-content msg)))))
+       (:user `(("role" . "user")
+                ("content" . ,(flatten-content-to-string (message-content msg)))))
+       (:assistant
+        (if (message-tool-calls msg)
+            `(("role" . "assistant")
+              ("content" . ,(or (message-content msg) :null))
+              ("tool_calls"
+               . ,(mapcar
+                   (lambda (tc)
+                     `(("id" . ,(tool-call-id tc)) ("type" . "function")
+                       ("function" ("name" . ,(tool-call-name tc))
+                        ("arguments"
+                         . ,(with-output-to-string (s)
+                              (yason:encode
+                               (alist-to-hash (tool-call-arguments tc)) s))))))
+                   (message-tool-calls msg))))
+            `(("role" . "assistant")
+              ("content" . ,(flatten-content-to-string (message-content msg))))))
+       (:tool
+        `(("role" . "tool") ("tool_call_id" . ,(message-tool-call-id msg))
+          ("content" . ,(flatten-content-to-string (message-content msg)))))))
+   messages))
 
 (defun parse-openai-response (response)
   "Parse OpenAI API response into a message struct.
@@ -671,7 +746,6 @@ Returns (values message usage-plist) where usage-plist may be nil."
              :message "OpenAI response missing choices"
              :raw-response response))
     (let* ((msg (gethash "message" first-choice))
-           ;; Extract usage
            (usage-ht (gethash "usage" response))
            (usage-plist (when usage-ht
                           (let* ((prompt-details (gethash "prompt_tokens_details" usage-ht))
@@ -700,13 +774,11 @@ Returns (values message usage-plist) where usage-plist may be nil."
                                         (yason:parse (gethash "arguments" func)
                                                      :object-as :hash-table)))
                            tool-calls))))
-        (when usage-plist
-          (log-info "llm" "Tokens: input=~a output=~a cache-read=~a cache-write=~a"
-                    (getf usage-plist :input-tokens) (getf usage-plist :output-tokens)
-                    (getf usage-plist :cache-read-tokens) (getf usage-plist :cache-write-tokens)))
+        (log-and-track-usage usage-plist)
         (values
          (assistant-message content :tool-calls (nreverse tool-calls))
          usage-plist)))))
+
 
 (defun complete-openai-streaming (client messages tools)
   "Stream OpenAI responses, invoking *streaming-text-callback* per text delta.
@@ -724,15 +796,17 @@ Returns a reconstructed assistant message."
          (body `(("model" . ,(client-model client))
                  ("max_completion_tokens" . ,(client-max-tokens client))
                  ("messages" . ,(messages-to-openai-format messages))
+                 ("store" . t)
                  ("stream" . t)
                  ("stream_options" . (("include_usage" . t)))))
          (temp-pair (openai-temperature-pair client))
          (final-body (progn
                        (when temp-pair
                          (push temp-pair body))
-                       (if openai-tools
-                           (append body `(("tools" . ,openai-tools)))
-                           body)))
+                       (let ((with-tools (if openai-tools
+                                             (append body `(("tools" . ,openai-tools)))
+                                             body)))
+                         (apply-openai-reasoning with-tools))))
          (text-parts nil)
          (tool-call-state (make-hash-table :test 'eql))
          (prompt-tokens nil)
@@ -820,10 +894,7 @@ Returns a reconstructed assistant message."
                                   :output-tokens (or completion-tokens 0)
                                   :cache-read-tokens (or cached-tokens 0)
                                   :cache-write-tokens 0))))
-        (when usage-plist
-          (log-info "llm" "Tokens (streaming): input=~a output=~a cache-read=~a cache-write=~a"
-                    (getf usage-plist :input-tokens) (getf usage-plist :output-tokens)
-                    (getf usage-plist :cache-read-tokens) (getf usage-plist :cache-write-tokens)))
+        (log-and-track-usage usage-plist " (streaming)")
         (values
          (assistant-message
           (when text-parts
@@ -849,6 +920,7 @@ Returns a reconstructed assistant message."
       (complete-openai-streaming client messages nil)
       (let* ((body `(("model" . ,(client-model client))
                      ("max_completion_tokens" . ,(client-max-tokens client))
+                     ("store" . t)
                      ("messages" . ,(messages-to-openai-format messages))))
              (temp-pair (openai-temperature-pair client)))
         (when temp-pair
@@ -880,6 +952,7 @@ Returns a reconstructed assistant message."
              (body `(("model" . ,(client-model client))
                      ("max_completion_tokens" . ,(client-max-tokens client))
                      ("messages" . ,(messages-to-openai-format messages))
+                     ("store" . t)
                      ("tools" . ,openai-tools)))
              (temp-pair (openai-temperature-pair client)))
         (when temp-pair
