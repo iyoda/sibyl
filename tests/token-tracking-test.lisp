@@ -234,6 +234,128 @@
     (is (= 50 (sibyl.agent::memory-max-messages mem)))))
 
 ;;; ============================================================
+;;; Token-based compaction tests
+;;; ============================================================
+
+;; Test 21: estimate-context-tokens returns reasonable values
+(test estimate-context-tokens-basic
+  "estimate-context-tokens returns positive value for non-empty memory"
+  (let ((mem (sibyl.agent::make-memory)))
+    ;; Empty memory → 0 tokens
+    (is (= 0 (sibyl.agent::estimate-context-tokens mem)))
+    ;; Add a message with known length (400 chars ≈ 100 tokens)
+    (sibyl.agent::memory-push mem (sibyl.llm:user-message (make-string 400 :initial-element #\a)))
+    (is (= 100 (sibyl.agent::estimate-context-tokens mem)))
+    ;; With system prompt
+    (is (= 200 (sibyl.agent::estimate-context-tokens mem
+                  :system-prompt (make-string 400 :initial-element #\b))))))
+
+;; Test 22: estimate-context-tokens counts tool results
+(test estimate-context-tokens-tool-results
+  "estimate-context-tokens counts tool result message content"
+  (let ((mem (sibyl.agent::make-memory)))
+    (sibyl.agent::memory-push mem (sibyl.llm:tool-result-message "tc1" (make-string 800 :initial-element #\x)))
+    ;; 800 chars / 4 = 200 tokens
+    (is (= 200 (sibyl.agent::estimate-context-tokens mem)))))
+
+;; Test 23: token-based compaction triggers at threshold
+(test token-based-compaction-triggers
+  "memory-push triggers compaction when estimated tokens exceed threshold.
+Uses max-messages=2 so split-idx=1 allows actual compaction."
+  (let ((mem (sibyl.agent::make-memory :max-messages 2
+                                        :context-window-size 1000
+                                        :compaction-threshold 0.80)))
+    ;; Push message with 2000 chars ≈ 500 tokens; under 800 threshold
+    (sibyl.agent::memory-push mem (sibyl.llm:user-message (make-string 2000 :initial-element #\a)))
+    ;; msg count 1 ≤ 2 and 500 < 800 → no compaction yet
+    (is (null (sibyl.agent::memory-summary mem)))
+    ;; Push another 2000-char message → total ≈ 1000 tokens > 800 threshold
+    ;; msg count 2 ≤ 2 (no message-count trigger), but token check fires
+    (sibyl.agent::memory-push mem (sibyl.llm:user-message (make-string 2000 :initial-element #\b)))
+    ;; Should have triggered token-based compaction
+    (is (not (null (sibyl.agent::memory-summary mem))))))
+
+;; Test 24: context-window-size defaults and make-memory params
+(test memory-context-window-size-params
+  "make-memory accepts context-window-size and compaction-threshold"
+  (let ((mem (sibyl.agent::make-memory :context-window-size 200000
+                                        :compaction-threshold 0.75)))
+    (is (= 200000 (sibyl.agent::memory-context-window-size mem)))
+    (is (= 0.75 (sibyl.agent::memory-compaction-threshold mem))))
+  ;; Default: nil context-window-size, 0.80 threshold
+  (let ((mem (sibyl.agent::make-memory)))
+    (is (null (sibyl.agent::memory-context-window-size mem)))
+    (is (= 0.80 (sibyl.agent::memory-compaction-threshold mem)))))
+
+;;; ============================================================
+;;; Phase 1: Deduplication tests
+;;; ============================================================
+
+;; Test 25: dedup removes duplicate tool results
+(test dedup-removes-duplicates
+  "memory-deduplicate-tool-results replaces duplicate tool result content"
+  (let ((mem (sibyl.agent::make-memory)))
+    ;; Push two tool results with identical large content (>200 chars)
+    (let ((big-content (make-string 500 :initial-element #\z)))
+      (sibyl.agent::memory-push mem (sibyl.llm:user-message "hello"))
+      (sibyl.agent::memory-push mem (sibyl.llm:tool-result-message "tc1" big-content))
+      (sibyl.agent::memory-push mem (sibyl.llm:user-message "again"))
+      (sibyl.agent::memory-push mem (sibyl.llm:tool-result-message "tc2" big-content)))
+    (let ((removed (sibyl.agent::memory-deduplicate-tool-results mem)))
+      (is (= 1 removed))
+      ;; First result should be preserved, second should be placeholder
+      (let ((msgs (sibyl.llm:conversation-to-list (sibyl.agent::memory-conversation mem))))
+        ;; msg 0: user, msg 1: tool (original), msg 2: user, msg 3: tool (deduped)
+        (is (= 500 (length (sibyl.llm:message-content (second msgs)))))
+        (is (search "duplicate" (sibyl.llm:message-content (fourth msgs))))))))
+
+;; Test 26: dedup preserves small and unique results
+(test dedup-preserves-unique
+  "memory-deduplicate-tool-results does not touch small or unique results"
+  (let ((mem (sibyl.agent::make-memory)))
+    (sibyl.agent::memory-push mem (sibyl.llm:tool-result-message "tc1" "short result"))
+    (sibyl.agent::memory-push mem (sibyl.llm:tool-result-message "tc2" (make-string 300 :initial-element #\a)))
+    (sibyl.agent::memory-push mem (sibyl.llm:tool-result-message "tc3" (make-string 300 :initial-element #\b)))
+    (let ((removed (sibyl.agent::memory-deduplicate-tool-results mem)))
+      (is (= 0 removed)))))
+
+;;; ============================================================
+;;; Phase 2: Aggressive truncation tests
+;;; ============================================================
+
+;; Test 27: truncation halves the largest output
+(test truncate-halves-largest
+  "memory-truncate-largest-outputs cuts the largest tool result by target-ratio"
+  (let ((mem (sibyl.agent::make-memory)))
+    (sibyl.agent::memory-push mem (sibyl.llm:tool-result-message "tc1" (make-string 1000 :initial-element #\x)))
+    (sibyl.agent::memory-push mem (sibyl.llm:tool-result-message "tc2" (make-string 200 :initial-element #\y)))
+    (let ((n (sibyl.agent::memory-truncate-largest-outputs mem :target-ratio 0.5 :max-iterations 1)))
+      (is (= 1 n))
+      ;; The 1000-char result should now be ~500 chars + " [truncated]"
+      (let* ((msgs (sibyl.llm:conversation-to-list (sibyl.agent::memory-conversation mem)))
+             (first-content (sibyl.llm:message-content (first msgs))))
+        (is (< (length first-content) 600))
+        (is (search "truncated" first-content))))))
+
+;; Test 28: truncation stops when no large outputs remain
+(test truncate-stops-when-small
+  "memory-truncate-largest-outputs stops early when all results are <= 200 chars"
+  (let ((mem (sibyl.agent::make-memory)))
+    (sibyl.agent::memory-push mem (sibyl.llm:tool-result-message "tc1" "small result"))
+    (sibyl.agent::memory-push mem (sibyl.llm:tool-result-message "tc2" (make-string 150 :initial-element #\a)))
+    (let ((n (sibyl.agent::memory-truncate-largest-outputs mem :max-iterations 20)))
+      (is (= 0 n)))))
+
+;; Test 29: truncation respects max-iterations
+(test truncate-respects-max-iterations
+  "memory-truncate-largest-outputs does not exceed max-iterations"
+  (let ((mem (sibyl.agent::make-memory)))
+    ;; Very large output that would take many iterations to shrink
+    (sibyl.agent::memory-push mem (sibyl.llm:tool-result-message "tc1" (make-string 100000 :initial-element #\x)))
+    (let ((n (sibyl.agent::memory-truncate-largest-outputs mem :target-ratio 0.9 :max-iterations 3)))
+      (is (<= n 3)))))
+
+;;; ============================================================
 ;;; Model Registry and Pricing Tests (simplified functionality)
 ;;; ============================================================
 

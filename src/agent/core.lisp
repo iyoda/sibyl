@@ -156,7 +156,14 @@ prompt with an optional system-prompt-hint prefix to save tokens."
                   :memory (make-memory :max-messages max-memory-messages))))
     ;; Propagate the LLM client to memory so :llm compaction strategy works
     (when client
-      (setf (memory-compaction-client (agent-memory agent)) client))
+      (setf (memory-compaction-client (agent-memory agent)) client)
+      ;; Set context window size for token-based proactive compaction
+      ;; Guard: non-llm-client subclasses (e.g. test mocks) may lack the model slot
+      (when (typep client 'sibyl.llm:llm-client)
+        (let ((model-name (ignore-errors (client-model client))))
+          (when model-name
+            (setf (memory-context-window-size (agent-memory agent))
+                  (sibyl.llm:context-window-for-model model-name))))))
     ;; Wire compaction callback → :on-compact agent hook
     (setf (memory-compaction-callback (agent-memory agent))
           (lambda (summary)
@@ -211,6 +218,62 @@ Adds :code if input has code-related keywords. Adds :analysis for analysis keywo
     cats))
 
 ;;; ============================================================
+;;; Context overflow recovery
+;;; ============================================================
+
+(defun %prompt-too-long-p (condition)
+  "Return T if CONDITION is a prompt-too-long error from the LLM API."
+  (and (typep condition 'llm-api-error)
+       (eql 400 (llm-error-status-code condition))
+       (let ((body (llm-error-body condition)))
+         (and body
+              (search "too long"
+                      (string-downcase (princ-to-string body)))))))
+
+(defun %call-with-context-recovery (agent make-call-fn)
+  "Call MAKE-CALL-FN, applying 3-phase recovery on prompt-too-long errors.
+MAKE-CALL-FN is a zero-argument function that builds context from current
+memory state and calls the LLM.  It is called fresh after each recovery
+phase so that context reflects the reduced memory.
+Returns (values response usage) on success."
+  (let* ((mem (agent-memory agent))
+         (recovery-phases
+           (list
+            ;; Phase 1: Deduplicate tool results
+            (cons "Phase 1: deduplicating tool results"
+                  (lambda () (memory-deduplicate-tool-results mem)))
+            ;; Phase 2: Aggressively truncate largest outputs
+            (cons "Phase 2: truncating largest tool outputs"
+                  (lambda ()
+                    (memory-truncate-largest-outputs mem
+                      :target-ratio 0.5 :max-iterations 20)))
+            ;; Phase 3: Full compaction (summarize)
+            (cons "Phase 3: compacting conversation"
+                  (lambda () (memory-compact mem))))))
+    ;; Initial attempt
+    (handler-case
+        (funcall make-call-fn)
+      (llm-api-error (initial-error)
+        (unless (%prompt-too-long-p initial-error)
+          (error initial-error))
+        ;; Apply recovery phases sequentially until one succeeds
+        (dolist (phase recovery-phases
+                        ;; All phases exhausted — signal the last error
+                        (error initial-error))
+          (log-warn "agent" "Context overflow — ~a" (car phase))
+          (run-hook agent :on-compact
+                    (format nil "[context-recovery] ~a" (car phase)))
+          (funcall (cdr phase))
+          (handler-case
+              (return-from %call-with-context-recovery
+                (funcall make-call-fn))
+            (llm-api-error (retry-error)
+              (unless (%prompt-too-long-p retry-error)
+                (error retry-error))
+              ;; Still too long — continue to next phase
+              (setf initial-error retry-error))))))))
+
+;;; ============================================================
 ;;; Single step: send context → get response → handle tool calls
 ;;; ============================================================
 
@@ -230,20 +293,23 @@ Adds :code if input has code-related keywords. Adds :analysis for analysis keywo
       (run-hook agent :before-step (agent-step-count agent))
       (when user-input
         (memory-push (agent-memory agent) (user-message user-input)))
-      (let* ((context
-              (memory-context-window (agent-memory agent) :system-prompt
-               (agent-system-prompt agent)))
-             (inferred-cats (when user-input (infer-tool-categories user-input)))
+      (let* ((inferred-cats (when user-input (infer-tool-categories user-input)))
              (tools-schema
               (if inferred-cats
                   (tools-as-schema :categories inferred-cats)
                   (tools-as-schema))))
-        (log-debug "agent" "Calling LLM: context-messages=~a tools=~a"
-                   (length context) (length tools-schema))
+        (log-debug "agent" "Calling LLM: tools=~a" (length tools-schema))
         (multiple-value-bind (response usage)
-            (if tools-schema
-                (complete-with-tools (agent-client agent) context tools-schema)
-                (complete (agent-client agent) context))
+            (%call-with-context-recovery agent
+              (lambda ()
+                (let ((context
+                        (memory-context-window (agent-memory agent)
+                          :system-prompt (agent-system-prompt agent))))
+                  (log-debug "agent" "LLM call: context-messages=~a"
+                             (length context))
+                  (if tools-schema
+                      (complete-with-tools (agent-client agent) context tools-schema)
+                      (complete (agent-client agent) context)))))
           (sibyl.llm:tracker-add-usage (agent-token-tracker agent) usage)
           ;; Estimate thinking tokens if present (API doesn't return them separately)
           (let ((thinking-text (sibyl.llm:message-thinking response)))
