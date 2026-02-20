@@ -1,0 +1,57 @@
+TASK 2: Write mock-based unit tests for %interrupt-action function
+========================================================================
+
+COMPLETION STATUS: ✓ COMPLETE
+
+DELIVERABLES:
+1. ✓ New test suite 'interrupt-handler-tests' added to tests/rich-repl-test.lisp
+2. ✓ 5 test cases covering all decision paths of %interrupt-action
+3. ✓ Suite classified as SAFE in tests/suite.lisp
+4. ✓ All tests pass (6 checks, 100% pass rate)
+
+TEST CASES IMPLEMENTED:
+1. interrupt-action-single-press-returns-hint
+   - Tests single press with large time gap returns :hint
+   
+2. interrupt-action-double-press-returns-exit
+   - Tests double press within 2-second window returns :exit
+   
+3. interrupt-action-timeout-expired-returns-hint
+   - Tests press after timeout expired (just over 2 seconds) returns :hint
+   
+4. interrupt-action-first-ever-press-returns-hint
+   - Tests first-ever press (last-time = 0, now = large) returns :hint
+   
+5. interrupt-action-boundary-at-window-edge
+   - Tests press exactly at window boundary returns :hint (not :exit)
+   - Also tests one tick before boundary returns :exit
+
+VERIFICATION RESULTS:
+- Suite location in test file: lines 436, 440
+- Suite classification in suite.lisp: line 80
+- Test count: 5 test cases
+- Test execution: 6 checks, 6 passed (100%), 0 failed
+- Syntax validation: All tests loaded successfully
+- No LSP errors (LSP not configured for Lisp, expected)
+
+FUNCTION UNDER TEST:
+Location: src/repl.lisp lines 1200-1204
+Logic: Returns :exit if (- now last-time) < window, else :hint
+Pure function: no I/O, no global state, no side effects
+
+CLASSIFICATION RATIONALE:
+- Pure logic: no file I/O, no network calls, no global state mutation
+- No sleep calls or timing-sensitive operations
+- Suitable for parallel test execution
+- Classified as SAFE in *safe-suites* list
+
+FILES MODIFIED:
+1. tests/rich-repl-test.lisp - Added interrupt-handler-tests suite (lines 432-489)
+2. tests/suite.lisp - Added interrupt-handler-tests to *safe-suites* (line 80)
+
+EVIDENCE FILES:
+- task-2-suite-classified.txt: Suite location verification
+- task-2-tests-pass.txt: Test execution output (all pass)
+- task-2-full-suite.txt: Full test suite run
+- task-2-test-coverage.txt: Test case count (5)
+- task-2-summary.txt: This summary

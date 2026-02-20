@@ -1,0 +1,5 @@
+--- Inner Handler Verification ---
+handler-bind at L1378 (plan ref: L1376-1389): UNCHANGED
+handler-case at L1482 (plan ref: L1480-1498): UNCHANGED
+repl-cancelled tag occurrences: 2
+VERDICT: UNCHANGED

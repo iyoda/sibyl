@@ -1,0 +1,80 @@
+This is SBCL 2.6.1, an implementation of ANSI Common Lisp.
+More information about SBCL is available at <http://www.sbcl.org/>.
+
+SBCL is free software, provided as is, with absolutely no warranty.
+It is mostly in the public domain; some portions are provided under
+BSD-style licenses.  See the CREDITS and COPYING files in the
+distribution for more information.
+
+ Did 1533 checks.
+    Pass: 1530 (100%)
+    Skip: 0
+    Fail: 1
+
+ Per-suite timing (safe):
+  CORE-TESTS                   0.000s (2 checks)
+  TOOLS-TESTS                  0.154s (26 checks)
+  READ-SEXP-TESTS              0.022s (67 checks)
+  DESCRIBE-SYMBOL-TESTS        0.000s (5 checks)
+  MACROEXPAND-FORM-TESTS       0.000s (10 checks)
+  PACKAGE-SYMBOLS-TESTS        0.019s (87 checks)
+  CODEBASE-MAP-TESTS           0.154s (9 checks)
+  SYNC-TO-FILE-TESTS           0.118s (6 checks)
+  MESSAGE-TESTS                0.010s (35 checks)
+  CLIENT-TESTS                 0.000s (6 checks)
+  AGENT-TESTS                  0.011s (12 checks)
+  TDD-ORCHESTRATION-TESTS      0.000s (10 checks)
+  RUN-HOOK-TESTS               0.011s (8 checks)
+  MEMORY-COMPACT-TESTS         0.008s (5 checks)
+  MEMORY-SANITIZE-TESTS        0.009s (13 checks)
+  TOKENS-TESTS                 0.009s (30 checks)
+  REPL-DISPLAY-TESTS           0.007s (77 checks)
+  TURN-FOOTER-TESTS            0.000s (41 checks)
+  INTERRUPT-HANDLER-TESTS      0.000s (6 checks)
+  MCP-TESTS                    0.009s (73 checks)
+  TOKEN-TRACKING-SUITE         0.012s (28 checks)
+  MEMORY-COMPACTION-SUITE      0.007s (5 checks)
+  MODEL-REGISTRY-TESTS         0.000s (13 checks)
+  OLLAMA-TESTS                 0.218s (124 checks)
+  OPENAI-USAGE-TESTS           0.000s (15 checks)
+  OPENAI-PRICING-TESTS         0.000s (9 checks)
+  OPENAI-STREAMING-USAGE-TESTS  0.013s (16 checks)
+  OPENAI-CACHE-TELEMETRY-TESTS  0.000s (19 checks)
+  OPENAI-CACHE-INTEGRATION-TESTS  0.016s (33 checks)
+  ANTHROPIC-STREAMING-CACHE-TESTS  0.011s (13 checks)
+  ANTHROPIC-THINKING-SERIALIZATION-TESTS  0.006s (22 checks)
+  ANTHROPIC-THINKING-CONFIG-TESTS  0.000s (7 checks)
+  ANTHROPIC-THINKING-PARAMS-TESTS  0.000s (10 checks)
+  CACHE-KEY-TESTS              0.011s (12 checks)
+  CACHE-ADAPTER-TESTS          0.030s (22 checks)
+  SESSION-SUMMARY-TESTS        0.000s (20 checks)
+  LOGGING-TESTS                0.007s (28 checks)
+
+ Per-suite timing (unsafe):
+  EVAL-FORM-TESTS              1.001s (9 checks)
+  WHO-CALLS-TESTS              0.078s (7 checks)
+  SUGGEST-IMPROVEMENTS-TESTS   0.157s (68 checks)
+  SAFE-REDEFINE-TESTS          0.023s (5 checks)
+  RUN-TESTS-TESTS              0.003s (14 checks)
+  WRITE-TEST-TESTS             0.185s (37 checks)
+  CREATION-INTEGRATION-TESTS   0.100s (7 checks)
+  ADD-DEFINITION-TESTS         0.129s (15 checks)
+  ADD-EXPORT-TESTS             0.004s (10 checks)
+  CREATE-MODULE-TESTS          0.001s (13 checks)
+  SUGGEST-IMPROVEMENTS-ENHANCED-TESTS  0.217s (26 checks)
+  ASDF-REGISTRATION-TESTS      0.011s (20 checks)
+  SELF-ASSESS-TESTS            3.007s (21 checks)
+  IMPROVEMENT-PLAN-TESTS       2.806s (78 checks)
+  PLANNING-TESTS               0.008s (79 checks)
+  PARALLEL-TOOL-EXECUTION-TESTS  0.263s (17 checks)
+  ASDF-PROTECTION-TESTS        0.001s (16 checks)
+  REGISTER-COMMAND-TESTS       0.001s (10 checks)
+  RICH-REPL-TESTS              0.466s (51 checks)
+  PARALLEL-RUNNER-TESTS        0.000s (10 checks)
+  PARALLEL-AGENT-TESTS         0.121s (20 checks)
+  CACHE-LRU-TESTS              0.001s (18 checks)
+  CACHE-TELEMETRY-TESTS        0.001s (22 checks)
+  CACHE-INTEGRATION-TESTS      0.006s (18 checks)
+  TOOL-TIMING-TESTS            0.069s (18 checks)
+
+ Total wall-clock:  8.877s (safe:  0.220s, unsafe:  8.658s)

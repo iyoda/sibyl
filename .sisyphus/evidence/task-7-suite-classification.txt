@@ -1,0 +1,1 @@
+    logging-tests)                  ;; Logging context propagation + component filtering: pure logic, no I/O

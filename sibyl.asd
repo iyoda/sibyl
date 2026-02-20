@@ -68,11 +68,12 @@
         (:file "anthropic")
         (:file "openai")
         (:file "integration")))
-     (:module "repl-module"
-      :pathname "repl"
-      :components
-      ((:file "spinner")
-       (:file "display" :depends-on ("spinner"))))
+      (:module "repl-module"
+       :pathname "repl"
+       :components
+       ((:file "spinner")
+        (:file "display" :depends-on ("spinner"))
+        (:file "session" :depends-on ("spinner"))))
      (:file "repl"))))
   :in-order-to ((test-op (test-op #:sibyl/tests))))
 
@@ -108,16 +109,17 @@
       (:file "rich-repl-test")
      (:file "parallel-runner-test")
      (:file "parallel-agent-test")
+     (:file "multi-agent-test")
       (:file "mcp-test")
        (:file "token-tracking-test")
        (:file "token-tracker-enhancement-test")
         (:file "ollama-test")
         (:file "openai-test")
         (:file "anthropic-streaming-test")
-        (:file "provisioning-test")
-         (:file "phase6-test")
-         (:file "cache-test")
-         (:file "tool-timing-test")
-         (:file "session-summary-test"))))
+          (:file "cache-test")
+          (:file "tool-timing-test")
+          (:file "session-summary-test")
+           (:file "logging-test")
+           (:file "session-test"))))
   :perform (test-op (o c)
              (uiop:symbol-call '#:sibyl.tests '#:run-sibyl-tests)))

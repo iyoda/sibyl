@@ -1,0 +1,2 @@
+1200:(defun %interrupt-action (now last-time window)
+1221:              (ecase (%interrupt-action now *last-interrupt-time* window)

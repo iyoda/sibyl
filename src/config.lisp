@@ -51,7 +51,13 @@ Convenience function equivalent to (setf (config-value KEY) VALUE)."
     ("SIBYL_MODEL"        . "llm.model")
     ("SIBYL_MAX_TOKENS"   . "llm.max-tokens")
     ("SIBYL_TEMPERATURE"  . "llm.temperature")
-    ("SIBYL_LOG_LEVEL"    . "log.level"))
+    ("SIBYL_LOG_LEVEL"    . "log.level")
+    ("SIBYL_LOG_LEVEL_LLM"   . "log.level.llm")
+    ("SIBYL_LOG_LEVEL_MCP"   . "log.level.mcp")
+    ("SIBYL_LOG_LEVEL_TOOLS" . "log.level.tools")
+    ("SIBYL_LOG_LEVEL_AGENT" . "log.level.agent")
+    ("SIBYL_LOG_LEVEL_REPL"  . "log.level.repl")
+    ("SIBYL_LOG_LEVEL_CACHE" . "log.level.cache"))
   "Mapping from environment variable names to config keys.")
 
 (defun load-env-config ()
@@ -140,6 +146,14 @@ Convenience function equivalent to (setf (config-value KEY) VALUE)."
       (let ((level-kw (intern (string-upcase level-str) :keyword)))
         (when (assoc level-kw sibyl.logging:*log-levels*)
           (setf sibyl.logging:*log-level* level-kw)))))
+  ;; Sync per-component log levels from config
+  (sibyl.logging:reset-component-log-levels)
+  (dolist (component '("llm" "mcp" "tools" "agent" "repl" "cache"))
+    (let ((level-str (config-value (format nil "log.level.~a" component))))
+      (when level-str
+        (let ((level-kw (intern (string-upcase level-str) :keyword)))
+          (when (assoc level-kw sibyl.logging:*log-levels*)
+            (setf (sibyl.logging:component-log-level component) level-kw))))))
   *config*)
 
 (defmacro with-config ((&key config-file) &body body)

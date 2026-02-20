@@ -1,0 +1,2 @@
+142:(defvar *last-interrupt-time* 0
+1329:      (setf *last-interrupt-time* 0)

@@ -1,0 +1,16 @@
+This is SBCL 2.6.1, an implementation of ANSI Common Lisp.
+More information about SBCL is available at <http://www.sbcl.org/>.
+
+SBCL is free software, provided as is, with absolutely no warranty.
+It is mostly in the public domain; some portions are provided under
+BSD-style licenses.  See the CREDITS and COPYING files in the
+distribution for more information.
+
+Running test suite INTERRUPT-HANDLER-TESTS
+ Running test INTERRUPT-ACTION-SINGLE-PRESS-RETURNS-HINT .
+ Running test INTERRUPT-ACTION-DOUBLE-PRESS-RETURNS-EXIT .
+ Running test INTERRUPT-ACTION-TIMEOUT-EXPIRED-RETURNS-HINT .
+ Running test INTERRUPT-ACTION-FIRST-EVER-PRESS-RETURNS-HINT .
+ Running test INTERRUPT-ACTION-BOUNDARY-AT-WINDOW-EDGE ..
+TESTS-RUN: 6
+PASS: T

@@ -1,0 +1,54 @@
+=== F3 Manual QA ===
+--- Task 1 S1: context standard format ---
+
+distribution for more information.
+PASS: 2026-02-20T17:12:17Z [DEBUG] agent [test-001 step:3]: Step started
+--- Task 1 S2: no context ---
+PASS
+--- Task 1 S3: component filtering ---
+PASS
+--- Task 1 S4: JSON context ---
+PASS
+--- Task 2: config env var ---
+PASS: llm=DEBUG mcp=TRACE tools=INFO
+--- Task 3: agent core logging ---
+  (assert (search \"with-request-context\" src))
+  (assert (search \"log-debug\" src))
+  (assert (search \"log-info\" src))
+  (assert (search \"log-warn\" src))
+  (format t \"PASS: log code present~%\"))
+(assert (fboundp (quote sibyl.agent::agent-step)))
+(format t \"PASS: agent-step defined~%\")"
+  (assert (search "with-request-context" src))
+  (assert (search "log-debug" src))
+  (assert (search "log-info" src))
+  (assert (search "log... {7006D4863F}>)
+  (assert (search "with-request-context" src))
+  (assert (search "log-debug" src))
+  (assert (search "log-info" src))
+  (assert (search "log... {7006D4863F}>) (:EVAL . "(quit)") (:QUIT)))
+--- Task 4: LLM logging ---
+PASS: LLM log points present
+--- Task 5: warn migration ---
+src/agent/core.lisp: 0
+0 CL warn remaining
+src/agent/memory.lisp: 0
+0 CL warn remaining
+src/llm/pricing.lisp: 0
+0 CL warn remaining
+src/llm/client.lisp: 0
+0 CL warn remaining
+--- Task 6: thread context ---
+  (assert (search \"*current-request-context*\" src))
+  (format t \"PASS: context capture in protocol.lisp~%\"))
+(assert (fboundp (quote sibyl.tools::execute-tool-calls-parallel)))
+(format t \"PASS: execute-tool-calls-parallel defined~%\")"
+  (assert (search "*current-request-context*" src))
+  (format t "PASS: context capture in protocol.lisp~%"))
+(assert (fboundp (quote sib... {7006D4863F}>)
+  (assert (search "*current-request-context*" src))
+  (format t "PASS: context capture in protocol.lisp~%"))
+(assert (fboundp (quote sib... {7006D4863F}>) (:EVAL . "(quit)") (:QUIT)))
+--- Task 7: test suite ---
+    logging-tests)                  ;; Logging context propagation + component filtering: pure logic, no I/O
+          (:file "logging-test"))))

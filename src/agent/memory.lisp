@@ -142,7 +142,7 @@ Focus on key decisions, facts, and context needed for continuity.~%~%~
                               ;; Fallback if LLM returns empty content
                               (simple-compaction-summary mem to-summarize))))
                     (error (e)
-                      (warn "LLM compaction failed (~a), falling back to simple" e)
+                      (log-warn "agent" "Memory compaction failed: ~a, falling back to simple" e)
                       (simple-compaction-summary mem to-summarize)))
                   ;; Simple text summarization (:simple strategy or :llm without client)
                   (simple-compaction-summary mem to-summarize))))

@@ -30,9 +30,12 @@
                           :initform :sequential :type (member :sequential :parallel :hierarchical))))
 
 ;; Task representation
+;; Task representation
 (defclass agent-task ()
   ((id :initarg :id :accessor task-id :type string)
    (description :initarg :description :accessor task-description :type string)
+   (required-role :initarg :required-role :accessor task-required-role :initform nil
+                  :documentation "Optional role name string that should handle this task")
    (assigned-agent :initarg :assigned-agent :accessor task-assigned-agent :initform nil)
    (dependencies :initarg :dependencies :accessor task-dependencies :initform nil
                  :documentation "List of task IDs this task depends on")
@@ -108,6 +111,21 @@
           (get-universal-time)
           (random 1000000000)))
 
+(defun parse-role-annotation (description)
+  "If DESCRIPTION begins with '[role-name]', return (values role-name description).
+Otherwise return (values nil description).
+
+Example: (parse-role-annotation \"[tester] Write tests\")
+         => \"tester\", \"[tester] Write tests\""
+  (let* ((trimmed (string-left-trim " " description))
+         (len     (length trimmed)))
+    (if (and (> len 2) (char= #\[ (char trimmed 0)))
+        (let ((close (position #\] trimmed)))
+          (if close
+              (values (subseq trimmed 1 close) description)
+              (values nil description)))
+        (values nil description))))
+
 ;; Agent management functions
 (defmethod add-agent ((coordinator agent-coordinator) (agent specialized-agent))
   "Add an agent to the coordinator"
@@ -132,12 +150,18 @@
     agents))
 
 ;; Task management functions
-(defmethod create-task ((coordinator agent-coordinator) description &key dependencies)
-  "Create a new task"
-  (let ((task (make-instance 'agent-task
-                             :id (generate-task-id)
-                             :description description
-                             :dependencies dependencies)))
+(defmethod create-task ((coordinator agent-coordinator) description
+                        &key dependencies required-role)
+  "Create a new task.
+If REQUIRED-ROLE is omitted, attempts to infer it from a leading [role] annotation
+in DESCRIPTION (e.g. \"[tester] Write tests\" → required-role \"tester\")."
+  (let* ((inferred-role (or required-role
+                            (nth-value 0 (parse-role-annotation description))))
+         (task (make-instance 'agent-task
+                              :id (generate-task-id)
+                              :description description
+                              :required-role inferred-role
+                              :dependencies dependencies)))
     (push task (coordinator-task-queue coordinator))
     task))
 
@@ -291,16 +315,30 @@ the completed-ids accumulator."
   (execute-tasks-sequential coordinator))
 
 (defmethod find-suitable-agent ((coordinator agent-coordinator) (task agent-task))
-  "Find the most suitable agent for a task based on capabilities"
-  ;; Simple implementation - find first idle agent
-  ;; In real implementation, would match task requirements with agent capabilities
-  (loop for agent in (list-agents coordinator)
-        when (eq (agent-status agent) :idle)
-        return agent))
+  "Find the most suitable agent for a task.
+If the task has a REQUIRED-ROLE, prefer agents whose role-name matches it.
+Falls back to any idle agent when no role match is found."
+  (let ((idle-agents (remove-if-not (lambda (a) (eq (agent-status a) :idle))
+                                    (list-agents coordinator)))
+        (required (task-required-role task)))
+    (or
+     ;; 1. Try exact role-name match among idle agents
+     (when required
+       (find required idle-agents
+             :test #'string=
+             :key (lambda (a) (role-name (agent-role a)))))
+     ;; 2. Fall back to any idle agent
+     (first idle-agents))))
 
 (defmethod execute-agent-task ((agent specialized-agent) (task agent-task))
-  "Execute a task with a specific agent"
-  ;; This would integrate with the existing agent-run method
-  ;; For now, return a placeholder result
-  (format nil "Task '~a' executed by ~a" (task-description task) (agent-name agent)))
+  "Execute a task by invoking agent-run with the task description.
+Marks the task :failed on error and records the condition message as the result."
+  (setf (task-status task) :in-progress)
+  (handler-case
+      (agent-run agent (task-description task))
+    (error (e)
+      (setf (task-status task) :failed)
+      (let ((msg (format nil "ERROR: ~a" e)))
+        (setf (task-result task) msg)
+        msg))))
 

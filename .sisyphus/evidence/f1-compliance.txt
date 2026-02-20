@@ -1,0 +1,188 @@
+================================================================================
+PLAN COMPLIANCE AUDIT — repl-ignore-ctrl-j
+Auditor: F1 (oracle)
+Date: 2026-02-20
+Plan: .sisyphus/plans/repl-ignore-ctrl-j.md
+================================================================================
+
+FILES AUDITED
+─────────────
+  src/repl.lisp              (lines 1255–1390 primary; also L55, L1258–1295)
+  tests/rich-repl-test.lisp  (lines 256–430)
+  src/config.lisp            (line 121)
+
+================================================================================
+MUST HAVE AUDIT (4 items)
+================================================================================
+
+[MH-1] readline-available-p check (cl-readline guard)
+  CRITERION: The unbind-key call must be guarded by (readline-available-p).
+  EVIDENCE:
+    src/repl.lisp L1378:
+      (when (and *ignore-ctrl-j* (readline-available-p))
+  STATUS: ✅ PRESENT
+  NOTE: Dual guard — both *ignore-ctrl-j* AND readline-available-p must be T.
+
+[MH-2] unbind-key failure → log-warn
+  CRITERION: When unbind-key returns non-NIL (failure), log-warn must be called.
+  EVIDENCE:
+    src/repl.lisp L1379–1383:
+      (let ((result (funcall (find-symbol "UNBIND-KEY" :cl-readline)
+                             (code-char 10))))
+        (if result
+            (log-warn "repl" "Failed to unbind Ctrl+J in readline")
+            (log-info "repl" "Ctrl+J (linefeed) unbound from accept-line")))
+    unbind-key returns NIL on success, T on failure (per cl-readline API).
+    When result is T (truthy), log-warn fires. When NIL, log-info fires.
+  STATUS: ✅ PRESENT
+
+[MH-3] (code-char 10) used (NOT #\Newline)
+  CRITERION: The key argument to unbind-key must be (code-char 10), not #\Newline.
+  EVIDENCE:
+    src/repl.lisp L1380:
+      (code-char 10)
+    No occurrence of #\Newline in the unbind-key call.
+  STATUS: ✅ PRESENT
+
+[MH-4] %strip-ctrl-j post-processing maintained as defense-in-depth
+  CRITERION: The %strip-ctrl-j function must remain unchanged and still be called
+             in read-user-input for the fallback read-line path.
+  EVIDENCE:
+    src/repl.lisp L1258–1261 — function definition unchanged:
+      (defun %strip-ctrl-j (input)
+        "Remove Ctrl+J (linefeed) characters from INPUT string."
+        (when input
+          (remove-if (lambda (ch) (= (char-code ch) 10)) input)))
+    src/repl.lisp L1286–1288 — still called in read-user-input:
+      (sanitized (if *ignore-ctrl-j*
+                     (%strip-ctrl-j input)
+                     input))
+    Comment at L1371–1372 explicitly notes this as defense-in-depth:
+      ;; The post-processing %strip-ctrl-j in read-user-input remains as
+      ;; defense-in-depth for the fallback read-line path (no cl-readline).
+  STATUS: ✅ PRESENT
+
+MUST HAVE SCORE: 4/4
+
+================================================================================
+MUST NOT HAVE AUDIT (6 items)
+================================================================================
+
+[MNH-1] No runtime toggle switching (one-time setup only)
+  CRITERION: *ignore-ctrl-j* must be set once at startup (let binding in start-repl),
+             not toggled at runtime.
+  EVIDENCE:
+    src/repl.lisp L1367–1368:
+      (let ((*ignore-ctrl-j*
+             (not (null (sibyl.config:config-value "repl.ignore-ctrl-j" nil)))))
+    This is a let-binding scoped to start-repl — set once at REPL startup.
+    No setf/setq of *ignore-ctrl-j* found anywhere in the implementation block.
+    Grep for "ignore-ctrl-j" shows 7 matches: defvar (L55), let binding (L1367–1368),
+    comment references (L1369, L1377), and the guard/call (L1378, L1286).
+    No runtime mutation found.
+  STATUS: ✅ ABSENT (guardrail respected)
+
+[MNH-2] No helper function created for silent no-op
+  CRITERION: No new helper function wrapping unbind-key or providing a silent no-op.
+  EVIDENCE:
+    Grep for "defun" near unbind-key: only %strip-ctrl-j (pre-existing) and
+    read-user-input (pre-existing) found in the relevant range.
+    The unbind-key call is inline within start-repl — no wrapper function created.
+  STATUS: ✅ ABSENT (guardrail respected)
+
+[MNH-3] No .inputrc integration
+  CRITERION: No references to .inputrc file or readline init file manipulation.
+  EVIDENCE:
+    Grep for "inputrc" in src/repl.lisp: NO MATCHES FOUND.
+  STATUS: ✅ ABSENT (guardrail respected)
+
+[MNH-4] No other keybinding changes
+  CRITERION: Only Ctrl+J (char 10) is unbound; no other keys touched.
+  EVIDENCE:
+    Grep for "unbind-key|bind-key|BIND-KEY|UNBIND-KEY" in src/repl.lisp:
+      L1370: comment reference (unbind-key)
+      L1379: (find-symbol "UNBIND-KEY" :cl-readline) — single call with (code-char 10)
+    Only one unbind-key call, only for (code-char 10). No bind-key calls added.
+  STATUS: ✅ ABSENT (guardrail respected)
+
+[MNH-5] No user-facing banner/messages
+  CRITERION: No new user-visible output (print/format to stdout) about Ctrl+J.
+  EVIDENCE:
+    The log-warn and log-info calls at L1382–1383 write to the log system,
+    NOT to *standard-output* or user-visible output.
+    print-banner (L1225) is a pre-existing function, unchanged.
+    No new format/write-string/princ calls related to Ctrl+J found.
+  STATUS: ✅ ABSENT (guardrail respected)
+
+[MNH-6] Default value unchanged (still nil)
+  CRITERION: config.lisp default for "repl.ignore-ctrl-j" must remain nil.
+  EVIDENCE:
+    src/config.lisp L121:
+      ("repl.ignore-ctrl-j" . nil)
+    Value is nil — unchanged from original.
+    Also: defvar at src/repl.lisp L55:
+      (defvar *ignore-ctrl-j* nil ...)
+    Both the config default and the defvar default are nil.
+  STATUS: ✅ ABSENT (guardrail respected)
+
+MUST NOT HAVE SCORE: 6/6
+
+================================================================================
+TEST COVERAGE AUDIT
+================================================================================
+
+Tests found in tests/rich-repl-test.lisp (lines 256–430):
+
+  [T1] ignore-ctrl-j-defvar (L256–259)
+       Verifies *ignore-ctrl-j* is bound and defaults to NIL.
+
+  [T2] ignore-ctrl-j-unbind-key-called-when-enabled (L378–398)
+       Mocks unbind-key, sets *ignore-ctrl-j* to T, verifies called with (code-char 10).
+       Skips gracefully when readline unavailable.
+
+  [T3] ignore-ctrl-j-unbind-key-not-called-when-disabled (L400–420)
+       Verifies unbind-key NOT called when *ignore-ctrl-j* is NIL.
+       Also covers readline-unavailable path.
+
+  [T4] ignore-ctrl-j-guard-skips-when-readline-unavailable (L422–430)
+       Verifies guard evaluates to NIL when readline is absent.
+
+  [T5] strip-ctrl-j-removes-linefeed (L265–268) — pre-existing, still present.
+
+All 4 new tests present. Pre-existing %strip-ctrl-j test maintained.
+
+================================================================================
+COMMENT UPDATE AUDIT
+================================================================================
+
+Plan required updating L1269–1272 comment. Verified at L1369–1372:
+  ;; When *ignore-ctrl-j* is T, Ctrl+J is unbound from accept-line at the
+  ;; readline level (see unbind-key call after %ensure-readline).
+  ;; The post-processing %strip-ctrl-j in read-user-input remains as
+  ;; defense-in-depth for the fallback read-line path (no cl-readline).
+
+Old comment (kernel-level termios) replaced with accurate description. ✅
+
+================================================================================
+SUMMARY
+================================================================================
+
+Must Have  [4/4] ✅
+  MH-1: readline-available-p guard          ✅ PRESENT
+  MH-2: unbind-key failure → log-warn       ✅ PRESENT
+  MH-3: (code-char 10) used                 ✅ PRESENT
+  MH-4: %strip-ctrl-j maintained            ✅ PRESENT
+
+Must NOT Have [6/6] ✅
+  MNH-1: No runtime toggle                  ✅ ABSENT
+  MNH-2: No silent no-op helper             ✅ ABSENT
+  MNH-3: No .inputrc integration            ✅ ABSENT
+  MNH-4: No other keybinding changes        ✅ ABSENT
+  MNH-5: No user-facing banner              ✅ ABSENT
+  MNH-6: Default nil unchanged              ✅ ABSENT
+
+Tests: 4 new tests added covering all guard paths.
+Comment: Updated per plan specification.
+
+Must Have [4/4] | Must NOT Have [6/6] | VERDICT: APPROVE
+================================================================================

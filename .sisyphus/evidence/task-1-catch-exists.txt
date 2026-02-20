@@ -1,0 +1,2 @@
+1228:                 (throw 'idle-interrupt nil)))))))
+1346:                       (catch 'idle-interrupt

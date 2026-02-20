@@ -1,0 +1,1 @@
+PASS: No cancel-requested in install-interrupt-handler

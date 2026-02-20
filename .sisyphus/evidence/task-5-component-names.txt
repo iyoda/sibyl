@@ -1,0 +1,9 @@
+=== Task 5: Component name verification ===
+
+175:          (log-warn "agent" "Hook ~a error: ~a" hook-name e))))))
+145:                      (log-warn "agent" "Memory compaction failed: ~a, falling back to simple" e)
+43:        (log-warn "llm" "Unknown model pricing: ~a, using sonnet-4-6 as fallback" model-name)
+161:                (log-warn "llm" "~a failed (attempt ~a/~a): ~a — retrying in ~,1fs"
+349:                  (log-warn "llm" "NDJSON parse error: ~a (line: ~a)" e trimmed)))))))))
+
+PASS: core.lisp=agent, memory.lisp=agent, pricing.lisp=llm, client.lisp=llm

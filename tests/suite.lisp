@@ -77,7 +77,8 @@
     repl-display-tests              ;; REPL display formatting: pure logic, no I/O, no global state
     turn-footer-tests               ;; Turn footer display: pure logic, no I/O, no global state
     session-summary-tests           ;; Session summary display: pure logic, no I/O, no global state
-    interrupt-handler-tests)        ;; Ctrl+C interrupt handler decision logic: pure logic, no I/O
+    interrupt-handler-tests         ;; Ctrl+C interrupt handler decision logic: pure logic, no I/O
+    logging-tests)                  ;; Logging context propagation + component filtering: pure logic, no I/O
   "Test suites in sibyl.tests package safe for parallel execution.
 Cross-package suites are resolved at runtime via %safe-suites-resolved.")
 
@@ -119,7 +120,8 @@ Called at run-tests-parallel invocation time, after all packages are loaded."
     cache-telemetry-tests
     cache-integration-tests
     ;; Task 1: Newly classified unsafe suites (sleep, threads, timing-sensitive)
-    rich-repl-tests)              ;; REPL features: spinner threads, sleep calls
+    rich-repl-tests               ;; REPL features: spinner threads, sleep calls
+    session-tests)                ;; Session persistence: file I/O, timer threads
   "Test suites in sibyl.tests package that must run sequentially (file I/O, global state, or FiveAM side effects).
 Cross-package suites are resolved at runtime via %unsafe-suites-resolved.")
 

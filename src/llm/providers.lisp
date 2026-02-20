@@ -288,6 +288,10 @@ Returns (values message usage-plist) where usage-plist may be nil."
                           :arguments (hash-to-alist
                                       (gethash "input" block)))
                          tool-calls)))))
+     (when usage-plist
+       (log-info "llm" "Tokens: input=~a output=~a cache-read=~a cache-write=~a"
+                 (getf usage-plist :input-tokens) (getf usage-plist :output-tokens)
+                 (getf usage-plist :cache-read-tokens) (getf usage-plist :cache-write-tokens)))
      (values
       (assistant-message
        (when text-parts
@@ -438,6 +442,10 @@ Returns a reconstructed assistant message."
                                    :output-tokens (or output-tokens-from-delta 0)
                                    :cache-read-tokens (or cache-read-tokens-from-start 0)
                                     :cache-write-tokens (or cache-write-tokens-from-start 0)))))
+           (when usage-plist
+             (log-info "llm" "Tokens (streaming): input=~a output=~a cache-read=~a cache-write=~a"
+                       (getf usage-plist :input-tokens) (getf usage-plist :output-tokens)
+                       (getf usage-plist :cache-read-tokens) (getf usage-plist :cache-write-tokens)))
            ;; Record server-side cache tokens for telemetry
            (when usage-plist
              (handler-case
@@ -631,6 +639,10 @@ Returns (values message usage-plist) where usage-plist may be nil."
                                         (yason:parse (gethash "arguments" func)
                                                      :object-as :hash-table)))
                            tool-calls))))
+        (when usage-plist
+          (log-info "llm" "Tokens: input=~a output=~a cache-read=~a cache-write=~a"
+                    (getf usage-plist :input-tokens) (getf usage-plist :output-tokens)
+                    (getf usage-plist :cache-read-tokens) (getf usage-plist :cache-write-tokens)))
         (values
          (assistant-message content :tool-calls (nreverse tool-calls))
          usage-plist)))))
@@ -747,6 +759,10 @@ Returns a reconstructed assistant message."
                                   :output-tokens (or completion-tokens 0)
                                   :cache-read-tokens (or cached-tokens 0)
                                   :cache-write-tokens 0))))
+        (when usage-plist
+          (log-info "llm" "Tokens (streaming): input=~a output=~a cache-read=~a cache-write=~a"
+                    (getf usage-plist :input-tokens) (getf usage-plist :output-tokens)
+                    (getf usage-plist :cache-read-tokens) (getf usage-plist :cache-write-tokens)))
         (values
          (assistant-message
           (when text-parts

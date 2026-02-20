@@ -1,0 +1,12 @@
+This is SBCL 2.6.1, an implementation of ANSI Common Lisp.
+More information about SBCL is available at <http://www.sbcl.org/>.
+
+SBCL is free software, provided as is, with absolutely no warranty.
+It is mostly in the public domain; some portions are provided under
+BSD-style licenses.  See the CREDITS and COPYING files in the
+distribution for more information.
+SESSION-ID=session-20260220-172917-196613
+ID-FORMAT=T
+SESSION-SEXP-TAG=:REPL-SESSION
+MESSAGE-COUNT=1
+ROUNDTRIP=T

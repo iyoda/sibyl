@@ -1,0 +1,27 @@
+F4 Scope Fidelity Check: repl-ignore-ctrl-j
+Date: 2026-02-20
+
+Git history (last 15) confirms ctrl-j related commits are present:
+- 51f69af fix(repl): unbind Ctrl+J at readline level to prevent accidental submission
+- 3909588 fix(repl): unbind Ctrl+J at readline level to prevent accidental submission
+- 29f9528 fix(repl): fix let indentation, split comments, improve test coverage
+
+Per-commit changed files:
+- 51f69af: src/repl.lisp, tests/rich-repl-test.lisp
+- 3909588: src/repl.lisp, src/tools/builtin.lisp, tests/rich-repl-test.lisp
+- 29f9528: src/repl.lisp, tests/rich-repl-test.lisp
+
+Guardrail checks:
+- Plan file scope only src/repl.lisp + tests/rich-repl-test.lisp: FAIL (3909588 also changed src/tools/builtin.lisp)
+- src/config.lisp default ('repl.ignore-ctrl-j' . nil): PASS (line 121)
+- %strip-ctrl-j exists and unchanged vs 51f69af^: PASS
+- read-user-input unchanged vs 51f69af^: PASS
+- No .inputrc/readline config files created: PASS
+
+Range file list (git diff --name-only 51f69af^..HEAD -- src/ tests/):
+- src/repl.lisp
+- src/tools/builtin.lisp
+- tests/rich-repl-test.lisp
+- tests/suite.lisp
+
+Tasks [4/5 compliant] | Unaccounted [1/3 files] | VERDICT: REJECT

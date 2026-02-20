@@ -1,0 +1,22 @@
+=== F2: Code Quality Review ===
+BUILD: OK
+
+--- logging.lisp quality checks ---
+107:                 (append ,new-ctx *current-request-context*)
+--- agent/core.lisp quality checks ---
+175:          (log-warn "agent" "Hook ~a error: ~a" hook-name e))))))
+225:    (log-debug "agent" "agent-step: step=~a/~a input-length=~a"
+228:    (with-request-context (:step-number (agent-step-count agent))
+240:        (log-debug "agent" "Calling LLM: context-messages=~a tools=~a"
+259:               (log-info "agent" "LLM response: tool-calls=~a" (length tc-list))
+280:                  (log-debug "agent" "Recursive step: step=~a" (agent-step-count agent))
+283:                  (log-warn "agent" "Max steps reached: ~a/~a"
+288:            (log-info "agent" "LLM response: text-length=~a"
+303:  (with-request-context (:agent-name (agent-name agent)
+--- protocol.lisp thread safety ---
+318:         (current-ctx sibyl.logging:*current-request-context*)
+327:                            (sibyl.logging:*current-request-context* current-ctx))
+--- No stray debug output ---
+--- Test isolation in logging-test.lisp ---
+15
+F2 checks complete

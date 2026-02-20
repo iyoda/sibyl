@@ -40,7 +40,7 @@
             return pricing)
       ;; fallback: return medium/sonnet pricing with a warning
       (progn
-        (warn "No pricing found for model ~s; using sonnet-4-6 pricing as fallback." model-name)
+        (log-warn "llm" "Unknown model pricing: ~a, using sonnet-4-6 as fallback" model-name)
         (cdr (assoc "claude-sonnet-4-6" *model-pricing-table* :test #'string-equal)))))
 
 

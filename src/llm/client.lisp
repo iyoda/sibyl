@@ -346,7 +346,7 @@ CONNECT-TIMEOUT and READ-TIMEOUT are in seconds (defaults from config or *defaul
             (error (e)
               (if on-error
                   (funcall on-error e)
-                  (warn "parse-ndjson-stream: failed to parse line: ~a" trimmed)))))))))
+                  (log-warn "llm" "NDJSON parse error: ~a (line: ~a)" e trimmed)))))))))
 
 (defun http-post-ndjson-stream (url headers body on-chunk on-done
                                 &key (on-error nil) connect-timeout read-timeout)
@@ -421,6 +421,7 @@ CONNECT-TIMEOUT and READ-TIMEOUT are in seconds (defaults from config or *defaul
   (let ((agent sibyl.agent::*current-agent*))
     (unless agent
       (error "call-llm: no current agent bound. Must be called within agent-step."))
+    (log-debug "llm" "call-llm: messages=~a tools=~a" (length messages) (if tools (length tools) 0))
     (let ((client (sibyl.agent:agent-client agent)))
       (if tools
           (complete-with-tools client messages tools)

@@ -1,0 +1,22 @@
+This is SBCL 2.6.1, an implementation of ANSI Common Lisp.
+More information about SBCL is available at <http://www.sbcl.org/>.
+
+SBCL is free software, provided as is, with absolutely no warranty.
+It is mostly in the public domain; some portions are provided under
+BSD-style licenses.  See the CREDITS and COPYING files in the
+distribution for more information.
+WARNING:
+   No pricing found for model "unknown"; using sonnet-4-6 pricing as fallback.
+CORRUPTION WARNING in SBCL pid 23165 pthread 0x16aee7000:
+Memory fault at 0x15 (pc=0x700304ddec)
+The integrity of this image is possibly compromised.
+Continuing with fingers crossed.
+CORRUPTION WARNING in SBCL pid 23165 pthread 0x16aee7000:
+Memory fault at 0x15 (pc=0x700304ddec)
+The integrity of this image is possibly compromised.
+Continuing with fingers crossed.
+WARNING: Sibyl warning: Hook ON-TOOL-RESULT error: Hook error - should be caught
+WARNING:
+   Computing just-done stamp in plan NIL for action (ASDF/LISP-ACTION:TEST-OP
+                                                     "sibyl/tests"), but dependency (ASDF/LISP-ACTION:LOAD-OP
+                                                                                     "sibyl/tests") wasn't done yet!

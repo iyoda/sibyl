@@ -1,0 +1,17 @@
+=== F1: Plan Compliance Audit ===
+
+--- MUST HAVE checks ---
+27:(defvar *current-request-context* nil
+MH1: PASS
+91:(defmacro with-request-context ((&key request-id agent-name step-number user-input) &body body)
+MH2: PASS
+33:(defvar *component-log-levels* (make-hash-table :test 'equal)
+MH3: PASS
+47:(defun component-log-level (component)
+58:(defun reset-component-log-levels ()
+MH4: PASS
+9
+MH5: PASS
+src/llm/client.lisp
+src/llm/providers.lisp
+MH6: PASS

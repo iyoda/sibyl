@@ -1,0 +1,9 @@
+=== Task 5: CL warn migration verification ===
+
+grep '(warn ' in migration targets:
+src/agent/core.lisp: NO CL warn found - PASS
+src/agent/memory.lisp: NO CL warn found - PASS
+src/llm/pricing.lisp: NO CL warn found - PASS
+src/llm/client.lisp: NO CL warn found - PASS
+
+PASS: All 4 CL warn calls migrated to log-warn

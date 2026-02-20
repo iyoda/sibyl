@@ -23,8 +23,7 @@
    #:llm-api-error
    #:llm-rate-limit-error
    #:llm-invalid-response
-   #:llm-stream-error
-   #:llm-cancelled
+    #:llm-cancelled
    #:llm-error-status-code
    #:llm-error-body
    ;; Tool conditions
@@ -69,6 +68,14 @@
    #:*log-stream*
    #:*log-format*
    #:*enable-colors*
+   ;; Context propagation
+   #:*current-request-context*
+   #:with-request-context
+   #:*request-counter*
+   ;; Component-level filtering
+   #:*component-log-levels*
+   #:component-log-level
+   #:reset-component-log-levels
    ;; Core functions
    #:log-level-priority
    #:should-log-p
@@ -342,6 +349,8 @@
    #:generate-agent-id
    #:*current-agent*
    #:infer-tool-categories
+   #:task-required-role
+   #:parse-role-annotation
    #:agent-reset))
 
 (defpackage #:sibyl.mcp
@@ -419,12 +428,16 @@
     #:*use-colors*))
 
 (defpackage #:sibyl.repl
-  (:use #:cl #:sibyl.agent #:sibyl.config #:sibyl.logging)
-  (:export
-   #:start-repl
-   #:repl-command-p
-   #:handle-repl-command
-   #:readline-available-p))
+   (:use #:cl #:sibyl.agent #:sibyl.config #:sibyl.logging)
+   (:export
+    #:start-repl
+    #:repl-command-p
+    #:handle-repl-command
+    #:readline-available-p
+    #:save-session
+    #:load-session
+    #:list-sessions
+    #:generate-session-id))
 
 (defpackage #:sibyl.cache
   (:use #:cl #:sibyl.util #:sibyl.logging)

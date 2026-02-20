@@ -427,10 +427,12 @@
   (let* ((tracker (sibyl.llm::make-token-tracker))
          (agent (sibyl.agent:make-agent :client nil :name "Test")))
     (sibyl.llm::tracker-add-usage tracker '(:input-tokens 500 :output-tokens 100
-                                             :cache-read-tokens 0 :cache-write-tokens 0))
+                                              :cache-read-tokens 0 :cache-write-tokens 0))
     (setf (sibyl.agent:agent-token-tracker agent) tracker)
+    ;; Muffle pricing warning: client is nil so model defaults to "unknown"
     (let ((output (with-output-to-string (*standard-output*)
-                    (sibyl.repl::handle-repl-command :tokens agent))))
+                    (handler-bind ((warning #'muffle-warning))
+                      (sibyl.repl::handle-repl-command :tokens agent)))))
       (is (search "Input" output :test #'string-equal))
       (is (search "Output" output :test #'string-equal)))))
 

@@ -315,6 +315,7 @@ The dynamic value of SIBYL.AGENT:*CURRENT-AGENT* is propagated to each thread."
   (let* ((n (length tc-list))
          (results (make-array n :initial-element nil))
          (current-agent sibyl.agent:*current-agent*)
+         (current-ctx sibyl.logging:*current-request-context*)
          (threads
            (loop for tc in tc-list
                  for i from 0
@@ -322,7 +323,8 @@ The dynamic value of SIBYL.AGENT:*CURRENT-AGENT* is propagated to each thread."
                  (let ((tc tc) (i i))
                    (bt:make-thread
                     (lambda ()
-                      (let ((sibyl.agent:*current-agent* current-agent))
+                      (let ((sibyl.agent:*current-agent* current-agent)
+                            (sibyl.logging:*current-request-context* current-ctx))
                         (setf (aref results i)
                               (handler-case (funcall executor tc)
                                 (error (e)

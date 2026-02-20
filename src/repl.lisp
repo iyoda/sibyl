@@ -11,6 +11,7 @@
   '(("/quit"          . :quit)
     ("/exit"          . :quit)
     ("/reset"         . :reset)
+    ("/new"           . :reset)
     ("/tools"         . :list-tools)
     ("/help"          . :help)
     ("/history"       . :history)
@@ -20,7 +21,10 @@
     ("/review"        . :review)
     ("/tokens"        . :tokens)
     ("/model"         . :model)
-    ("/cost-report"   . :cost-report))
+    ("/cost-report"   . :cost-report)
+    ("/sessions"      . :sessions)
+    ("/save"          . :save-session)
+    ("/load"          . :load-session))
   "Mapping of REPL commands to actions.")
 
 ;;; ============================================================
@@ -54,6 +58,9 @@
 
 (defvar *command-count* 0
   "Counter tracking the number of commands executed in the current REPL session.")
+
+(defvar *current-session-id* nil
+  "The session ID for the current REPL session.")
 
 ;;; ============================================================
 ;;; Output post-processing
@@ -338,6 +345,19 @@ Returns TEXT unchanged when it is not a string."
 (defun handle-reset-command (agent input)
   "Handler for :reset command."
   (declare (ignore input))
+  ;; Auto-save current session before reset.
+  (when *current-session-id*
+    (handler-case
+        (let* ((mem (sibyl.agent:agent-memory agent))
+               (messages (sibyl.llm:conversation-to-list
+                          (sibyl.agent:memory-conversation mem)))
+               (summary (sibyl.agent:memory-summary mem)))
+          (save-session *current-session-id* messages summary
+                        :command-count *command-count*)
+          (format t "~%Session saved before reset: ~a~%" *current-session-id*))
+      (error (e)
+        (format *error-output*
+                "~&Warning: failed to save session before reset: ~a~%" e))))
   (sibyl.agent:agent-reset agent)
   (format t "~%[Conversation reset]~%")
   nil)
@@ -382,6 +402,12 @@ Returns TEXT unchanged when it is not a string."
         (format t "         — Show cumulative token usage statistics~%")
         (format-colored-text "  /model" :green)
         (format t "         — Show current model information~%")
+        (format-colored-text "  /sessions" :green)
+        (format t "      — List saved sessions~%")
+        (format-colored-text "  /save" :green)
+        (format t "          — Save current session~%")
+        (format-colored-text "  /load <id>" :green)
+        (format t "     — Load a saved session~%")
         (format-colored-text "  /colors" :green)
         (format t "        — Toggle color output (on/off)~%")
         (format-colored-text "  /quit" :green)
@@ -400,6 +426,9 @@ Returns TEXT unchanged when it is not a string."
         (format t "  /review          — Review improvement suggestions~%")
         (format t "  /tokens          — Show cumulative token usage statistics~%")
         (format t "  /model           — Show current model information~%")
+        (format t "  /sessions        — List saved sessions~%")
+        (format t "  /save            — Save current session~%")
+        (format t "  /load <id>       — Load a saved session~%")
         (format t "  /colors          — Toggle color output (on/off)~%")
         (format t "  /quit            — Exit REPL~%")
         (format t "~%Type anything else to chat with the agent.~%")))
@@ -675,6 +704,72 @@ Returns TEXT unchanged when it is not a string."
 
 
 
+;;; Session command handlers
+
+(defun handle-sessions-command (agent input)
+  "Handler for /sessions — list saved sessions."
+  (declare (ignore agent input))
+  (let ((sessions (list-sessions)))
+    (if sessions
+        (progn
+          (format t "~%Saved sessions:~%")
+          (format t "  ~30a ~20a ~8a~%" "ID" "Last Modified" "Messages")
+          (format t "  ~30,,,'-a ~20,,,'-a ~8,,,'-a~%" "" "" "")
+          (dolist (s sessions)
+            (format t "  ~30a ~20a ~8a~%"
+                    (getf s :id)
+                    (or (getf s :last-modified) "-")
+                    (or (getf s :message-count) 0))))
+        (format t "~%No saved sessions.~%")))
+  nil)
+
+(defun handle-save-session-command (agent input)
+  "Handler for /save — save current session to disk."
+  (declare (ignore input))
+  (if *current-session-id*
+      (let* ((mem (sibyl.agent:agent-memory agent))
+             (messages (sibyl.llm:conversation-to-list
+                        (memory-conversation mem)))
+             (summary (memory-summary mem)))
+        (save-session *current-session-id* messages summary
+                      :command-count *command-count*)
+        (format t "~%Session saved: ~a~%" *current-session-id*))
+      (format t "~%No active session to save.~%"))
+  nil)
+
+(defun handle-load-session-command (agent input)
+  "Handler for /load <id> — switch to another session."
+  (let ((session-id (string-trim '(#\Space #\Tab)
+                                 (subseq input (min 5 (length input))))))
+    (if (or (null session-id) (string= session-id ""))
+        (format t "~%Usage: /load <session-id>~%")
+        (progn
+          ;; Auto-save current session first
+          (when *current-session-id*
+            (let* ((mem (sibyl.agent:agent-memory agent))
+                   (messages (sibyl.llm:conversation-to-list
+                              (memory-conversation mem)))
+                   (summary (memory-summary mem)))
+              (save-session *current-session-id* messages summary
+                            :command-count *command-count*)))
+          ;; Load requested session
+          (multiple-value-bind (messages summary command-count)
+              (load-session session-id)
+            (if messages
+                (let ((mem (sibyl.agent:agent-memory agent)))
+                  ;; Replace conversation
+                  (sibyl.llm:conversation-clear (memory-conversation mem))
+                  (dolist (msg messages)
+                    (sibyl.llm:conversation-push (memory-conversation mem) msg))
+                  ;; Restore summary and counts
+                  (setf (memory-summary mem) summary)
+                  (setf *current-session-id* session-id)
+                  (setf *command-count* (or command-count 0))
+                  (format t "~%Loaded session: ~a (~a messages)~%"
+                          session-id (length messages)))
+                (format t "~%Session not found: ~a~%" session-id))))))
+  nil)
+
 ;;; Command handler registry
 
 (defparameter *command-handlers*
@@ -689,7 +784,10 @@ Returns TEXT unchanged when it is not a string."
         (cons :review  #'handle-review-command-wrapper)
         (cons :tokens        #'handle-tokens-command)
         (cons :model         #'handle-model-command)
-        (cons :cost-report   #'handle-cost-report-command))
+        (cons :cost-report   #'handle-cost-report-command)
+        (cons :sessions     #'handle-sessions-command)
+        (cons :save-session #'handle-save-session-command)
+        (cons :load-session #'handle-load-session-command))
   "Mapping of command keywords to handler functions.")
 
 (defun handle-repl-command (command agent &optional original-input)
@@ -1240,7 +1338,9 @@ Otherwise, use model-specific optimized prompt for Ollama models."
 
 (defun start-repl (&key client
                      (system-prompt sibyl.agent::*default-system-prompt*)
-                     (name "Sibyl"))
+                     (name "Sibyl")
+                     session-id
+                     (auto-save-interval 300))
   "Start the interactive REPL.
 
    Usage:
@@ -1249,6 +1349,7 @@ Otherwise, use model-specific optimized prompt for Ollama models."
 
    Or with an existing agent:
      (start-repl :client my-client)"
+  
   (let* ((effective-prompt (%select-system-prompt client system-prompt))
          (agent (sibyl.agent:make-agent
                  :client client
@@ -1284,7 +1385,43 @@ Otherwise, use model-specific optimized prompt for Ollama models."
       ;; SBCL starts with LC_ALL="C" — fix locale before any readline use
       ;; so that mbrtowc/wcwidth correctly handle multibyte characters.
       (%ensure-utf8-locale))
+    ;; Session initialization.
+    (if session-id
+        ;; Resume existing session.
+        (multiple-value-bind (messages summary command-count)
+            (load-session session-id)
+          (if messages
+              (let ((mem (sibyl.agent:agent-memory agent)))
+                (dolist (msg messages)
+                  (sibyl.llm:conversation-push
+                   (sibyl.agent:memory-conversation mem) msg))
+                (when summary
+                  (setf (sibyl.agent:memory-summary mem) summary))
+                (when command-count
+                  (setf *command-count* command-count))
+                (setf *current-session-id* session-id)
+                (log-info "repl" "Resumed session ~a (~a messages)"
+                          session-id (length messages)))
+              (progn
+                (format *error-output*
+                        "~&Warning: session ~a not found, starting fresh~%"
+                        session-id)
+                (setf *current-session-id* (generate-session-id)))))
+        ;; New session.
+        (setf *current-session-id* (generate-session-id)))
     (print-banner)
+    (format t "  Session: ~a~%" *current-session-id*)
+    ;; Start auto-save timer
+    (start-auto-save-timer
+     (lambda ()
+       (values *current-session-id*
+               (sibyl.llm:conversation-to-list
+                (sibyl.agent:memory-conversation
+                 (sibyl.agent:agent-memory agent)))
+               (sibyl.agent:memory-summary
+                (sibyl.agent:agent-memory agent))
+               *command-count*))
+     auto-save-interval)
     ;; Pre-warm Ollama model — large models use blocking ensure-warm with
     ;; progress display; small models use lightweight background pre-warm.
     (when (typep client 'sibyl.llm:ollama-client)
@@ -1330,16 +1467,33 @@ Otherwise, use model-specific optimized prompt for Ollama models."
       (labels ((save-history ()
                  (when (readline-available-p)
                    (funcall (find-symbol "WRITE-HISTORY" :cl-readline) "~/.sibyl_history")))
-                (exit-repl (&optional message)
-                   (when message
-                     (format t "~%~a~%" message))
-                   (log-info "repl" "Shutting down REPL")
-                   ;; Disconnect MCP servers
-                   (handler-case (sibyl.mcp:disconnect-all-mcp-servers)
-                     (error (e)
-                       (log-debug "repl" "MCP disconnect error: ~a" e)))
-                   (save-history)
-                   (return-from repl-loop))
+                 (exit-repl (&optional message)
+                    (when message
+                      (format t "~%~a~%" message))
+                    (log-info "repl" "Shutting down REPL")
+                    ;; Disconnect MCP servers
+                    (handler-case (sibyl.mcp:disconnect-all-mcp-servers)
+                      (error (e)
+                        (log-debug "repl" "MCP disconnect error: ~a" e)))
+                    (save-history)
+                    ;; Stop auto-save timer before final save
+                    (stop-auto-save-timer)
+                    ;; Save session before exit.
+                    (when *current-session-id*
+                      (handler-case
+                          (let* ((mem (sibyl.agent:agent-memory agent))
+                                 (messages (sibyl.llm:conversation-to-list
+                                            (sibyl.agent:memory-conversation mem)))
+                                 (summary (sibyl.agent:memory-summary mem)))
+                            (save-session *current-session-id* messages summary
+                                          :command-count *command-count*)
+                            (format t "~&Session saved: ~a~%" *current-session-id*)
+                            (format t "Resume with: (start-repl :client ... :session-id ~s)~%"
+                                    *current-session-id*))
+                        (error (e)
+                          (format *error-output*
+                                  "~&Warning: failed to save session: ~a~%" e))))
+                    (return-from repl-loop))
                (repl-body ()
                    (tagbody
                      next-iteration
