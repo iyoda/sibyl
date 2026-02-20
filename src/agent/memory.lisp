@@ -35,6 +35,11 @@ When nil and strategy is :llm, falls back to :simple text summarization.")
                          :initform nil
                          :type (or function null)
                          :documentation "Optional callback invoked after compaction with the summary text.")
+   (compaction-start-callback :initarg :compaction-start-callback
+                              :accessor memory-compaction-start-callback
+                              :initform nil
+                              :type (or function null)
+                              :documentation "Optional callback invoked before compaction starts.")
    (compaction-count :initarg :compaction-count
                      :accessor memory-compaction-count
                      :initform 0
@@ -210,6 +215,9 @@ tool_result messages from their corresponding assistant tool_use messages."
     ;; Guard: ensure we keep at least one message
     (when (>= split-idx total)
       (setf split-idx (max 0 (1- total))))
+    ;; Fire start callback once compaction is confirmed.
+    (when (memory-compaction-start-callback mem)
+      (funcall (memory-compaction-start-callback mem)))
     (let ((to-summarize (subseq messages 0 split-idx))
           (to-keep (subseq messages split-idx)))
       (let ((summary-text

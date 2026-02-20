@@ -34,7 +34,8 @@
                     :accessor agent-hooks
                     :initform nil
                     :documentation "Alist of hook-name → function.
-                     Hooks: :before-step :after-step :on-tool-call :on-tool-result :on-error")
+                     Hooks: :before-step :after-step :on-tool-call :on-tool-result :on-error
+                            :on-compact-start :on-compact")
    (token-tracker :initform (sibyl.llm::make-token-tracker)
                   :accessor agent-token-tracker
                   :documentation "Cumulative token usage for this session.")
@@ -168,6 +169,9 @@ prompt with an optional system-prompt-hint prefix to save tokens."
             (setf (memory-context-window-size (agent-memory agent))
                   (sibyl.llm:context-window-for-model model-name))))))
     ;; Wire compaction callback → :on-compact agent hook
+    (setf (memory-compaction-start-callback (agent-memory agent))
+          (lambda ()
+            (run-hook agent :on-compact-start)))
     (setf (memory-compaction-callback (agent-memory agent))
           (lambda (summary)
             (run-hook agent :on-compact summary)))
@@ -268,8 +272,7 @@ Returns (values response usage) on success."
                         ;; All phases exhausted — signal the last error
                         (error initial-error))
           (log-warn "agent" "Context overflow — ~a" (car phase))
-          (run-hook agent :on-compact
-                    (format nil "[context-recovery] ~a" (car phase)))
+          (run-hook agent :on-compact-start (car phase))
           (funcall (cdr phase))
           (handler-case
               (return-from %call-with-context-recovery

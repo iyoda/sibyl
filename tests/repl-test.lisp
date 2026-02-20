@@ -585,6 +585,27 @@
       (is (search "Context compacted" output)
           "Invoking the hook should print a compaction notice"))))
 
+(test make-compact-start-hook-prints-start-notice
+  "make-compact-start-hook should print the compaction start notice."
+  (let ((hook-fn (sibyl.repl::make-compact-start-hook)))
+    (is (functionp hook-fn) "make-compact-start-hook should return a function")
+    (let* ((sibyl.repl::*current-spinner* nil)
+           (sibyl.repl.display:*use-colors* nil)
+           (output (with-output-to-string (*standard-output*)
+                     (funcall hook-fn))))
+      (is (search "Context compacting" output)
+          "Invoking the hook should print a start notice"))))
+
+(test make-compact-start-hook-with-phase-label
+  "make-compact-start-hook should include phase text when provided."
+  (let ((hook-fn (sibyl.repl::make-compact-start-hook)))
+    (let* ((sibyl.repl::*current-spinner* nil)
+           (sibyl.repl.display:*use-colors* nil)
+           (output (with-output-to-string (*standard-output*)
+                     (funcall hook-fn "Phase 3: compacting conversation"))))
+      (is (search "Phase 3: compacting conversation" output)
+          "Phase label should be included in start notice"))))
+
 (test command-entry-accessors
   "Auto-generated test"
   ;; plist形式のエントリからアクセサが正しく値を取得できる

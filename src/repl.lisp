@@ -46,6 +46,14 @@
 (defvar *ignore-ctrl-j* nil
   "When T, strip Ctrl+J (linefeed) characters from REPL input.")
 
+(defparameter *shift-enter-keyseqs*
+  (list
+   ;; xterm/kitty CSI-u style (modifyOtherKeys)
+   (concatenate 'string (string #\Escape) "[13;2u")
+   ;; Alternate CSI style seen in some terminals
+   (concatenate 'string (string #\Escape) "[27;2;13~"))
+  "Readline key sequences that may correspond to Shift+Enter.")
+
 (defvar *command-count* 0
   "Counter tracking the number of commands executed in the current REPL session.")
 
@@ -1180,6 +1188,30 @@ tests) can trigger SBCL stream corruption warnings."
   (lambda (err)
     (log-error "agent" "Agent error: ~a" err)))
 
+(defun make-compact-start-hook ()
+  "Return a closure suitable for the :on-compact-start agent hook.
+   Displays a context compaction start notification so users can see
+   an explicit begin/end pair with make-compact-hook."
+  (lambda (&optional phase-label)
+    (bt:with-lock-held (*spinner-output-lock*)
+      (let ((active-spinner *current-spinner*))
+        (cond
+          ((and active-spinner
+                (sibyl.repl.spinner:spinner-active-p active-spinner))
+           (sibyl.repl.spinner:stop-spinner active-spinner)
+           (setf *current-spinner* nil)
+           (format t "~C~C[2K" #\Return #\Escape))
+          (t
+           (fresh-line)))
+        (if phase-label
+            (if *use-colors*
+                (format t "~C[2m🗜️  Context compacting: ~a~C[0m~%" #\Escape phase-label #\Escape)
+                (format t "🗜️  Context compacting: ~a~%" phase-label))
+            (if *use-colors*
+                (format t "~C[2m🗜️  Context compacting...~C[0m~%" #\Escape #\Escape)
+                (format t "🗜️  Context compacting...~%")))
+        (force-output)))))
+
 (defun make-compact-hook ()
   "Return a closure suitable for the :on-compact agent hook.
    Displays a context compaction notification when the conversation history
@@ -1438,6 +1470,32 @@ Returns NIL when *stream-enabled* is NIL (streaming disabled)."
   (when input
     (remove-if (lambda (ch) (= (char-code ch) 10)) input)))
 
+(defun %readline-insert-newline (count key)
+  "Readline callback: insert a literal newline into the edit buffer."
+  (declare (ignore count key))
+  (let ((insert-fn (find-symbol "INSERT-TEXT" :cl-readline))
+        (redisplay-fn (find-symbol "REDISPLAY" :cl-readline)))
+    (when insert-fn
+      (funcall insert-fn (string #\Newline)))
+    (when redisplay-fn
+      (funcall redisplay-fn))
+    ;; Readline callbacks return 0 (false) on success.
+    nil))
+
+(defun %bind-shift-enter-newline ()
+  "Bind known Shift+Enter key sequences to literal newline insertion."
+  (when (readline-available-p)
+    (let ((bind-keyseq-fn (find-symbol "BIND-KEYSEQ" :cl-readline)))
+      (when bind-keyseq-fn
+        (dolist (keyseq *shift-enter-keyseqs*)
+          (let ((failed-p (funcall bind-keyseq-fn
+                                   keyseq
+                                   #'%readline-insert-newline
+                                   :if-unbound t)))
+            (if failed-p
+                (log-debug "repl" "Shift+Enter key binding failed for sequence ~s" keyseq)
+                (log-debug "repl" "Shift+Enter key binding installed for sequence ~s" keyseq))))))))
+
 (defun read-user-input ()
   "Read a line of input using cl-readline if available, read-line otherwise.
    Returns NIL on EOF."
@@ -1548,6 +1606,7 @@ Otherwise, use model-specific optimized prompt for Ollama models."
                 (cons :before-step (make-before-step-hook))
                 (cons :after-step (make-after-step-hook))
                 (cons :on-error (make-on-error-hook))
+                (cons :on-compact-start (make-compact-start-hook))
                 (cons :on-compact (make-compact-hook))))
     (let ((*ignore-ctrl-j*
            (not (null (sibyl.config:config-value "repl.ignore-ctrl-j" nil)))))
@@ -1566,6 +1625,8 @@ Otherwise, use model-specific optimized prompt for Ollama models."
           (if result
               (log-warn "repl" "Failed to unbind Ctrl+J in readline")
               (log-info "repl" "Ctrl+J (linefeed) unbound from accept-line"))))
+      ;; Configure Shift+Enter to insert newline in multi-line prompts.
+      (%bind-shift-enter-newline)
       ;; SBCL starts with LC_ALL="C" — fix locale before any readline use
       ;; so that mbrtowc/wcwidth correctly handle multibyte characters.
       (%ensure-utf8-locale))
