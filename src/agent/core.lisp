@@ -324,9 +324,9 @@ Returns (values response usage) on success."
                    (use-parallel (>= (length tc-list)
                                      sibyl.tools:*parallel-tool-threshold*)))
                (log-info "agent" "LLM response: tool-calls=~a" (length tc-list))
-               (if use-parallel
-                   ;; --- 並列実行パス ---
-                   (let ((results
+                (if use-parallel
+                    ;; --- Parallel execution path ---
+                    (let ((results
                           (sibyl.tools:execute-tool-calls-parallel
                            tc-list
                            (lambda (tc)
@@ -335,9 +335,9 @@ Returns (values response usage) on success."
                      (loop for tc in tc-list
                            for result in results
                            do (memory-push (agent-memory agent)
-                                           (tool-result-message (tool-call-id tc) result))))
-                   ;; --- シリアル実行パス (threshold 未満) ---
-                   (dolist (tc tc-list)
+                                            (tool-result-message (tool-call-id tc) result))))
+                    ;; --- Serial execution path (below threshold) ---
+                    (dolist (tc tc-list)
                      (run-hook agent :on-tool-call tc)
                      (let ((result (%execute-tool-with-timing agent tc)))
                        (memory-push (agent-memory agent)

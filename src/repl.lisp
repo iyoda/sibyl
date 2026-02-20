@@ -1010,16 +1010,16 @@ Returns TEXT unchanged when it is not a string."
 
 (defun make-tool-call-hook (&optional spinner)
   "Return a closure suitable for the :on-tool-call agent hook.
-   The closure accepts a TOOL-CALL struct and displays the tool name in cyan,
-   followed by a brief summary of the primary argument(s).
-
-   If a spinner is active, it is stopped first so the message is not erased
-   by the spinner's line-clear escape sequence.  After displaying the tool info,
-   a fresh spinner is started with a '考え中...' message to provide visual
-   feedback during tool execution.
-
-   Usage:
-     (cons :on-tool-call (make-tool-call-hook spinner))"
+    The closure accepts a TOOL-CALL struct and displays the tool name in cyan,
+    followed by a brief summary of the primary argument(s).
+ 
+    If a spinner is active, it is stopped first so the message is not erased
+    by the spinner's line-clear escape sequence.  After displaying the tool info,
+    a fresh spinner is started with a 'Thinking...' message to provide visual
+    feedback during tool execution.
+ 
+    Usage:
+      (cons :on-tool-call (make-tool-call-hook spinner))"
   (lambda (tc)
     (let* ((tool-name (sibyl.llm:tool-call-name tc))
            (summary (format-tool-call-summary tc))
@@ -1050,14 +1050,14 @@ Returns TEXT unchanged when it is not a string."
             (setf *current-spinner* new-spinner)))))))
 
 (defun format-tool-call-summary (tc &key (max-length 50))
-  "ツールコールの引数を人間が読みやすい短い文字列に整形する。
-   例: shell + ((command . \"ls -la\")) → \"(ls -la)\"
-       eval-form + ((form . \"(defun foo () 42)\")) → \"(defun foo () 42)\"
-   引数が長い場合は max-length 文字で切り詰める。"
+  "Format tool call arguments into a human-readable short string.
+    Example: shell + ((command . \"ls -la\")) → \"(ls -la)\"
+             eval-form + ((form . \"(defun foo () 42)\")) → \"(defun foo () 42)\"
+    If arguments are long, truncate to max-length characters."
   (let* ((args (sibyl.llm:tool-call-arguments tc))
          (tool-name (sibyl.llm:tool-call-name tc))
-         ;; ツールごとの主要引数キー（優先順位順）
-         (primary-keys
+          ;; Primary argument keys per tool (in priority order)
+          (primary-keys
            (cond
              ((string= tool-name "shell")           '("command"))
              ((string= tool-name "read-file")       '("path"))
@@ -1075,9 +1075,9 @@ Returns TEXT unchanged when it is not a string."
              ((string= tool-name "write-test")      '("name"))
              ((string= tool-name "add-definition")  '("file"))
              ((string= tool-name "create-module")   '("path"))
-             (t nil)))
-         ;; 主要引数の値を取得
-         (values-to-show
+              (t nil)))
+          ;; Get primary argument value
+          (values-to-show
            (if primary-keys
                (remove nil
                  (mapcar (lambda (k)
@@ -1085,24 +1085,24 @@ Returns TEXT unchanged when it is not a string."
                              (when pair
                                (let ((v (cdr pair)))
                                  (if (stringp v) v (format nil "~a" v))))))
-                         primary-keys))
-               ;; フォールバック: 最初の引数の値
-               (when args
+                          primary-keys))
+                ;; Fallback: value of the first argument
+                (when args
                  (let ((v (cdr (first args))))
-                   (list (if (stringp v) v (format nil "~a" v)))))))
-         ;; 値を結合
-         (summary (if values-to-show
+                    (list (if (stringp v) v (format nil "~a" v)))))))
+          ;; Join values
+          (summary (if values-to-show
                       (format nil "~{~a~^ ~}" values-to-show)
                       "")))
-    (cond
-      ((string= summary "") "")
-      ;; 値が既に括弧で始まる場合（Lispフォームなど）はそのまま表示
-      ((char= (char summary 0) #\()
+     (cond
+       ((string= summary "") "")
+       ;; If value already starts with a paren (e.g. Lisp form), display as-is
+       ((char= (char summary 0) #\()
        (if (> (length summary) max-length)
-           (format nil "~a..." (subseq summary 0 max-length))
-           summary))
-      ;; 通常は括弧で囲む
-      (t
+            (format nil "~a..." (subseq summary 0 max-length))
+            summary))
+       ;; Otherwise wrap in parens
+       (t
        (if (> (length summary) max-length)
            (format nil "(~a...)" (subseq summary 0 max-length))
            (format nil "(~a)" summary))))))
@@ -1145,13 +1145,17 @@ Returns TEXT unchanged when it is not a string."
     (declare (ignore summary))
     (bt:with-lock-held (*spinner-output-lock*)
       (let ((active-spinner *current-spinner*))
-        ;; Stop existing spinner before printing so our message survives.
-        (when (and active-spinner
-                   (sibyl.repl.spinner:spinner-active-p active-spinner))
-          (sibyl.repl.spinner:stop-spinner active-spinner)
-          (setf *current-spinner* nil))
-        ;; Print a clean compaction notice with trailing newline (permanent).
-        (format t "~C~C[2K" #\Return #\Escape)
+        (cond
+          ;; Spinner active — stop it, then clear the line for our message.
+          ((and active-spinner
+                (sibyl.repl.spinner:spinner-active-p active-spinner))
+           (sibyl.repl.spinner:stop-spinner active-spinner)
+           (setf *current-spinner* nil)
+           (format t "~C~C[2K" #\Return #\Escape))
+          ;; No spinner — cursor may be mid-line from streamed text.
+          ;; fresh-line avoids erasing content that \r\e[2K would destroy.
+          (t
+           (fresh-line)))
         (if *use-colors*
             (format t "~C[2m🗜️  Context compacted~C[0m~%" #\Escape #\Escape)
             (format t "🗜️  Context compacted~%"))
@@ -1176,11 +1180,20 @@ Returns TEXT unchanged when it is not a string."
       (log-info "agent" "Tool call: ~a" (sibyl.llm:tool-call-name tc))
       (bt:with-lock-held (*spinner-output-lock*)
         (let ((active-spinner (or spinner *current-spinner*)))
-          (when (and active-spinner
-                     (sibyl.repl.spinner:spinner-active-p active-spinner))
-            (sibyl.repl.spinner:stop-spinner active-spinner)
-            (setf *current-spinner* nil))
-          ;; No newline — spinner and result hook will overwrite this line.
+          (cond
+            ;; Spinner active — stop it.  stop-spinner clears the line via
+            ;; \r\e[2K so the tool display can be written on the now-blank line.
+            ((and active-spinner
+                  (sibyl.repl.spinner:spinner-active-p active-spinner))
+             (sibyl.repl.spinner:stop-spinner active-spinner)
+             (setf *current-spinner* nil))
+            ;; No spinner — the streaming callback already stopped it and wrote
+            ;; response text.  The cursor may be mid-line (text without trailing
+            ;; newline).  Emit fresh-line so the subsequent spinner's \r\e[2K
+            ;; won't erase streamed content.
+            (t
+             (fresh-line)))
+          ;; No trailing newline — spinner and result hook will overwrite this line.
           (if *use-colors*
               (format-colored-text display :cyan)
               (format t "~a" display))
@@ -1204,15 +1217,20 @@ Returns TEXT unchanged when it is not a string."
     (let ((bytes (if (stringp result) (length result) 0)))
       (bt:with-lock-held (*spinner-output-lock*)
         (let ((active-spinner *current-spinner*))
-          ;; Stop existing spinner
-          (when (and active-spinner
-                     (sibyl.repl.spinner:spinner-active-p active-spinner))
-            (sibyl.repl.spinner:stop-spinner active-spinner)
-            (setf *current-spinner* nil))
-          ;; Clear line and display result (with trailing newline)
-          (format t "~C~C[2K~a~%"
-                  #\Return #\Escape
-                  (sibyl.repl.display:format-tool-result-line tc result elapsed-seconds bytes))
+          (cond
+            ;; Spinner active — stop it and clear the line for the result.
+            ((and active-spinner
+                  (sibyl.repl.spinner:spinner-active-p active-spinner))
+             (sibyl.repl.spinner:stop-spinner active-spinner)
+             (setf *current-spinner* nil)
+             (format t "~C~C[2K~a~%"
+                     #\Return #\Escape
+                     (sibyl.repl.display:format-tool-result-line tc result elapsed-seconds bytes)))
+            ;; No spinner — cursor may be mid-line; use fresh-line + normal output.
+            (t
+             (fresh-line)
+             (format t "~a~%"
+                     (sibyl.repl.display:format-tool-result-line tc result elapsed-seconds bytes))))
           (force-output)
           ;; Restart spinner so user has feedback during the next LLM call.
           ;; The streaming callback or on-tool-call hook will stop it when appropriate.

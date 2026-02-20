@@ -231,7 +231,7 @@ in DESCRIPTION (e.g. \"[tester] Write tests\" → required-role \"tester\")."
             (complete-task coordinator task result)))))))
 
 ;;; ============================================================
-;;; 並列タスク実行エンジン
+;;; Parallel task execution engine
 ;;; ============================================================
 
 (defun %tasks-ready-p (task completed-ids)
