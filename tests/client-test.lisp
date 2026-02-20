@@ -23,9 +23,15 @@
       (is (= 2 (gethash "b" nested))))))
 
 (test streaming-thinking-callback-exists
-  "Auto-generated test"
+  "The variable *streaming-thinking-callback* is bound.
+   Its global (defvar) default is NIL; within an active streaming session
+   (e.g. when tests run inside start-repl) it holds a function.
+   The test accepts both values so it is robust to either execution context,
+   mirroring the pattern in streaming-callback-invoked which uses an explicit
+   outer nil binding to shield *streaming-text-callback* for the same reason."
   (is (boundp 'sibyl.llm::*streaming-thinking-callback*))
-  (is (null sibyl.llm::*streaming-thinking-callback*)))
+  (is (or (null sibyl.llm::*streaming-thinking-callback*)
+          (functionp sibyl.llm::*streaming-thinking-callback*))))
 
 (test streaming-thinking-callback-invoked
   "Auto-generated test"

@@ -132,6 +132,29 @@ sibyl/
 (asdf:test-system :sibyl)
 ```
 
+## Git Hooks (pre-push static checks)
+
+To prevent accidental compile-time dependencies on test-only packages in `src/`,
+install the repository pre-push hook:
+
+```bash
+sbcl --noinform --non-interactive --script scripts/install-git-hooks.lisp
+```
+
+The hook runs:
+
+```bash
+sbcl --noinform --non-interactive --script scripts/check-no-test-packages-in-src.lisp
+```
+
+This check rejects direct `fiveam:` / `it.bese.fiveam:` references under `src/`.
+For REPL-side test execution use runtime resolution (`find-package`, `find-symbol`,
+`progv`) so test functionality remains available without introducing read-time
+package dependencies.
+
+To extend forbidden package prefixes, edit `*forbidden-prefixes*` in
+`scripts/check-no-test-packages-in-src.lisp`.
+
 ## Dependencies
 
 | Library | Purpose |

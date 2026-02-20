@@ -151,10 +151,14 @@ Called at run-tests-parallel invocation time, after all packages are loaded."
 (defun run-sibyl-tests ()
   "Run the full test suite with self-assess nested execution prevention
 and codebase-map caching for faster repeated scans."
+  (when *run-tests-parallel-running*
+    (format *error-output* "~%[parallel-runner] WARNING: recursive re-entry detected, skipping~%")
+    (return-from run-sibyl-tests nil))
   (sibyl.tools:with-codebase-map-cache nil
     (let ((sibyl.tools:*self-assess-running* t)
           (*run-tests-parallel-running* t)
-          (it.bese.fiveam:*test-dribble* (make-broadcast-stream)))
+          (it.bese.fiveam:*test-dribble* (make-broadcast-stream))
+          (*error-output* (make-broadcast-stream)))
       (it.bese.fiveam:run! 'sibyl-tests))))
 
 (defun %reset-suite-statuses (suite)
@@ -220,10 +224,11 @@ Uses *fiveam-reset-enabled* to control status reset before execution."
            (list (make-broadcast-stream)
                  (make-array 0 :element-type 'character :fill-pointer 0 :adjustable t)
                  nil)
-      (when *fiveam-reset-enabled*
-        (%reset-suite-statuses suite))
-      (funcall return-result-list-fn
-               (lambda () (funcall %run-fn suite))))))
+      (let ((*error-output* (make-broadcast-stream)))
+        (when *fiveam-reset-enabled*
+          (%reset-suite-statuses suite))
+        (funcall return-result-list-fn
+                 (lambda () (funcall %run-fn suite)))))))
 
 (defun %collect-fiveam-results (suite)
   "Run SUITE collecting results with thread-safe serialization.
@@ -239,10 +244,11 @@ Uses *fiveam-reset-enabled* to control status reset before execution."
              (list (make-broadcast-stream)
                    (make-array 0 :element-type 'character :fill-pointer 0 :adjustable t)
                    nil)
-        (when *fiveam-reset-enabled*
-          (%reset-suite-statuses suite))
-        (funcall return-result-list-fn
-                 (lambda () (funcall %run-fn suite)))))))
+        (let ((*error-output* (make-broadcast-stream)))
+          (when *fiveam-reset-enabled*
+            (%reset-suite-statuses suite))
+          (funcall return-result-list-fn
+                   (lambda () (funcall %run-fn suite))))))))
 
 (defun %suite-run-order (suite)
   "Return the immediate test/suite names for SUITE, preserving duplicates." 
@@ -570,27 +576,24 @@ THUNK is a zero-argument function. elapsed-seconds is a float."
                                          (loop for i in (nreverse batch)
                                                for suite = (aref safe-run-vector i)
                                                collect
-                                               (let ((suite-capture suite)
-                                                     (i-capture i))
-                                                 (bt:make-thread
-                                                  (lambda ()
-                                                    (let ((error-stream (make-string-output-stream)))
-                                                      (unwind-protect
-                                                           (let ((*error-output* error-stream)
-                                                                 (sibyl.tools:*codebase-map-cache*
-                                                                   (when sibyl.tools:*codebase-map-cache*
-                                                                     (make-hash-table :test 'equal))))
-                                                             (handler-case
-                                                                 (multiple-value-bind (results elapsed)
-                                                                     (%time-call (lambda () (%run-suite-isolated suite-capture)))
-                                                                   (setf (aref safe-results i-capture) (cons results elapsed)))
-                                                               (error (e)
-                                                                 (format *error-output* "~%[parallel-runner] Error in ~a: ~a~%"
-                                                                         suite-capture e)
-                                                                 (setf (aref safe-results i-capture) (cons nil 0.0)))))
-                                                        (setf (aref safe-error-output i-capture)
-                                                              (get-output-stream-string error-stream)))))
-                                                  :name (format nil "test-~a" suite-capture))))
+                                                (let ((suite-capture suite)
+                                                      (i-capture i))
+                                                  (bt:make-thread
+                                                   (lambda ()
+                                                     (let ((*error-output* (make-broadcast-stream))
+                                                           (sibyl.tools:*codebase-map-cache*
+                                                             (when sibyl.tools:*codebase-map-cache*
+                                                               (make-hash-table :test 'equal))))
+                                                       (handler-case
+                                                           (multiple-value-bind (results elapsed)
+                                                               (%time-call (lambda () (%run-suite-isolated suite-capture)))
+                                                             (setf (aref safe-results i-capture) (cons results elapsed)))
+                                                         (error (e)
+                                                           (setf (aref safe-error-output i-capture)
+                                                                 (format nil "~%[parallel-runner] Error in ~a: ~a~%"
+                                                                         suite-capture e))
+                                                           (setf (aref safe-results i-capture) (cons nil 0.0))))))
+                                                   :name (format nil "test-~a" suite-capture))))
                                     )
 
                                     (dolist (thread threads)

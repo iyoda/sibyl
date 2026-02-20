@@ -1812,3 +1812,90 @@
        (no-cache (assoc "cache_control" last-block :test #'equal)))
   (is (null no-cache)
       "Should not add cache_control when caching is disabled")))
+
+(test thinking-callback-emits-prefix-on-first-chunk
+  "Auto-generated test"
+  
+;; When *current-spinner* is NIL and stream is enabled,
+;; the callback should emit the [thinking] prefix before the first chunk.
+(let* ((sibyl.repl::*stream-enabled* t)
+       (sibyl.repl::*use-colors* nil)
+       (sibyl.repl::*current-spinner* nil)
+       (out (make-string-output-stream))
+       (*standard-output* out)
+       (cb (sibyl.repl::make-thinking-display-callback)))
+  (funcall cb "hello")
+  (let ((result (get-output-stream-string out)))
+    (is (search "[thinking]" result)
+        "prefix should appear on first chunk")
+    (is (search "hello" result)
+        "chunk content should appear")))
+)
+
+(test thinking-callback-no-prefix-on-subsequent-chunks
+  "Auto-generated test"
+  
+;; Subsequent chunks in the SAME block should NOT re-emit the prefix.
+(let* ((sibyl.repl::*stream-enabled* t)
+       (sibyl.repl::*use-colors* nil)
+       (sibyl.repl::*current-spinner* nil)
+       (out (make-string-output-stream))
+       (*standard-output* out)
+       (cb (sibyl.repl::make-thinking-display-callback)))
+  (funcall cb "first")
+  (funcall cb "second")
+  (funcall cb "third")
+  (let ((result (get-output-stream-string out)))
+    (is (= 1 (let ((count 0) (pos 0))
+               (loop (let ((found (search "[thinking]" result :start2 pos)))
+                       (if found
+                           (progn (incf count) (setf pos (1+ found)))
+                           (return count))))))
+        "prefix should appear exactly once across consecutive chunks")))
+)
+
+(test thinking-callback-re-emits-prefix-after-spinner-restart
+  "Auto-generated test"
+  
+;; KEY BUG REGRESSION TEST:
+;; After a tool call restarts the spinner, the next thinking block
+;; must re-emit the 💭/[thinking] prefix (and stop the spinner).
+;;
+;; We simulate: thinking block 1 (no spinner) → spinner restart → thinking block 2
+;; The prefix must appear TWICE: once per block.
+(let* ((sibyl.repl::*stream-enabled* t)
+       (sibyl.repl::*use-colors* nil)
+       (sibyl.repl::*current-spinner* nil)
+       (out (make-string-output-stream))
+       (*standard-output* out)
+       (cb (sibyl.repl::make-thinking-display-callback)))
+  ;; Block 1: no spinner, emit first chunk
+  (funcall cb "block-one")
+  ;; Simulate tool call restarting the spinner:
+  ;; We just set *current-spinner* to a fake "active" object that
+  ;; make-thinking-display-callback will detect and (attempt to) stop.
+  ;; Use a real spinner with no thread so stop-spinner won't block.
+  (let ((fake-spinner (sibyl.repl.spinner:start-spinner "Thinking...")))
+    ;; Immediately stop the background thread but keep the struct
+    ;; so we can re-set active=T to simulate "spinner running"
+    (sibyl.repl.spinner:stop-spinner fake-spinner)
+    ;; Now re-activate the flag so the callback thinks it's running
+    (setf (sibyl.repl.spinner::spinner-active fake-spinner) t)
+    (setf sibyl.repl::*current-spinner* fake-spinner))
+  ;; Block 2: spinner is "active" → callback must stop it and re-emit prefix
+  (funcall cb "block-two")
+  (let* ((result (get-output-stream-string out))
+         (count (let ((c 0) (pos 0))
+                  (loop (let ((found (search "[thinking]" result :start2 pos)))
+                          (if found
+                              (progn (incf c) (setf pos (1+ found)))
+                              (return c)))))))
+    (is (= 2 count)
+        (format nil "prefix should appear twice (once per block), got ~a in: ~s"
+                count result))
+    (is (search "block-one" result) "block 1 content should appear")
+    (is (search "block-two" result) "block 2 content should appear")
+    ;; Spinner should now be deactivated
+    (is (null sibyl.repl::*current-spinner*)
+        "spinner should be cleared after block 2 starts")))
+)

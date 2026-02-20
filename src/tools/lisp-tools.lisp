@@ -8,13 +8,6 @@
     (unless (find-package :sibyl.tools)
       (when (and packages (probe-file packages))
         (load packages)))
-    (ignore-errors (require :asdf))
-    (when (and (find-package :asdf)
-               (null (find-package :yason)))
-      (ignore-errors (asdf:load-system :yason)))
-    (when (and (find-package :asdf)
-               (null (find-package :fiveam)))
-      (ignore-errors (asdf:load-system :fiveam)))
     (let* ((tool-package (find-package :sibyl.tools))
            (deftool-symbol (and tool-package
                                 (find-symbol "DEFTOOL" tool-package))))
@@ -1312,4 +1305,3 @@ with --- a/PATH and +++ b/PATH headers."
         (let ((callers (%who-calls-get-callers symbol)))
           (return-from who-calls
             (%who-calls-format-callers symbol callers)))))))
-

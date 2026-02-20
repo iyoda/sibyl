@@ -400,7 +400,8 @@ Returns NIL when parsing fails."
     (error () nil)))
 
 (defun complete-anthropic-streaming (client messages tools)
-  "Stream Anthropic responses, invoking *streaming-text-callback* per text delta.
+  "Stream Anthropic responses, invoking *streaming-text-callback* per text delta
+and *streaming-thinking-callback* per thinking delta.
 Returns a reconstructed assistant message."
   (multiple-value-bind (system api-messages)
       (prepare-anthropic-messages messages)
@@ -417,10 +418,10 @@ Returns a reconstructed assistant message."
                            (append `(("system" . ,system-with-cache)) body-with-tools)
                            body-with-tools))
            (final-body-with-thinking (apply-anthropic-thinking final-body (client-model client)))
-            (text-parts nil)
-            (thinking-parts nil)
-            (signature-parts nil)
-            (tool-calls nil)
+           (text-parts nil)
+           (thinking-parts nil)
+           (signature-parts nil)
+           (tool-calls nil)
            (current-tool-id nil)
            (current-tool-name nil)
            (current-tool-input-parts nil)
@@ -431,14 +432,14 @@ Returns a reconstructed assistant message."
       (labels ((finalize-tool-call ()
                  (when current-tool-name
                    (let* ((json-str (if current-tool-input-parts
-                                         (format nil "~{~a~}" (nreverse current-tool-input-parts))
-                                         "{}"))
+                                        (format nil "~{~a~}" (nreverse current-tool-input-parts))
+                                        "{}"))
                           (args (handler-case
-                                     (let ((parsed-args (yason:parse json-str :object-as :hash-table)))
-                                       (if (hash-table-p parsed-args)
-                                           (hash-to-alist parsed-args)
-                                           parsed-args))
-                                   (error () nil))))
+                                    (let ((parsed-args (yason:parse json-str :object-as :hash-table)))
+                                      (if (hash-table-p parsed-args)
+                                          (hash-to-alist parsed-args)
+                                          parsed-args))
+                                  (error () nil))))
                      (push (make-tool-call
                             :id current-tool-id
                             :name current-tool-name
@@ -456,35 +457,39 @@ Returns a reconstructed assistant message."
              (when parsed
                (let ((parsed-event (getf parsed :event)))
                  (cond
-                    ((string= parsed-event "content_block_delta")
-                     (let ((delta-type (getf parsed :delta-type)))
-                       (cond
-                         ((string= delta-type "text_delta")
-                          (let ((text (getf parsed :text)))
-                            (when text
-                              (push text text-parts)
-                              (funcall *streaming-text-callback* text))))
-                          ((string= delta-type "thinking_delta")
-                           (let ((thinking (getf parsed :thinking)))
-                             (when thinking
-                               (push thinking thinking-parts))))
-                          ((string= delta-type "signature_delta")
-                           (let ((sig (getf parsed :signature)))
-                             (when sig
-                               (push sig signature-parts))))
-                          ((string= delta-type "input_json_delta")
-                          (let ((partial (getf parsed :partial-json)))
-                            (when partial
-                              (push partial current-tool-input-parts)))))))
-                    ((string= parsed-event "content_block_start")
-                     (let ((block-type (getf parsed :content-block-type)))
-                       (cond
-                         ((string= block-type "tool_use")
-                          (setf current-tool-id (getf parsed :tool-id)
-                                current-tool-name (getf parsed :tool-name)
-                                current-tool-input-parts nil))
-                         ((string= block-type "thinking")
-                          nil))))
+                   ((string= parsed-event "content_block_delta")
+                    (let ((delta-type (getf parsed :delta-type)))
+                      (cond
+                        ((string= delta-type "text_delta")
+                         (let ((text (getf parsed :text)))
+                           (when text
+                             (push text text-parts)
+                             (when *streaming-text-callback*
+                               (funcall *streaming-text-callback* text)))))
+                        ((string= delta-type "thinking_delta")
+                         (let ((thinking (getf parsed :thinking)))
+                           (when thinking
+                             (push thinking thinking-parts)
+                             ;; ★ リアルタイム表示コールバックを呼ぶ（修正箇所）
+                             (when *streaming-thinking-callback*
+                               (funcall *streaming-thinking-callback* thinking)))))
+                        ((string= delta-type "signature_delta")
+                         (let ((sig (getf parsed :signature)))
+                           (when sig
+                             (push sig signature-parts))))
+                        ((string= delta-type "input_json_delta")
+                         (let ((partial (getf parsed :partial-json)))
+                           (when partial
+                             (push partial current-tool-input-parts)))))))
+                   ((string= parsed-event "content_block_start")
+                    (let ((block-type (getf parsed :content-block-type)))
+                      (cond
+                        ((string= block-type "tool_use")
+                         (setf current-tool-id (getf parsed :tool-id)
+                               current-tool-name (getf parsed :tool-name)
+                               current-tool-input-parts nil))
+                        ((string= block-type "thinking")
+                         nil))))
                    ((string= parsed-event "content_block_stop")
                     (finalize-tool-call))
                    ((string= parsed-event "message_start")
@@ -498,29 +503,28 @@ Returns a reconstructed assistant message."
                              (list :input-tokens (or input-tokens-from-start 0)
                                    :output-tokens (or output-tokens-from-delta 0)
                                    :cache-read-tokens (or cache-read-tokens-from-start 0)
-                                    :cache-write-tokens (or cache-write-tokens-from-start 0)))))
-           (when usage-plist
-             (log-info "llm" "Tokens (streaming): input=~a output=~a cache-read=~a cache-write=~a"
-                       (getf usage-plist :input-tokens) (getf usage-plist :output-tokens)
-                       (getf usage-plist :cache-read-tokens) (getf usage-plist :cache-write-tokens)))
-           ;; Record server-side cache tokens for telemetry
-           (when usage-plist
-             (handler-case
-                 (let ((total-cache-tokens (+ (or cache-read-tokens-from-start 0)
-                                              (or cache-write-tokens-from-start 0))))
-                   (sibyl.cache:record-server-cache-tokens total-cache-tokens))
-               (error (e)
-                 (log-warn "llm" "Telemetry recording failed: ~a" e))))
-            (values
-            (assistant-message
-             (when text-parts
-               (string-join "" (nreverse text-parts)))
-             :tool-calls (nreverse tool-calls)
-             :thinking (when thinking-parts
-                         (string-join "" (nreverse thinking-parts)))
-             :thinking-signature (when signature-parts
-                                   (string-join "" (nreverse signature-parts))))
-            usage-plist))))))
+                                   :cache-write-tokens (or cache-write-tokens-from-start 0)))))
+          (when usage-plist
+            (log-info "llm" "Tokens (streaming): input=~a output=~a cache-read=~a cache-write=~a"
+                      (getf usage-plist :input-tokens) (getf usage-plist :output-tokens)
+                      (getf usage-plist :cache-read-tokens) (getf usage-plist :cache-write-tokens)))
+          (when usage-plist
+            (handler-case
+                (let ((total-cache-tokens (+ (or cache-read-tokens-from-start 0)
+                                             (or cache-write-tokens-from-start 0))))
+                  (sibyl.cache:record-server-cache-tokens total-cache-tokens))
+              (error (e)
+                (log-warn "llm" "Telemetry recording failed: ~a" e))))
+          (values
+           (assistant-message
+            (when text-parts
+              (string-join "" (nreverse text-parts)))
+            :tool-calls (nreverse tool-calls)
+            :thinking (when thinking-parts
+                        (string-join "" (nreverse thinking-parts)))
+            :thinking-signature (when signature-parts
+                                  (string-join "" (nreverse signature-parts))))
+           usage-plist))))))
 
 (defun anthropic-messages-url (client)
   "Build the messages endpoint URL. Appends ?beta=true for OAuth."

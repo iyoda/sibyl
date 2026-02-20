@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+
+echo "[pre-push] Running static checks..."
+sbcl --noinform --non-interactive --script "$ROOT_DIR/scripts/check-no-test-packages-in-src.lisp"
+
+echo "[pre-push] All checks passed."

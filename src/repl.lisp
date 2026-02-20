@@ -146,6 +146,14 @@ Returns TEXT unchanged when it is not a string."
    Prevents garbled escape sequences when parallel tool calls each fire the hook
    from separate worker threads.")
 
+(defun %spinner-stream-supported-p (&optional (stream *standard-output*))
+  "Return T when STREAM is suitable for background spinner updates.
+Spinner output assumes an interactive terminal stream; writing from a
+background thread to non-interactive streams (e.g., string streams used by
+tests) can trigger SBCL stream corruption warnings."
+  (and (streamp stream)
+       (ignore-errors (interactive-stream-p stream))))
+
 (defvar *last-interrupt-time* 0
   "Internal real time (from GET-INTERNAL-REAL-TIME) of the most recent Ctrl+C press.
    Used to detect double-press within 2 seconds for REPL exit.")
@@ -1043,11 +1051,12 @@ Returns TEXT unchanged when it is not a string."
               (progn (format-colored-text display :cyan) (format t "~%"))
               (format t "~a~%" display))
           (force-output)
-          ;; Restart spinner to give visual feedback during tool execution.
-          ;; The spinner runs until the next LLM streaming chunk arrives
-          ;; (which stops it via the streaming callback).
-          (let ((new-spinner (sibyl.repl.spinner:start-spinner "Thinking...")))
-            (setf *current-spinner* new-spinner)))))))
+          ;; Restart spinner only on interactive terminal streams.
+          ;; Non-interactive streams (e.g. with-output-to-string in tests)
+          ;; must avoid background spinner threads.
+          (when (%spinner-stream-supported-p *standard-output*)
+            (let ((new-spinner (sibyl.repl.spinner:start-spinner "Thinking...")))
+              (setf *current-spinner* new-spinner))))))))
 
 (defun format-tool-call-summary (tc &key (max-length 50))
   "Format tool call arguments into a human-readable short string.
@@ -1160,9 +1169,10 @@ Returns TEXT unchanged when it is not a string."
             (format t "~C[2m🗜️  Context compacted~C[0m~%" #\Escape #\Escape)
             (format t "🗜️  Context compacted~%"))
         (force-output)
-        ;; Restart Thinking... spinner — LLM is called right after compaction.
-        (let ((new-spinner (sibyl.repl.spinner:start-spinner "Thinking...")))
-          (setf *current-spinner* new-spinner))))))
+        ;; Restart spinner only on interactive terminal streams.
+        (when (%spinner-stream-supported-p *standard-output*)
+          (let ((new-spinner (sibyl.repl.spinner:start-spinner "Thinking...")))
+            (setf *current-spinner* new-spinner)))))))
 
 (defun make-tool-call-hook-v2 (&optional spinner)
   "Return a closure suitable for the :on-tool-call agent hook (v2).
@@ -1198,35 +1208,65 @@ Returns TEXT unchanged when it is not a string."
               (format-colored-text display :cyan)
               (format t "~a" display))
           (force-output)
-          (let ((new-spinner (sibyl.repl.spinner:start-spinner "Thinking...")))
-            (setf *current-spinner* new-spinner)))))))
+          (when (%spinner-stream-supported-p *standard-output*)
+            (let ((new-spinner (sibyl.repl.spinner:start-spinner "Thinking...")))
+              (setf *current-spinner* new-spinner))))))))
+
 
 (defun make-thinking-display-callback ()
   "Return a lambda suitable for *streaming-thinking-callback*.
-Displays thinking chunks in magenta ANSI style, prefixed with '💭 ' on the first chunk.
-Stops any active spinner before writing the first chunk.
+Displays thinking chunks in magenta ANSI style, prefixed with '💭 ' on the
+first chunk of EACH thinking block.
+
+A new thinking block is detected when *current-spinner* is active at the
+time a chunk arrives — indicating that a tool call restarted the spinner
+since the last thinking block ended.  In that case:
+  1. The spinner is stopped (preventing \r\e[2K from overwriting the text).
+  2. The '💭' prefix is re-emitted for the new block.
+
+Newline handling:
+  - After stopping a spinner: cursor is already at column 0 of a cleared
+    line (spinner's \r\e[2K), so the prefix is written on that line directly
+    (no leading newline needed, avoids a spurious blank line).
+  - Without an active spinner: cursor may be mid-line, so fresh-line is used
+    before emitting the prefix.
+
 Returns NIL when *stream-enabled* is NIL (streaming disabled)."
   (when *stream-enabled*
-    (let ((first-thinking-chunk-p t))
+    (let ((in-thinking-block nil))
       (lambda (thinking-chunk)
         (when (and thinking-chunk (plusp (length thinking-chunk)))
-          ;; On first thinking chunk: stop spinner and emit header
-          (when first-thinking-chunk-p
-            (setf first-thinking-chunk-p nil)
+          (let ((just-stopped-spinner nil))
+            ;; If a spinner is active it means a tool call has occurred since
+            ;; the last thinking block.  Stop it and reset the block flag so
+            ;; the prefix is re-emitted for this new block.
             (when (and *current-spinner*
                        (sibyl.repl.spinner:spinner-active-p *current-spinner*))
               (bt:with-lock-held (*spinner-output-lock*)
                 (sibyl.repl.spinner:stop-spinner *current-spinner*)
-                (setf *current-spinner* nil)))
+                (setf *current-spinner* nil))
+              (setf in-thinking-block nil
+                    just-stopped-spinner t))
+            ;; Emit the block header at the start of each new thinking block.
+            (unless in-thinking-block
+              (setf in-thinking-block t)
+              (if just-stopped-spinner
+                  ;; Spinner's \r\e[2K left cursor at col 0 of a cleared line.
+                  ;; Write the prefix directly on that line — no extra newline.
+                  (if *use-colors*
+                      (format t "~C[35m💭 ~C[0m" #\Escape #\Escape)
+                      (format t "[thinking] "))
+                  ;; No spinner was active; cursor may be mid-line after streamed
+                  ;; text or a previous thinking block.  Ensure a new line first.
+                  (if *use-colors*
+                      (format t "~%~C[35m💭 ~C[0m" #\Escape #\Escape)
+                      (format t "~%[thinking] ")))
+              (force-output))
+            ;; Write the chunk in magenta (or plain text).
             (if *use-colors*
-                (format t "~%~C[35m💭 ~C[0m" #\Escape #\Escape)
-                (format t "~%[thinking] "))
-            (force-output))
-          ;; Write each chunk in magenta
-          (if *use-colors*
-              (format t "~C[35m~a~C[0m" #\Escape thinking-chunk #\Escape)
-              (write-string thinking-chunk *standard-output*))
-          (force-output *standard-output*))))))
+                (format t "~C[35m~a~C[0m" #\Escape thinking-chunk #\Escape)
+                (write-string thinking-chunk *standard-output*))
+            (force-output *standard-output*)))))))
 
 (defun make-tool-result-hook ()
   "Return a closure suitable for the :on-tool-result agent hook.
