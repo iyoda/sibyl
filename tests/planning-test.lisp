@@ -46,6 +46,13 @@
     (is (= 1 (length (getf plan :phases))))
     (is (string= "Phase 1" (getf (first (getf plan :phases)) :title)))))
 
+(test plan-make-with-id-suffix
+  "make-plan appends normalized id-suffix to generated plan IDs."
+  (let ((plan (sibyl.plan:make-plan :title "Plan With Suffix"
+                                    :id-suffix "Auto Model Select")))
+    (is (stringp (getf plan :id)))
+    (is (search "-auto-model-select" (getf plan :id)))))
+
 (test plan-make-task
   "make-task returns a plist with required fields."
   (let ((task (sibyl.plan:make-task :title "Implement feature")))
@@ -256,6 +263,20 @@
         (progn
           (is (stringp result))
           (is (search "plan-" result)))
+      (cleanup-plan-dir dir))))
+
+(test tool-save-plan-with-id-suffix
+  "save-plan tool accepts id-suffix and appends it to new plan ID."
+  (let* ((dir    (make-temp-plan-dir))
+         (result (sibyl.tools:execute-tool
+                  "save-plan"
+                  (list (cons "title" "Tool Test Plan")
+                        (cons "id-suffix" "auto model select")
+                        (cons "plan-dir" (namestring dir))))))
+    (unwind-protect
+        (progn
+          (is (stringp result))
+          (is (search "-auto-model-select" result)))
       (cleanup-plan-dir dir))))
 
 (test tool-list-plans-basic

@@ -2,12 +2,51 @@
 
 (in-package #:sibyl.repl)
 
-(defun generate-session-id ()
-  "Generate a session ID in session-YYYYMMDD-HHMMSS-NNNNNN format."
+(defun %normalize-session-id-suffix (suffix)
+  "Normalize SUFFIX into a lowercase kebab-case fragment for session IDs.
+Returns NIL when SUFFIX is empty or has no ASCII alnum chars."
+  (when (and (stringp suffix) (string/= suffix ""))
+    (let ((out (make-string-output-stream))
+          (last-was-hyphen nil))
+      (labels ((emit-hyphen ()
+                 (unless last-was-hyphen
+                   (write-char #\- out)
+                   (setf last-was-hyphen t)))
+               (emit-char (ch)
+                 (write-char ch out)
+                 (setf last-was-hyphen nil)))
+        (loop for ch across (string-downcase suffix) do
+          (cond
+            ((or (and (char>= ch #\a) (char<= ch #\z))
+                 (and (char>= ch #\0) (char<= ch #\9)))
+             (emit-char ch))
+            ((or (char= ch #\Space)
+                 (char= ch #\Tab)
+                 (char= ch #\Newline)
+                 (char= ch #\_)
+                 (char= ch #\-)
+                 (char= ch #\/)
+                 (char= ch #\.)
+                 (char= ch #\+))
+             (emit-hyphen)))))
+      (let* ((raw (get-output-stream-string out))
+             (trimmed (string-trim '(#\-) raw)))
+        (when (string/= trimmed "")
+          (if (> (length trimmed) 40)
+              (subseq trimmed 0 40)
+              trimmed))))))
+
+(defun generate-session-id (&key suffix)
+  "Generate a session ID in session-YYYYMMDD-HHMMSS-NNNNNN format.
+When SUFFIX is provided, append a normalized readable fragment."
   (multiple-value-bind (second minute hour day month year)
       (get-decoded-time)
-    (format nil "session-~4,'0d~2,'0d~2,'0d-~2,'0d~2,'0d~2,'0d-~6,'0d"
-            year month day hour minute second (random 1000000))))
+    (let* ((base (format nil "session-~4,'0d~2,'0d~2,'0d-~2,'0d~2,'0d~2,'0d-~6,'0d"
+                         year month day hour minute second (random 1000000)))
+           (slug (%normalize-session-id-suffix suffix)))
+      (if slug
+          (format nil "~a-~a" base slug)
+          base))))
 
 (defun tool-call->sexp (tool-call)
   "Serialize TOOL-CALL object to a plist."

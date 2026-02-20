@@ -216,6 +216,7 @@
    #:list-available-models
    #:agent-switch-client
    #:create-client-for-model
+   #:api-key-for-provider
     #:call-with-retry))
 
 (defpackage #:sibyl.plan

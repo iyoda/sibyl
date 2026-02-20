@@ -7,14 +7,16 @@
 ;;; REPL commands
 ;;; ============================================================
 
+
 (defparameter *repl-commands*
   '(("/quit" . :quit) ("/exit" . :quit) ("/reset" . :reset) ("/new" . :reset)
     ("/tools" . :list-tools) ("/help" . :help) ("/history" . :history)
     ("/mcp" . :mcp) ("/plan" . :plan) ("/improve" . :improve)
     ("/review" . :review) ("/tokens" . :tokens) ("/model" . :model)
-    ("/cost-report" . :cost-report) ("/sessions" . :sessions)
+    ("/cost-report" . :cost-report) ("/cache-stats" . :cache-stats)
+    ("/sessions" . :sessions)
     ("/save" . :save-session) ("/load" . :load-session)
-    ("/colors" . :colors))
+    ("/colors" . :colors) ("/log" . :log))
   "Mapping of REPL commands to actions.")
 
 ;;; ============================================================
@@ -40,6 +42,12 @@
 (defvar *use-colors* t
   "Whether to use colored output in the REPL. Defaults to t (colors enabled).")
 
+(defvar *saved-log-stream* nil
+  "Saved log stream when log output is muted via /log off.")
+
+(defvar *muted-log-stream* nil
+  "Broadcast stream used while log output is muted via /log off.")
+
 (defvar *stream-enabled* t
   "When T, LLM responses are streamed token-by-token to the terminal.")
 
@@ -56,6 +64,10 @@
 
 (defvar *command-count* 0
   "Counter tracking the number of commands executed in the current REPL session.")
+
+(defvar *model-switch-history* nil
+  "List of model switch records, most recent first.
+Each entry is a plist (:model name :provider provider :timestamp time).")
 
 (defvar *current-session-id* nil
   "The session ID for the current REPL session.")
@@ -344,6 +356,46 @@ tests) can trigger SBCL stream corruption warnings."
        (format t "Usage: /colors [on|off]~%"))))
   nil)
 
+(defun log-output-muted-p ()
+  "Return T when log output is currently muted in this process."
+  (and *saved-log-stream*
+       (streamp *saved-log-stream*)
+       *muted-log-stream*
+       (eq *log-stream* *muted-log-stream*)))
+
+(defun handle-log-command (agent input)
+  "Handler for :log command to control log output visibility."
+  (declare (ignore agent))
+  (let* ((args (string-trim '(#\  #\Tab)
+                            (if (search "/log" input :test #'string-equal)
+                                (subseq input (length "/log"))
+                                input)))
+         (action (string-downcase args)))
+    (cond
+      ((or (string= action "") (string= action "status"))
+       (if (log-output-muted-p)
+           (format t "Log output is currently disabled.~%")
+           (format t "Log output is currently enabled.~%")))
+      ((or (string= action "off") (string= action "disable") (string= action "false"))
+       (if (log-output-muted-p)
+           (format t "Log output is already disabled.~%")
+           (progn
+             (setf *saved-log-stream* *log-stream*)
+             (setf *muted-log-stream* (make-broadcast-stream))
+             (setf *log-stream* *muted-log-stream*)
+             (format t "Log output disabled.~%"))))
+      ((or (string= action "on") (string= action "enable") (string= action "true"))
+       (if (log-output-muted-p)
+           (progn
+             (setf *log-stream* *saved-log-stream*)
+             (setf *saved-log-stream* nil
+                   *muted-log-stream* nil)
+             (format t "Log output enabled.~%"))
+           (format t "Log output is already enabled.~%")))
+      (t
+       (format t "Usage: /log [on|off|status]~%"))))
+  nil)
+
 (defun repl-command-p (input)
   "Check if INPUT is a REPL command. Returns the command keyword or NIL.
    Handles commands with arguments by extracting the first word."
@@ -618,23 +670,18 @@ tests) can trigger SBCL stream corruption warnings."
 
 
 (defun handle-model-command (agent input)
-  "Handler for :model command. Shows current model, lists models, or switches.
+  "Handler for :model command. Shows current model, lists models, switches, or shows history.
 
    Usage:
-     /model        — Show current model name, context window, and provider
-     /model list   — List all available models grouped by provider
-     /model <name> — Switch to a model by name, prefix, or alias (sonnet, opus, haiku, etc.)"
+     /model          — Show current model name, context window, and provider
+     /model list     — List all available models grouped by provider
+     /model history  — Show model switch history for this session
+     /model <name>   — Switch to a model by name, prefix, or alias (sonnet, opus, haiku, etc.)"
   (let ((arg (string-trim '(#\Space #\Tab) input)))
-    (cond
-      ;; /model (no args) — show current status
-      ((string= arg "")
-       (%model-show-status agent))
-      ;; /model list — show all available models
-      ((string-equal arg "list")
-       (%model-list-all agent))
-      ;; /model <name> — switch model
-      (t
-       (%model-switch agent arg))))
+    (cond ((string= arg "") (%model-show-status agent))
+          ((string-equal arg "list") (%model-list-all agent))
+          ((string-equal arg "history") (%model-show-history agent))
+          (t (%model-switch agent arg))))
   nil)
 
 (defun %model-show-status (agent)
@@ -688,24 +735,78 @@ tests) can trigger SBCL stream corruption warnings."
     (format t "~%  Aliases: ~{~a~^, ~}~%"
             (mapcar #'car sibyl.llm:*model-aliases*))))
 
+(defun %record-model-switch (model-name provider)
+  "Record a model switch in the history."
+  (push (list :model model-name
+              :provider provider
+              :timestamp (get-universal-time))
+        *model-switch-history*))
+
+(defun %model-show-history (agent)
+  "Show model switch history for the current session."
+  (declare (ignore agent))
+  (if (null *model-switch-history*)
+      (format t "~%No model switches in this session.~%")
+      (progn
+        (format t "~%Model Switch History (~d entries):~%" (length *model-switch-history*))
+        (loop for entry in *model-switch-history*
+              for i from 1
+              do (let ((model (getf entry :model))
+                       (provider (getf entry :provider))
+                       (ts (getf entry :timestamp)))
+                   (multiple-value-bind (sec min hour)
+                       (decode-universal-time ts)
+                     (format t "  ~2d. [~2,'0d:~2,'0d:~2,'0d] ~a (~a)~%"
+                             i hour min sec model
+                             (string-downcase (symbol-name provider)))))))))
+
+
+
 (defun %model-switch (agent spec)
   "Switch agent's model based on user SPEC string.
 Uses resolve-model-spec for fuzzy matching, then creates client and switches.
-Shows did-you-mean suggestions when no match is found."
+Records successful switches in *model-switch-history*.
+Shows did-you-mean suggestions when no match is found.
+Handles errors during client creation and switching gracefully."
   (let ((config (sibyl.llm:resolve-model-spec spec)))
     (if (null config)
         (progn
-          (format t "~%Unknown model: ~a~%" spec)
+          (format t "~%")
+          (format-colored-text "✗ " :red)
+          (format t "Unknown model: ~a~%" spec)
           (let ((suggestions (sibyl.llm::suggest-similar-models spec)))
             (if suggestions
-                (format t "Did you mean:~%~{  ~a~%~}~%" suggestions)
+                (progn
+                  (format t "Did you mean:~%")
+                  (dolist (s suggestions)
+                    (format t "  ")
+                    (format-colored-text (format nil "~a" s) :cyan)
+                    (format t "~%")))
                 (format t "Try /model list to see available models.~%"))))
-        (let* ((new-client (sibyl.llm:create-client-for-model config))
-               (new-name (sibyl.llm:model-name config)))
-          (sibyl.llm:agent-switch-client agent new-client)
-          (format t "~%Switched to: ~a (~a)~%" new-name
-                  (string-downcase
-                   (symbol-name (sibyl.llm:model-provider config))))))))
+        (handler-case
+            (let* ((new-client (sibyl.llm:create-client-for-model config))
+                   (new-name (sibyl.llm:model-name config))
+                   (provider (sibyl.llm:model-provider config)))
+              (sibyl.llm:agent-switch-client agent new-client)
+              (%record-model-switch new-name provider)
+              (format t "~%")
+              (format-colored-text "✓ " :green)
+              (format t "Switched to: ")
+              (format-colored-text (format nil "~a" new-name) :cyan)
+              (format t " (~a)~%" (string-downcase (symbol-name provider))))
+          (sibyl.conditions:config-missing-key-error (e)
+            (format t "~%")
+            (format-colored-text "✗ " :red)
+            (format t "Missing API key for ~a provider.~%"
+                    (string-downcase (symbol-name (sibyl.llm:model-provider config))))
+            (format t "Please set: ")
+            (format-colored-text (format nil "~a" (slot-value e 'sibyl.conditions::key)) :yellow)
+            (format t "~%"))
+          (error (e)
+            (format t "~%")
+            (format-colored-text "✗ " :red)
+            (format t "Error switching to ~a: ~a~%"
+                    (sibyl.llm:model-name config) e))))))
 
 (defun save-cost-log (report)
   "Persist a SESSION-COST-REPORT to ~/.sibyl/cost-log.json.
@@ -762,6 +863,54 @@ Shows did-you-mean suggestions when no match is found."
             (when saved-path
               (format t "  [Saved to ~a]~%" saved-path)))
           report)))
+  nil)
+
+(defun handle-cache-stats-command (agent input)
+  "Handler for /cache-stats command. Shows session cache performance.
+   Displays server-side cache hit rate, tokens saved, and cost savings,
+   plus client-side response cache statistics."
+  (declare (ignore agent input))
+  (let* ((tracker (when sibyl.agent:*current-agent*
+                    (sibyl.agent:agent-token-tracker sibyl.agent:*current-agent*)))
+         ;; Server-side prompt cache stats
+         (cache-read (if tracker (sibyl.llm::token-tracker-cache-read-tokens tracker) 0))
+         (cache-write (if tracker (sibyl.llm::token-tracker-cache-write-tokens tracker) 0))
+         (total-input (if tracker (sibyl.llm::token-tracker-input-tokens tracker) 0))
+         (hit-rate (if tracker (sibyl.llm::tracker-cache-hit-rate tracker) 0.0))
+         ;; Cost savings calculation
+         (model-name (when (and sibyl.agent:*current-agent*
+                                (sibyl.agent:agent-client sibyl.agent:*current-agent*))
+                       (ignore-errors
+                        (sibyl.llm::client-model
+                         (sibyl.agent:agent-client sibyl.agent:*current-agent*)))))
+         (pricing (when model-name
+                    (sibyl.llm::lookup-model-pricing model-name)))
+         (price-input (if pricing (getf pricing :input 3.0) 3.0))
+         (price-cr (if pricing (getf pricing :cache-read 0.30) 0.30))
+         (savings (* cache-read (/ (- price-input price-cr) 1000000.0d0)))
+         ;; Client-side response cache stats
+         (telemetry (sibyl.cache:get-cache-telemetry))
+         (client-hits (getf telemetry :client-hits 0))
+         (client-misses (getf telemetry :client-misses 0))
+         (client-rate (getf telemetry :hit-rate 0.0))
+         (rcache (sibyl.cache:response-cache-stats))
+         (entries (if rcache (getf rcache :size) 0))
+         (max-entries (if rcache (getf rcache :max-size) 0)))
+    (format t "~%╔══════════════════════════════════════╗~%")
+    (format t "║         Cache Performance             ║~%")
+    (format t "╠══════════════════════════════════════╣~%")
+    (format t "║  Server-side (prompt caching)         ║~%")
+    (format t "║    Cache read tokens:  ~12:d    ║~%" cache-read)
+    (format t "║    Cache write tokens: ~12:d    ║~%" cache-write)
+    (format t "║    Total input tokens: ~12:d    ║~%" total-input)
+    (format t "║    Hit rate:           ~8,1f%%       ║~%" (* 100.0 hit-rate))
+    (format t "║    Cost saved:        $~8,4f       ║~%" savings)
+    (format t "╠══════════════════════════════════════╣~%")
+    (format t "║  Response cache (client-side)         ║~%")
+    (format t "║    Hits / Misses:    ~5d / ~5d     ║~%" client-hits client-misses)
+    (format t "║    Hit rate:           ~8,1f%%       ║~%" (* 100.0 client-rate))
+    (format t "║    Entries:          ~5d / ~5d     ║~%" entries max-entries)
+    (format t "╚══════════════════════════════════════╝~%"))
   nil)
 
 
@@ -834,6 +983,7 @@ Shows did-you-mean suggestions when no match is found."
 
 ;;; Command handler registry
 
+
 (defparameter *command-handlers*
   (list
    (cons :quit     (list :handler #'handle-quit-command
@@ -860,6 +1010,8 @@ Shows did-you-mean suggestions when no match is found."
                          :description "Switch or show current model"))
    (cons :cost-report (list :handler #'handle-cost-report-command
                             :description "Show cost breakdown"))
+   (cons :cache-stats (list :handler #'handle-cache-stats-command
+                            :description "Show cache performance stats"))
    (cons :sessions (list :handler #'handle-sessions-command
                          :description "List saved sessions"))
    (cons :save-session (list :handler #'handle-save-session-command
@@ -867,7 +1019,9 @@ Shows did-you-mean suggestions when no match is found."
    (cons :load-session (list :handler #'handle-load-session-command
                              :description "Load a saved session"))
    (cons :colors   (list :handler #'handle-colors-command
-                         :description "Toggle colored output")))
+                         :description "Toggle colored output"))
+   (cons :log      (list :handler #'handle-log-command
+                         :description "Enable, disable, or show log output status")))
   "Mapping of command keywords to handler plists (:handler :description :hidden).")
 
 ;;; ============================================================
@@ -1674,6 +1828,7 @@ Otherwise, use model-specific optimized prompt for Ollama models."
                      (system-prompt sibyl.agent::*default-system-prompt*)
                      (name "Sibyl")
                      session-id
+                     session-id-suffix
                      (auto-save-interval 300))
   "Start the interactive REPL.
 
@@ -1682,7 +1837,10 @@ Otherwise, use model-specific optimized prompt for Ollama models."
        (sibyl:start-repl :client (sibyl:make-anthropic-client)))
 
    Or with an existing agent:
-     (start-repl :client my-client)"
+     (start-repl :client my-client)
+
+   Optional:
+     :session-id-suffix \"short-label\" for new session IDs."
   
   (let* ((effective-prompt (%select-system-prompt client system-prompt))
          (max-steps-config (sibyl.config:config-value "agent.max-steps" 50))
@@ -1750,9 +1908,11 @@ Otherwise, use model-specific optimized prompt for Ollama models."
                 (format *error-output*
                         "~&Warning: session ~a not found, starting fresh~%"
                         session-id)
-                (setf *current-session-id* (generate-session-id)))))
+                (setf *current-session-id*
+                      (generate-session-id :suffix session-id-suffix)))))
         ;; New session.
-        (setf *current-session-id* (generate-session-id)))
+        (setf *current-session-id*
+              (generate-session-id :suffix session-id-suffix)))
     (print-banner)
     (format t "  Session: ~a~%" *current-session-id*)
     ;; Start auto-save timer

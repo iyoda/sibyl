@@ -92,6 +92,37 @@
   "Test that /review is recognized as a command."
   (is (eq :review (sibyl.repl:repl-command-p "/review"))))
 
+(test log-command-registered
+  "Test that /log command is registered in *repl-commands*."
+  (is (assoc "/log" sibyl.repl::*repl-commands* :test #'string-equal))
+  (is (eq :log (cdr (assoc "/log" sibyl.repl::*repl-commands*
+                           :test #'string-equal)))))
+
+(test log-command-recognized
+  "Test that /log is recognized as a command."
+  (is (eq :log (sibyl.repl:repl-command-p "/log"))))
+
+(test help-includes-log
+  "Test that /help output includes /log command."
+  (let ((output (with-output-to-string (*standard-output*)
+                  (sibyl.repl::handle-repl-command :help nil))))
+    (is (search "/log" output :test #'string-equal))))
+
+(test log-command-off-on-roundtrip
+  "Test that /log off mutes output and /log on restores the previous stream."
+  (let* ((original-stream (make-string-output-stream))
+         (sibyl.logging:*log-stream* original-stream)
+         (sibyl.repl::*saved-log-stream* nil)
+         (sibyl.repl::*muted-log-stream* nil))
+    (with-output-to-string (*standard-output*)
+      (sibyl.repl::handle-log-command nil "/log off"))
+    (is (sibyl.repl::log-output-muted-p))
+    (is (eq sibyl.logging:*log-stream* sibyl.repl::*muted-log-stream*))
+    (with-output-to-string (*standard-output*)
+      (sibyl.repl::handle-log-command nil "/log on"))
+    (is (not (sibyl.repl::log-output-muted-p)))
+    (is (eq sibyl.logging:*log-stream* original-stream))))
+
 (test help-includes-review
   "Test that /help output includes /review command."
   (let ((output (with-output-to-string (*standard-output*)

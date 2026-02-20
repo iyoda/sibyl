@@ -23,11 +23,50 @@
 
 ;;; ── ID generation ────────────────────────────────────────────────────────
 
-(defun %generate-plan-id ()
-  "Generate a unique plan ID using timestamp + random suffix."
-  (format nil "plan-~a-~a"
-          (get-universal-time)
-          (random 1000000)))
+(defun %normalize-plan-id-suffix (suffix)
+  "Normalize SUFFIX into a lowercase kebab-case fragment for plan IDs.
+Returns NIL when SUFFIX is empty or does not contain any ASCII alnum chars."
+  (when (and (stringp suffix) (string/= suffix ""))
+    (let ((out (make-string-output-stream))
+          (last-was-hyphen nil))
+      (labels ((emit-hyphen ()
+                 (unless last-was-hyphen
+                   (write-char #\- out)
+                   (setf last-was-hyphen t)))
+               (emit-char (ch)
+                 (write-char ch out)
+                 (setf last-was-hyphen nil)))
+        (loop for ch across (string-downcase suffix) do
+          (cond
+            ((or (and (char>= ch #\a) (char<= ch #\z))
+                 (and (char>= ch #\0) (char<= ch #\9)))
+             (emit-char ch))
+            ((or (char= ch #\Space)
+                 (char= ch #\Tab)
+                 (char= ch #\Newline)
+                 (char= ch #\_)
+                 (char= ch #\-)
+                 (char= ch #\/)
+                 (char= ch #\.)
+                 (char= ch #\+))
+             (emit-hyphen)))))
+      (let* ((raw (get-output-stream-string out))
+             (trimmed (string-trim '(#\-) raw)))
+        (when (string/= trimmed "")
+          (if (> (length trimmed) 40)
+              (subseq trimmed 0 40)
+              trimmed))))))
+
+(defun %generate-plan-id (&key suffix)
+  "Generate a unique plan ID using timestamp + random suffix.
+When SUFFIX is provided, append a normalized readable fragment."
+  (let* ((base (format nil "plan-~a-~a"
+                       (get-universal-time)
+                       (random 1000000)))
+         (slug (%normalize-plan-id-suffix suffix)))
+    (if slug
+        (format nil "~a-~a" base slug)
+        base)))
 
 (defun %generate-task-id ()
   "Generate a unique task ID."
@@ -65,17 +104,18 @@ TASKS  — list of task plists."
         :status status
         :tasks (or tasks nil)))
 
-(defun make-plan (&key title description (status :draft) phases notes)
+(defun make-plan (&key title description (status :draft) phases notes id-suffix)
   "Create a plan plist.
 TITLE       — required string.
 DESCRIPTION — optional string.
 STATUS      — keyword: :draft :in-progress :completed :abandoned (default :draft).
 PHASES      — list of phase plists.
-NOTES       — optional string."
+NOTES       — optional string.
+ID-SUFFIX   — optional short identifier appended to generated plan ID."
   (unless (and (stringp title) (string/= title ""))
     (error "make-plan: :title must be a non-empty string"))
   (let ((now (sibyl.util:timestamp-now)))
-    (list :id (%generate-plan-id)
+    (list :id (%generate-plan-id :suffix id-suffix)
           :title title
           :description (or description "")
           :status status
@@ -357,5 +397,4 @@ Returns T on success, NIL if not found."
 ;;; ── deftool registrations ────────────────────────────────────────────────
 ;;; These are defined in sibyl.tools package via the tools protocol.
 ;;; We use a helper macro to stay in sibyl.plan but register into sibyl.tools.
-
 

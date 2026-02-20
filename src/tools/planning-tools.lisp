@@ -28,6 +28,8 @@ Returns the plan ID."
     (:name "phases"      :type "string"  :required nil :description
      "S-expression string: list of phase plists (from make-phase)")
     (:name "notes"       :type "string"  :required nil :description "Free-form notes")
+    (:name "id-suffix"   :type "string"  :required nil :description
+     "Optional short suffix added to new plan IDs (e.g. auto-model-select)")
     (:name "plan-id"     :type "string"  :required nil :description
      "Existing plan ID to update (omit to create new)")
     (:name "plan-dir"    :type "string"  :required nil :description
@@ -37,6 +39,7 @@ Returns the plan ID."
            (description (or (getf args :description) ""))
            (phases-str  (getf args :phases))
            (notes       (or (getf args :notes) ""))
+           (id-suffix   (getf args :id-suffix))
            (plan-id     (getf args :plan-id))
            (dir         (%planning-resolve-dir (getf args :plan-dir))))
       (unless (and title (stringp title) (string/= title ""))
@@ -69,7 +72,8 @@ Returns the plan ID."
                   (sibyl.plan:make-plan :title title
                                         :description description
                                         :phases phases
-                                        :notes notes))))
+                                        :notes notes
+                                        :id-suffix id-suffix))))
         (sibyl.plan:save-plan plan :directory dir)
         (format nil "~a" (getf plan :id))))))
 

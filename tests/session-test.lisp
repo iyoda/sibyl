@@ -182,6 +182,13 @@
     (is (> (length id) 20))
     (is (eql 0 (search "session-" id)))))
 
+(test test-generate-session-id-with-suffix
+  "Generated ID appends normalized suffix."
+  (let ((id (sibyl.repl:generate-session-id :suffix "Auto Model Select")))
+    (is (stringp id))
+    (is (eql 0 (search "session-" id)))
+    (is (search "-auto-model-select" id))))
+
 (test test-unique-session-ids
   "Two generated IDs are different (random suffix)."
   (let ((id1 (sibyl.repl:generate-session-id))
