@@ -268,6 +268,7 @@
         #:*codebase-map-cache*
      #:execute-tool-calls-parallel
      #:*parallel-tool-threshold*
+     #:*allowed-tools*
         #:with-codebase-map-cache))
 
 (defpackage #:sibyl.agent

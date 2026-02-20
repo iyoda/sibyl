@@ -332,13 +332,16 @@ Falls back to any idle agent when no role match is found."
 
 (defmethod execute-agent-task ((agent specialized-agent) (task agent-task))
   "Execute a task by invoking agent-run with the task description.
+Binds *allowed-tools* to the role's tool list for runtime filtering.
 Marks the task :failed on error and records the condition message as the result."
   (setf (task-status task) :in-progress)
-  (handler-case
-      (agent-run agent (task-description task))
-    (error (e)
-      (setf (task-status task) :failed)
-      (let ((msg (format nil "ERROR: ~a" e)))
-        (setf (task-result task) msg)
-        msg))))
+  (let ((role-tool-list (role-tools (agent-role agent))))
+    (handler-case
+        (let ((sibyl.tools:*allowed-tools* role-tool-list))
+          (agent-run agent (task-description task)))
+      (error (e)
+        (setf (task-status task) :failed)
+        (let ((msg (format nil "ERROR: ~a" e)))
+          (setf (task-result task) msg)
+          msg)))))
 

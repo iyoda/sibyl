@@ -34,10 +34,10 @@
 
 (test format-bytes-human-basic
   "format-bytes-human formats bytes, KB, MB"
-  (is (string= "500 B" (with-output-to-string (s) (sibyl.repl.display:format-bytes-human 500 s))))
-  (is (string= "1.0 KB" (with-output-to-string (s) (sibyl.repl.display:format-bytes-human 1024 s))))
-  (is (string= "14.9 KB" (with-output-to-string (s) (sibyl.repl.display:format-bytes-human 15258 s))))
-  (is (string= "1.0 MB" (with-output-to-string (s) (sibyl.repl.display:format-bytes-human (* 1024 1024) s)))))
+  (is (string= "500B" (with-output-to-string (s) (sibyl.repl.display:format-bytes-human 500 s))))
+  (is (string= "1.0KB" (with-output-to-string (s) (sibyl.repl.display:format-bytes-human 1024 s))))
+  (is (string= "14.9KB" (with-output-to-string (s) (sibyl.repl.display:format-bytes-human 15258 s))))
+  (is (string= "1.0MB" (with-output-to-string (s) (sibyl.repl.display:format-bytes-human (* 1024 1024) s)))))
 
 ;;; ============================================================
 ;;; format-duration tests
@@ -195,7 +195,7 @@
       (is (search "read-file" output))
       (is (search "(src/repl.lisp)" output))
       (is (search "0.02s" output))
-      (is (search "14.9 KB" output)))))
+      (is (search "14.9KB" output)))))
 
 (test format-tool-result-line-success-colors
   "format-tool-result-line uses green ✓ when *use-colors* is T"
@@ -207,7 +207,18 @@
       (is (search (string #\Escape) output))  ; ANSI code present
       (is (search "32m" output))              ; green color code
       (is (search "1.20s" output))
-      (is (search "500 B" output)))))
+      (is (search "500B" output)))))
+
+(test format-tool-result-line-time-size-colors-customizable
+  "format-tool-result-line applies configured colors to elapsed time and size."
+  (let ((tc (sibyl.llm:make-tool-call :name "shell" :id "tc6b"
+                                       :arguments '(("command" . "pwd"))))
+        (sibyl.repl.display:*use-colors* t)
+        (sibyl.repl.display::*tool-result-time-color* :magenta)
+        (sibyl.repl.display::*tool-result-size-color* :yellow))
+    (let ((output (sibyl.repl.display:format-tool-result-line tc "output" 1.2 500)))
+      (is (search "35m" output)) ; magenta time
+      (is (search "33m" output))))) ; yellow size
 
 (test format-tool-result-line-failure-basic
   "format-tool-result-line produces failure line with ✗"
@@ -244,6 +255,40 @@
       (is (not (search "B" output)))  ; no size indicator
       (is (not (search "KB" output))))))
 
+(test format-tool-result-line-eval-form-error-is-single-line
+  "eval-form output should keep args/error labels compact and single-line."
+  (let ((tc (sibyl.llm:make-tool-call
+             :name "eval-form" :id "tc9a"
+             :arguments
+             '(("form" . ";; Find the pending task ID in Phase 1
+(let ((plan 1))
+  plan)"))))
+        (sibyl.repl.display:*use-colors* nil))
+    (let ((output (sibyl.repl.display:format-tool-result-line
+                   tc
+                   "Error: blocked unsafe form during eval"
+                   0.00
+                   0)))
+      (is (search "✗" output))
+      (is (search "eval-form" output))
+      (is (search "(;; Find the pending task ID in Phase 1" output))
+      (is (not (search (string #\Newline) output)))
+      (is (search "Error: blocked unsafe form" output)))))
+
+(test format-tool-result-line-run-tests-failures
+  "run-tests with failed tests should show failure count instead of generic Error."
+  (let ((tc (sibyl.llm:make-tool-call :name "run-tests" :id "tc9b"
+                                      :arguments '(("suite" . "sibyl-tests"))))
+        (sibyl.repl.display:*use-colors* nil)
+        (result "{\"total\":42,\"passed\":40,\"failed\":2,\"failures\":[]}"))
+    (let ((output (sibyl.repl.display:format-tool-result-line tc result 0.02 0)))
+      (is (search "✗" output))
+      (is (search "run-tests" output))
+      (is (search "(sibyl-tests)" output))
+      (is (search "0.02s" output))
+      (is (search "2/42 failed" output))
+      (is (not (search " Error" output))))))
+
 (test format-tool-result-line-multiple-args
   "format-tool-result-line shows multiple args for grep tool"
   (let ((tc (sibyl.llm:make-tool-call :name "grep" :id "tc10"
@@ -254,4 +299,4 @@
       (is (search "grep" output))
       (is (search "(defun src/)" output))
       (is (search "0.30s" output))
-      (is (search "1.0 KB" output)))))
+      (is (search "1.0KB" output)))))

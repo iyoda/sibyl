@@ -444,3 +444,29 @@
           "Task must be :completed")
       (is (string= "real-result" (task-result task))
           "With task-fn, result must equal agent-run's return value"))))
+
+(test execute-agent-task-filters-tools-by-role
+  "Auto-generated test"
+  
+;; A specialized-agent with role "tester" (tools: write-test, run-tests, read-sexp)
+;; should only have those tools available during execute-agent-task.
+;; We capture the agent's available-tools at execution time via a mock.
+(let* ((captured-tools nil)
+       (tester-agent (sibyl.multi-agent.tests::make-mock-agent
+                       :role-name "tester"
+                       :tools '("write-test" "run-tests" "read-sexp")
+                       :response "test-done"))
+       (task (sibyl.multi-agent.tests::make-test-task "Run all tests")))
+  ;; Override agent-run to capture the agent's tool list at call time
+  (defmethod sibyl.agent:agent-run :around ((agent sibyl.multi-agent.tests::mock-specialized-agent) input)
+    (setf captured-tools (sibyl.agent:role-tools (sibyl.agent:agent-role agent)))
+    (call-next-method))
+  (sibyl.agent:execute-agent-task tester-agent task)
+  ;; The role's tools should be respected
+  (is (not (null captured-tools))
+      "Tools must be captured during execution")
+  (is (member "run-tests" captured-tools :test #'string=)
+      "Tester role must have run-tests tool")
+  (is (not (member "write-file" captured-tools :test #'string=))
+      "Tester role must NOT have write-file tool"))
+)

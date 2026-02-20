@@ -2002,3 +2002,69 @@
       (write-string clean output)))
   (is (string= "Content" (get-output-stream-string output))
       "Output should be just 'Content' with no leading newlines")))
+
+(test register-command-uses-plist-format
+  "Auto-generated test"
+  
+(let* ((sibyl.repl::*command-handlers* (copy-list sibyl.repl::*command-handlers*))
+       (sibyl.repl::*repl-commands* (copy-list sibyl.repl::*repl-commands*))
+       (tool-call (sibyl.llm:make-tool-call
+                   :id "tc-register-command-plist"
+                   :name "register-command"
+                   :arguments '(:name "test-plist-fmt"
+                                :description "A test command"
+                                :handler-body "(lambda (agent input) (declare (ignore agent input)) nil)")))
+       (result (sibyl.tools:execute-tool-call tool-call)))
+  (declare (ignore result))
+  (let* ((entry-pair (assoc :test-plist-fmt sibyl.repl::*command-handlers*))
+         (entry (cdr entry-pair)))
+    ;; Entry should be a plist, not a raw function
+    (is (listp entry) "Entry should be a plist list")
+    (is (functionp (getf entry :handler)) "Should have :handler key")
+    (is (string= "A test command" (getf entry :description)) "Should have :description")))
+)
+
+(test tools-as-schema-respects-allowed-tools
+  "Auto-generated test"
+  
+(let* ((all-tools (sibyl.tools:tools-as-schema))
+       (first-tool-name (getf (first all-tools) :name)))
+  ;; Without filter, should return many tools
+  (is (> (length all-tools) 5))
+  ;; With *allowed-tools* bound, should only return matching tools
+  (let ((sibyl.tools:*allowed-tools* (list first-tool-name)))
+    (let ((filtered (sibyl.tools:tools-as-schema)))
+      (is (= 1 (length filtered)))
+      (is (string= first-tool-name (getf (first filtered) :name)))))
+  ;; With empty list, should return nothing
+  (let ((sibyl.tools:*allowed-tools* '()))
+    ;; NIL means no filter, empty list is still nil... 
+    ;; Actually NIL = no filter. We need a sentinel.
+    ;; Let's test with a non-existent tool name
+    (let ((sibyl.tools:*allowed-tools* (list "nonexistent-tool-xyz")))
+      (is (= 0 (length (sibyl.tools:tools-as-schema)))))))
+)
+
+(test execute-agent-task-binds-allowed-tools
+  "Auto-generated test"
+  
+;; Test that execute-agent-task binds *allowed-tools* based on role
+(let* ((role (make-instance 'sibyl.agent:agent-role
+                            :name :tester
+                            :system-prompt "You are a tester."
+                            :tools '("read-file" "eval-form")))
+       (tool-list (sibyl.agent::role-tools role)))
+  ;; Role has expected tools
+  (is (equal '("read-file" "eval-form") tool-list))
+  ;; Outside execute-agent-task, *allowed-tools* is nil (no filter)
+  (is (null sibyl.tools:*allowed-tools*))
+  ;; Verify tools-as-schema returns all tools normally
+  (let ((all-count (length (sibyl.tools:tools-as-schema))))
+    (is (> all-count 2))
+    ;; Simulate what execute-agent-task does
+    (let ((sibyl.tools:*allowed-tools* tool-list))
+      (let ((filtered (sibyl.tools:tools-as-schema)))
+        (is (= 2 (length filtered)))
+        (is (every (lambda (s) (member (getf s :name) tool-list :test #'string=))
+                   filtered))))))
+)

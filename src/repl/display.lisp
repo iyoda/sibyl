@@ -12,6 +12,12 @@
 (defparameter *use-colors* t
   "When T, enable ANSI color codes in output. When NIL, output plain text.")
 
+(defparameter *tool-result-time-color* :cyan
+  "ANSI color keyword used for elapsed time in tool result lines.")
+
+(defparameter *tool-result-size-color* :blue
+  "ANSI color keyword used for output size in tool result lines.")
+
 ;;; ============================================================
 ;;; Formatting functions
 ;;; ============================================================
@@ -28,14 +34,14 @@
 
 (defun format-bytes-human (bytes &optional (stream *standard-output*))
   "Format byte count in human-readable form.
-   Examples: 500 B, 14.9 KB, 1.0 MB"
+   Examples: 500B, 14.9KB, 1.0MB"
   (cond
     ((< bytes 1024)
-     (format stream "~d B" bytes))
+     (format stream "~dB" bytes))
     ((< bytes (* 1024 1024))
-     (format stream "~,1f KB" (/ bytes 1024.0)))
+     (format stream "~,1fKB" (/ bytes 1024.0)))
     (t
-     (format stream "~,1f MB" (/ bytes (* 1024.0 1024.0))))))
+     (format stream "~,1fMB" (/ bytes (* 1024.0 1024.0))))))
 
 (defun format-duration (seconds &optional (stream *standard-output*))
   "Format duration in seconds.
@@ -109,6 +115,39 @@
 ;;; Tool execution display
 ;;; ============================================================
 
+(defun %normalize-inline-whitespace (text)
+  "Return TEXT with all whitespace normalized to single spaces."
+  (let ((out (make-string-output-stream))
+        (pending-space nil))
+    (loop for ch across (or text "")
+          do (if (member ch '(#\Space #\Tab #\Newline #\Return))
+                 (setf pending-space t)
+                 (progn
+                   (when pending-space
+                     (write-char #\Space out))
+                   (write-char ch out)
+                   (setf pending-space nil))))
+    (string-trim '(#\Space #\Tab #\Newline #\Return)
+                 (get-output-stream-string out))))
+
+(defun %truncate-with-ellipsis (text max-length)
+  "Truncate TEXT to MAX-LENGTH and append ellipsis when needed."
+  (if (and text (> (length text) max-length))
+      (format nil "~a..." (subseq text 0 max-length))
+      text))
+
+(defun %extract-error-label (result &key (max-length 60))
+  "Build a short one-line error label from RESULT."
+  (let* ((normalized (%normalize-inline-whitespace (or result "")))
+         (has-colon-prefix (and (>= (length normalized) 6)
+                                (string= "Error:" normalized :end2 6)))
+         (has-space-prefix (and (>= (length normalized) 6)
+                                (string= "Error " normalized :end2 6)))
+         (base (if (or has-colon-prefix has-space-prefix)
+                   normalized
+                   (format nil "Error: ~a" normalized))))
+    (%truncate-with-ellipsis base max-length)))
+
 (defun %extract-tool-args (tool-call &key (max-length 50))
   "Extract primary argument values from a tool-call for display.
    Returns a string like '(ls -la)' or '(src/repl.lisp)'.
@@ -143,12 +182,14 @@
                            (let ((pair (assoc k args :test #'string=)))
                              (when pair
                                (let ((v (cdr pair)))
-                                 (if (stringp v) v (format nil "~a" v))))))
+                                 (%normalize-inline-whitespace
+                                  (if (stringp v) v (format nil "~a" v)))))))
                          primary-keys))
                ;; Fallback: first argument value
                (when args
                  (let ((v (cdr (first args))))
-                   (list (if (stringp v) v (format nil "~a" v)))))))
+                   (list (%normalize-inline-whitespace
+                          (if (stringp v) v (format nil "~a" v))))))))
          ;; Join values
          (summary (if values-to-show
                       (format nil "~{~a~^ ~}" values-to-show)
@@ -157,14 +198,11 @@
       ((string= summary "") "")
       ;; Value already has parentheses (Lisp forms) — display as-is
       ((and (> (length summary) 0) (char= (char summary 0) #\())
-       (if (> (length summary) max-length)
-           (format nil "~a..." (subseq summary 0 max-length))
-           summary))
+       (%truncate-with-ellipsis summary max-length))
       ;; Normal case — wrap in parentheses
       (t
-       (if (> (length summary) max-length)
-           (format nil "(~a...)" (subseq summary 0 max-length))
-           (format nil "(~a)" summary))))))
+       (let ((short (%truncate-with-ellipsis summary max-length)))
+         (format nil "(~a)" short))))))
 
 (defun format-tool-start-line (tool-call)
   "Format tool execution start line.
@@ -175,32 +213,60 @@
   "Format tool execution result line with timing and size.
    Returns a string with ✓ (success) or ✗ (error), tool name, args, time, and size.
    Examples:
-     ✓ read-file (src/repl.lisp) 0.02s 14.9 KB
+     ✓ read-file (src/repl.lisp) 0.02s 14.9KB
      ✗ shell (bad-cmd) 1.20s Error
 
    Error detection: checks only the first 20 characters of result to avoid
    false positives when tool output contains 'Error:' as part of code/text."
+  (flet ((run-tests-failure-label (tool-name result)
+           (when (and (string= tool-name "run-tests")
+                      (stringp result)
+                      (plusp (length result)))
+             (handler-case
+                 (let* ((parsed (yason:parse result :object-as :hash-table))
+                        (failed (gethash "failed" parsed))
+                        (total (gethash "total" parsed)))
+                   (when (and (integerp failed) (plusp failed))
+                     (if (and (integerp total) (plusp total))
+                         (format nil "~d/~d failed" failed total)
+                         (format nil "~d failed" failed))))
+               (error () nil)))))
   (let* ((tool-name (sibyl.llm:tool-call-name tool-call))
-         (is-error (and (stringp result)
-                        (let ((limit (min 20 (length result))))
-                          (or (search "Error:" result :end2 limit)
-                              (search "Error " result :end2 limit)))))
+         (execution-error-p (and (stringp result)
+                                 (let ((limit (min 20 (length result))))
+                                   (or (search "Error:" result :end2 limit)
+                                       (search "Error " result :end2 limit)))))
+         (run-tests-failure (and (not execution-error-p)
+                                 (run-tests-failure-label tool-name result)))
+         (is-error (or execution-error-p run-tests-failure))
          (icon (if is-error "✗" "✓"))
          (colored-icon (if *use-colors*
                            (with-output-to-string (s)
                              (format-colored icon (if is-error :red :green) s))
                            icon))
          (args-str (%extract-tool-args tool-call))
-         (time-str (with-output-to-string (s) (format-duration elapsed-seconds s)))
+         (time-base (with-output-to-string (s) (format-duration elapsed-seconds s)))
+         (time-str (if *use-colors*
+                       (with-output-to-string (s)
+                         (format-colored time-base *tool-result-time-color* s))
+                       time-base))
          (size-str (if (and (not is-error) (> bytes 0))
-                       (with-output-to-string (s) (format-bytes-human bytes s))
-                       nil)))
+                       (let ((size-base (with-output-to-string (s) (format-bytes-human bytes s))))
+                         (if *use-colors*
+                             (with-output-to-string (s)
+                               (format-colored size-base *tool-result-size-color* s))
+                             size-base))
+                       nil))
+         (status-str (cond
+                       (execution-error-p (%extract-error-label result))
+                       (run-tests-failure run-tests-failure)
+                       (t size-str))))
     (format nil "~a ~a ~a ~a~@[ ~a~]"
             colored-icon
             tool-name
             args-str
             time-str
-            (if is-error "Error" size-str))))
+            status-str))))
 
 ;;; ============================================================
 ;;; Multi-line turn footer

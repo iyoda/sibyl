@@ -8,23 +8,13 @@
 ;;; ============================================================
 
 (defparameter *repl-commands*
-  '(("/quit"          . :quit)
-    ("/exit"          . :quit)
-    ("/reset"         . :reset)
-    ("/new"           . :reset)
-    ("/tools"         . :list-tools)
-    ("/help"          . :help)
-    ("/history"       . :history)
-    ("/mcp"           . :mcp)
-    ("/plan"          . :plan)
-    ("/improve"       . :improve)
-    ("/review"        . :review)
-    ("/tokens"        . :tokens)
-    ("/model"         . :model)
-    ("/cost-report"   . :cost-report)
-    ("/sessions"      . :sessions)
-    ("/save"          . :save-session)
-    ("/load"          . :load-session))
+  '(("/quit" . :quit) ("/exit" . :quit) ("/reset" . :reset) ("/new" . :reset)
+    ("/tools" . :list-tools) ("/help" . :help) ("/history" . :history)
+    ("/mcp" . :mcp) ("/plan" . :plan) ("/improve" . :improve)
+    ("/review" . :review) ("/tokens" . :tokens) ("/model" . :model)
+    ("/cost-report" . :cost-report) ("/sessions" . :sessions)
+    ("/save" . :save-session) ("/load" . :load-session)
+    ("/colors" . :colors))
   "Mapping of REPL commands to actions.")
 
 ;;; ============================================================
@@ -400,63 +390,49 @@ tests) can trigger SBCL stream corruption warnings."
 
 
 (defun handle-help-command (agent input)
-  "Handler for :help command with enhanced formatting."
+  "Handler for :help command. Auto-generates help from *command-handlers*."
   (declare (ignore agent input))
-  (if *use-colors*
-      (progn
-        (format t "~%")
-        (format-colored-text "Sibyl REPL Commands:" :cyan)
-        (format t "~%~%")
-        (format-colored-text "  /help" :green)
-        (format t "          — Show this help~%")
-        (format-colored-text "  /tools" :green)
-        (format t "         — List registered tools~%")
-        (format-colored-text "  /reset" :green)
-        (format t "         — Reset conversation~%")
-        (format-colored-text "  /history" :green)
-        (format t "       — Show conversation history~%")
-        (format-colored-text "  /mcp" :green)
-        (format t "           — Show MCP server status and tools~%")
-        (format-colored-text "  /plan" :green)
-        (format t "          — Manage development plans~%")
-        (format-colored-text "  /improve" :green)
-        (format t "       — Request self-improvement (TDD cycle)~%")
-        (format-colored-text "  /review" :green)
-        (format t "        — Review improvement suggestions~%")
-        (format-colored-text "  /tokens" :green)
-        (format t "         — Show cumulative token usage statistics~%")
-        (format-colored-text "  /model" :green)
-        (format t "         — Show current model information~%")
-        (format-colored-text "  /sessions" :green)
-        (format t "      — List saved sessions~%")
-        (format-colored-text "  /save" :green)
-        (format t "          — Save current session~%")
-        (format-colored-text "  /load <id>" :green)
-        (format t "     — Load a saved session~%")
-        (format-colored-text "  /colors" :green)
-        (format t "        — Toggle color output (on/off)~%")
-        (format-colored-text "  /quit" :green)
-        (format t "          — Exit REPL~%~%")
-        (format-colored-text "Type anything else to chat with the agent." :yellow)
-        (format t "~%"))
-      (progn
-        (format t "~%Sibyl REPL commands:~%")
-        (format t "  /help            — Show this help~%")
-        (format t "  /tools           — List registered tools~%")
-        (format t "  /reset           — Reset conversation~%")
-        (format t "  /history         — Show conversation history~%")
-        (format t "  /mcp             — Show MCP server status and tools~%")
-        (format t "  /plan            — Manage development plans~%")
-        (format t "  /improve         — Request self-improvement (TDD cycle)~%")
-        (format t "  /review          — Review improvement suggestions~%")
-        (format t "  /tokens          — Show cumulative token usage statistics~%")
-        (format t "  /model           — Show current model information~%")
-        (format t "  /sessions        — List saved sessions~%")
-        (format t "  /save            — Save current session~%")
-        (format t "  /load <id>       — Load a saved session~%")
-        (format t "  /colors          — Toggle color output (on/off)~%")
-        (format t "  /quit            — Exit REPL~%")
-        (format t "~%Type anything else to chat with the agent.~%")))
+  ;; Build reverse map: keyword -> slash-command
+  (let ((key-to-slash (make-hash-table :test #'eq)))
+    (dolist (pair *repl-commands*)
+      (setf (gethash (cdr pair) key-to-slash) (car pair)))
+    ;; Collect visible commands with their slash names
+    (let ((entries nil))
+      (dolist (pair *command-handlers*)
+        (let* ((key (car pair))
+               (entry (cdr pair))
+               (hidden (command-entry-hidden-p entry))
+               (desc (command-entry-description entry))
+               (slash (gethash key key-to-slash)))
+          (when (and slash (not hidden))
+            (push (cons slash desc) entries))))
+      ;; Sort by slash command name
+      (setf entries (sort entries #'string< :key #'car))
+      ;; Find max command width for alignment
+      (let ((max-width (reduce #'max entries
+                               :key (lambda (e) (length (car e)))
+                               :initial-value 0)))
+        (if *use-colors*
+            (progn
+              (format t "~%")
+              (format-colored-text "Sibyl REPL Commands:" :cyan)
+              (format t "~%~%")
+              (dolist (e entries)
+                (format-colored-text (format nil "  ~a" (car e)) :green)
+                (format t "~v@T — ~a~%"
+                        (+ 4 max-width (- (length (car e)))) (cdr e)))
+              (format t "~%")
+              (format-colored-text
+               "Type anything else to chat with the agent." :yellow)
+              (format t "~%"))
+            (progn
+              (format t "~%Sibyl REPL commands:~%")
+              (dolist (e entries)
+                (format t "  ~a~v@T — ~a~%"
+                        (car e)
+                        (+ 4 max-width (- (length (car e))))
+                        (cdr e)))
+              (format t "~%Type anything else to chat with the agent.~%"))))))
   nil)
 
 (defun handle-mcp-command (agent input)
@@ -798,34 +774,71 @@ tests) can trigger SBCL stream corruption warnings."
 ;;; Command handler registry
 
 (defparameter *command-handlers*
-  (list (cons :quit    #'handle-quit-command)
-        (cons :reset   #'handle-reset-command)
-        (cons :list-tools #'handle-tools-command)
-        (cons :help    #'handle-help-command)
-        (cons :history #'handle-history-command)
-        (cons :mcp     #'handle-mcp-command)
-        (cons :plan    #'handle-plan-command)
-        (cons :improve #'handle-improve-command-wrapper)
-        (cons :review  #'handle-review-command-wrapper)
-        (cons :tokens        #'handle-tokens-command)
-        (cons :model         #'handle-model-command)
-        (cons :cost-report   #'handle-cost-report-command)
-        (cons :sessions     #'handle-sessions-command)
-        (cons :save-session #'handle-save-session-command)
-        (cons :load-session #'handle-load-session-command))
-  "Mapping of command keywords to handler functions.")
+  (list
+   (cons :quit     (list :handler #'handle-quit-command
+                         :description "Exit the REPL"))
+   (cons :reset    (list :handler #'handle-reset-command
+                         :description "Start a new conversation"))
+   (cons :list-tools (list :handler #'handle-tools-command
+                           :description "List available tools"))
+   (cons :help     (list :handler #'handle-help-command
+                         :description "Show this help message"))
+   (cons :history  (list :handler #'handle-history-command
+                         :description "Show conversation history"))
+   (cons :mcp      (list :handler #'handle-mcp-command
+                         :description "Manage MCP servers"))
+   (cons :plan     (list :handler #'handle-plan-command
+                         :description "View and manage plans"))
+   (cons :improve  (list :handler #'handle-improve-command-wrapper
+                         :description "Suggest codebase improvements"))
+   (cons :review   (list :handler #'handle-review-command-wrapper
+                         :description "Review recent changes"))
+   (cons :tokens   (list :handler #'handle-tokens-command
+                         :description "Show token usage stats"))
+   (cons :model    (list :handler #'handle-model-command
+                         :description "Switch or show current model"))
+   (cons :cost-report (list :handler #'handle-cost-report-command
+                            :description "Show cost breakdown"))
+   (cons :sessions (list :handler #'handle-sessions-command
+                         :description "List saved sessions"))
+   (cons :save-session (list :handler #'handle-save-session-command
+                             :description "Save current session"))
+   (cons :load-session (list :handler #'handle-load-session-command
+                             :description "Load a saved session"))
+   (cons :colors   (list :handler #'handle-colors-command
+                         :description "Toggle colored output")))
+  "Mapping of command keywords to handler plists (:handler :description :hidden).")
+
+;;; ============================================================
+;;; Command entry accessors (plist-based command entries)
+;;; ============================================================
+
+(defun command-entry-handler (entry)
+  "Get the handler function from a command entry.
+   Handles both new plist format (:handler fn :description str ...)
+   and legacy format (bare function)."
+  (if (and (listp entry) (getf entry :handler))
+      (getf entry :handler)
+      (if (functionp entry) entry nil)))
+
+(defun command-entry-description (entry)
+  "Get the description string from a command entry, or NIL for legacy entries."
+  (when (listp entry) (getf entry :description)))
+
+(defun command-entry-hidden-p (entry)
+  "Return T if the command entry is marked as hidden."
+  (when (listp entry) (getf entry :hidden)))
 
 (defun handle-repl-command (command agent &optional original-input)
   "Handle a REPL command. Returns :quit to exit, or NIL to continue.
    ORIGINAL-INPUT is the full command string including arguments.
    Uses dynamic dispatch via *command-handlers* alist."
   (log-debug "repl" "Command ~a" command)
-  (let ((handler (cdr (assoc command *command-handlers*))))
+  (let* ((entry (cdr (assoc command *command-handlers*)))
+         (handler (when entry (command-entry-handler entry))))
     (if handler
         (funcall handler agent original-input)
-        (progn
-          (format t "~%Unknown command: ~a~%" command)
-          nil))))
+        (progn (format t "~%Unknown command: ~a~%" command) nil))))
 
 (defun parse-improve-args (input)
   "Parse /improve command arguments. Returns (values task-description auto-commit-p).
@@ -1005,9 +1018,24 @@ tests) can trigger SBCL stream corruption warnings."
       (format t "Task: ~a~%" task-desc)
       (format t "Auto-commit: ~:[NO~;YES~]~%~%" auto-commit-p)
       
-      ;; Execute agent step with TDD prompt
+      ;; /improve bypasses the normal chat loop, so it needs its own
+      ;; spinner lifecycle around agent-run.
+      (flet ((run-agent-with-spinner (input)
+               (let ((spinner nil))
+                 (unwind-protect
+                      (progn
+                        (when (%spinner-stream-supported-p *standard-output*)
+                          (setf spinner (sibyl.repl.spinner:start-spinner "Thinking...")
+                                *current-spinner* spinner))
+                        (sibyl.agent:agent-run agent input))
+                   (when *current-spinner*
+                     (sibyl.repl.spinner:stop-spinner *current-spinner*))
+                   (when (and spinner (not (eq spinner *current-spinner*)))
+                     (sibyl.repl.spinner:stop-spinner spinner))
+                   (setf *current-spinner* nil)))))
+        ;; Execute agent step with TDD prompt
       (handler-case
-          (let ((response (sibyl.agent:agent-run agent prompt)))
+          (let ((response (run-agent-with-spinner prompt)))
             (format t "~%~a~%~%" response)
             
             ;; If not auto-commit, ask for confirmation
@@ -1019,14 +1047,14 @@ tests) can trigger SBCL stream corruption warnings."
                            (string-equal (string-trim '(#\Space #\Tab) confirmation) "y"))
                   (format t "~%Committing changes to disk...~%")
                   (let ((sync-response
-                          (sibyl.agent:agent-run agent 
-                            "Please use sync-to-file to persist all changes to disk, then use sibyl.system:unprotect-file.")))
+                          (run-agent-with-spinner
+                           "Please use sync-to-file to persist all changes to disk, then use sibyl.system:unprotect-file.")))
                     (format t "~%~a~%~%" sync-response))))))
         
         (sibyl.conditions:llm-error (e)
           (format t "~%[LLM Error: ~a]~%~%" e))
         (error (e)
-          (format t "~%[Error: ~a]~%~%" e))))))
+          (format t "~%[Error: ~a]~%~%" e)))))))
 
 
 ;;; ============================================================
@@ -1381,11 +1409,11 @@ Returns NIL when *stream-enabled* is NIL (streaming disabled)."
         (format t "~%")
         (format-colored-text "║          " :cyan)
         (format-colored-text "S I B Y L" :green)
-        (format-colored-text "  v0.1.0           ║" :cyan)
+        (format-colored-text "  v0.1.0            ║" :cyan)
         (format t "~%")
         (format-colored-text "║     " :cyan)
         (format-colored-text "Lisp-based Coding Agent" :yellow)
-        (format-colored-text "          ║" :cyan)
+        (format-colored-text "           ║" :cyan)
         (format t "~%")
         (format-colored-text "╚═══════════════════════════════════════╝" :cyan)
         (format t "~%~%")
@@ -1396,8 +1424,8 @@ Returns NIL when *stream-enabled* is NIL (streaming disabled)."
       ;; Fallback to original banner if colors disabled
       (format t "~%~
 ╔═══════════════════════════════════════╗~%~
-║          S I B Y L  v0.1.0           ║~%~
-║     Lisp-based Coding Agent          ║~%~
+║          S I B Y L  v0.1.0            ║~%~
+║     Lisp-based Coding Agent           ║~%~
 ╚═══════════════════════════════════════╝~%~
 ~%Type /help for commands, or start chatting.~%~%")))
 

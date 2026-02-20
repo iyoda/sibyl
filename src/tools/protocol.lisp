@@ -41,6 +41,11 @@
   "Cached result of (tools-as-schema). Plist (:generation N :all <list> :by-cats <alist>).
    Invalidated when *tool-schema-generation* advances.")
 
+
+(defvar *allowed-tools* nil
+  "When non-NIL, a list of tool name strings that tools-as-schema should
+   include. Used for role-based tool filtering in multi-agent execution.
+   Bind dynamically around agent-run calls.")
 (defun register-tool (tool)
   "Register a TOOL in the global registry. Overwrites if exists.
 Bumps the schema generation counter to invalidate cached schemas."
@@ -176,19 +181,23 @@ Bumps the schema generation counter to invalidate cached schemas."
   "Return registered tools as a list of schema plists.
    If CATEGORIES (a list of keywords) is specified, only include tools
    whose category is a member of CATEGORIES. Without CATEGORIES, returns all.
+   When *ALLOWED-TOOLS* is non-NIL, further filters to only those tool names.
    Results are cached and rebuilt only when the tool registry changes."
-  (let ((cache (%ensure-schema-cache)))
-    (if categories
-        ;; Gather schemas for requested categories from the index
-        (let ((index (getf cache :by-cats))
-              (result nil))
-          (dolist (cat categories)
-            (let ((bucket (gethash cat index)))
-              (when bucket
-                (setf result (append result bucket)))))
-          result)
-        ;; All tools
-        (getf cache :all))))
+  (let* ((cache (%ensure-schema-cache))
+         (schemas
+          (if categories
+              (let ((index (getf cache :by-cats)) (result nil))
+                (dolist (cat categories)
+                  (let ((bucket (gethash cat index)))
+                    (when bucket (setf result (append result bucket)))))
+                result)
+              (getf cache :all))))
+    (if *allowed-tools*
+        (remove-if-not
+         (lambda (schema)
+           (member (getf schema :name) *allowed-tools* :test #'string=))
+         schemas)
+        schemas)))
 
 ;;; ============================================================
 ;;; Tool execution with condition-based error handling

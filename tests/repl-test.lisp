@@ -302,7 +302,7 @@
            (let ((entry (assoc :test-rc-cmd sibyl.repl::*command-handlers*)))
              (is (not (null entry)))
              (is (eq :test-rc-cmd (car entry)))
-             (is (functionp (cdr entry)))))
+             (is (functionp (sibyl.repl::command-entry-handler (cdr entry))))))
       ;; Cleanup
       (setf sibyl.repl::*command-handlers* original-commands))))
 
@@ -319,7 +319,7 @@
                   (cons "handler-body" "(lambda (agent input) (declare (ignore agent input)) \"callable-result\")")))
            ;; Find the handler and call it
            (let* ((entry (assoc :test-rc-callable sibyl.repl::*command-handlers*))
-                  (handler (cdr entry))
+                  (handler (sibyl.repl::command-entry-handler (cdr entry)))
                   (result (funcall handler nil nil)))
              (is (not (null entry)))
              (is (string= "callable-result" result))))
@@ -372,7 +372,7 @@
                   (cons "handler-body" "(lambda (agent input) (declare (ignore agent input)) \"second\")")))
            ;; The most recently registered handler should be first in the alist
            (let* ((entry (assoc :test-rc-dup sibyl.repl::*command-handlers*))
-                  (handler (cdr entry))
+                  (handler (sibyl.repl::command-entry-handler (cdr entry)))
                   (result (funcall handler nil nil)))
              (is (not (null entry)))
              (is (string= "second" result))))
@@ -584,3 +584,79 @@
         (setf sibyl.repl::*current-spinner* nil))
       (is (search "Context compacted" output)
           "Invoking the hook should print a compaction notice"))))
+
+(test command-entry-accessors
+  "Auto-generated test"
+  ;; plist形式のエントリからアクセサが正しく値を取得できる
+(let ((entry (list :handler #'identity
+                   :description "Test command"
+                   :hidden nil)))
+  (is (eq #'identity (sibyl.repl::command-entry-handler entry)))
+  (is (string= "Test command" (sibyl.repl::command-entry-description entry)))
+  (is (null (sibyl.repl::command-entry-hidden-p entry))))
+;; hidden省略時のデフォルト
+(let ((minimal (list :handler #'identity :description "Minimal")))
+  (is (null (sibyl.repl::command-entry-hidden-p minimal))))
+;; 後方互換: 生の関数もhandlerとして取得できる
+(let ((legacy-entry #'identity))
+  (is (eq #'identity (sibyl.repl::command-entry-handler legacy-entry)))
+  (is (null (sibyl.repl::command-entry-description legacy-entry)))))
+
+(test command-handlers-new-structure
+  "Auto-generated test"
+  ;; *command-handlers* の全エントリが新plist形式である
+(dolist (pair sibyl.repl::*command-handlers*)
+  (let ((key (car pair))
+        (entry (cdr pair)))
+    (is (keywordp key) (format nil "~a should be keyword" key))
+    (is (listp entry) (format nil "~a entry should be plist" key))
+    (is (functionp (sibyl.repl::command-entry-handler entry))
+        (format nil "~a should have handler" key))
+    (is (stringp (sibyl.repl::command-entry-description entry))
+        (format nil "~a should have description" key)))))
+
+(test colors-in-repl-commands
+  "Auto-generated test"
+  ;; /colors が *repl-commands* に登録されている
+(is (assoc "/colors" sibyl.repl::*repl-commands* :test #'string-equal)
+    "/colors should be in *repl-commands*")
+;; コマンドとして認識される
+(is (eq :colors (sibyl.repl:repl-command-p "/colors"))
+    "/colors should be recognized as command"))
+
+(test help-auto-generated-includes-all-visible
+  "Auto-generated test"
+  ;; /help の出力に、hidden でない全コマンドの説明が自動的に含まれる
+(let ((help-output (with-output-to-string (*standard-output*)
+                     (let ((sibyl.repl::*use-colors* nil))
+                       (sibyl.repl::handle-help-command nil nil)))))
+  ;; 以前表示されていなかった /cost-report が表示される
+  (is (search "/cost-report" help-output)
+      "/cost-report should appear in help")
+  ;; /colors が表示される
+  (is (search "/colors" help-output)
+      "/colors should appear in help")
+  ;; /help 自体が表示される
+  (is (search "/help" help-output)
+      "/help should appear in help")
+  ;; 各コマンドの説明文も表示される
+  (is (search "Show this help" help-output)
+      "Description should appear")))
+
+(test help-hides-hidden-commands
+  "Auto-generated test"
+  ;; hidden フラグが立ったコマンドはヘルプに表示されない
+(let ((original sibyl.repl::*command-handlers*))
+  (unwind-protect
+       (progn
+         (push (cons :test-hidden
+                     (list :handler (lambda (a i) (declare (ignore a i)) nil)
+                           :description "Secret command"
+                           :hidden t))
+               sibyl.repl::*command-handlers*)
+         (let ((help-output (with-output-to-string (*standard-output*)
+                              (let ((sibyl.repl::*use-colors* nil))
+                                (sibyl.repl::handle-help-command nil nil)))))
+           (is (null (search "Secret command" help-output))
+               "Hidden command description should NOT appear in help")))
+    (setf sibyl.repl::*command-handlers* original))))

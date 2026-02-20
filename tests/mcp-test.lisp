@@ -351,4 +351,4 @@
   ;; Check *command-handlers* has handler
   (let ((handler (assoc :mcp sibyl.repl::*command-handlers*)))
     (is (not (null handler)))
-    (is (functionp (cdr handler)))))
+    (is (functionp (sibyl.repl::command-entry-handler (cdr handler))))))

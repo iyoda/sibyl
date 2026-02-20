@@ -68,7 +68,7 @@
                                   t)
                          (error () nil))))
                 (unwind-protect
-                     (loop for i = 0 then (mod (1+ i) (length *spinner-frames*))
+                     (loop for i = 1 then (mod (1+ i) (length *spinner-frames*))
                            while (not (spinner-stop-flag s))
                            do (let* ((msg     (bt:with-recursive-lock-held ((spinner-lock s))
                                                 (spinner-message s)))
@@ -88,6 +88,19 @@
                   ;; Cleanup: best-effort line clear; ignore failures.
                   (%write-safe out "~C~C[2K" #\Return #\Escape))))
             :name "sibyl-spinner")))
+    ;; Render the first frame immediately so users don't see a blank gap
+    ;; before the background thread gets scheduled.
+    (handler-case
+        (let ((msg (bt:with-recursive-lock-held ((spinner-lock s))
+                     (spinner-message s))))
+          (format out "~C~C[2K~A ~A (~,1fs)"
+                  #\Return #\Escape
+                  (aref *spinner-frames* 0)
+                  msg
+                  0.0)
+          (force-output out))
+      (error ()
+        (setf (spinner-stop-flag s) t)))
     (setf (spinner-thread s) thread
           (spinner-active s) t)
     s))
