@@ -410,3 +410,37 @@
       "create-task must parse [role] annotation from description and store as required-role")
   (is (string= "[tester] Write comprehensive tests" (sibyl.agent:task-description task))
       "description must be preserved verbatim")))
+
+(test execute-tasks-parallel-without-task-fn-returns-placeholder
+  "Auto-generated test"
+  
+  (let* ((coordinator (make-agent-coordinator :strategy :parallel))
+         (agent       (make-mock-agent :response "real-result")))
+    (add-agent coordinator agent)
+    (create-task coordinator "parallel placeholder task")
+    (execute-tasks coordinator)
+    (let ((task (first (coordinator-task-queue coordinator))))
+      (is (eq :completed (task-status task))
+          "Task must reach :completed even without task-fn")
+      (is (not (string= "real-result" (task-result task)))
+          "Without task-fn, parallel result must NOT equal agent-run's value"))))
+
+(test execute-tasks-parallel-with-task-fn-calls-execute-agent-task
+  "Auto-generated test"
+  
+  (let* ((coordinator (make-agent-coordinator :strategy :parallel))
+         (agent       (make-mock-agent :response "real-result")))
+    (add-agent coordinator agent)
+    (create-task coordinator "parallel real task")
+    ;; Pass task-fn that calls execute-agent-task — what the tool SHOULD do
+    (execute-tasks coordinator
+                   :task-fn (lambda (task)
+                              (let ((a (find-suitable-agent coordinator task)))
+                                (if a
+                                    (execute-agent-task a task)
+                                    (format nil "no-agent")))))
+    (let ((task (first (coordinator-task-queue coordinator))))
+      (is (eq :completed (task-status task))
+          "Task must be :completed")
+      (is (string= "real-result" (task-result task))
+          "With task-fn, result must equal agent-run's return value"))))

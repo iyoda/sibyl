@@ -228,8 +228,15 @@
   (let ((coordinator *current-coordinator*))
     (if coordinator
         (progn
-          ;; Create and execute tasks based on coordination strategy
-          (sibyl.agent:execute-tasks coordinator)
+          ;; Pass task-fn so execute-tasks-parallel calls execute-agent-task
+          (sibyl.agent:execute-tasks
+           coordinator
+           :task-fn (lambda (task)
+                      (let ((agent (sibyl.agent:find-suitable-agent coordinator task)))
+                        (if agent
+                            (sibyl.agent:execute-agent-task agent task)
+                            (format nil "No suitable agent for: ~a"
+                                    (sibyl.agent:task-description task))))))
           (format nil "Team task execution completed: ~a" (getf args :task-description)))
         "No active agent coordinator. Create a team first with create-agent-team.")))
 
