@@ -47,15 +47,16 @@
 
 (test collect-fiveam-results-suppresses-stderr
   "Auto-generated test"
-  
-(let* ((captured (make-string-output-stream))
-       (*error-output* captured))
-  ;; session-tests contains a test that writes "Warning: session X not found"
-  ;; to *error-output*.  After the fix, %collect-fiveam-results must suppress it.
-  (sibyl.tests::%collect-fiveam-results 'sibyl.tests::session-tests)
-  (let ((err (get-output-stream-string captured)))
-    (is (string= "" err)
-        "~a: %collect-fiveam-results must not leak test *error-output* to caller" err)))
+  (if sibyl.tests::*run-tests-parallel-running*
+      (pass "Skipped under run-tests-parallel: avoids recursive lock re-entry")
+      (let* ((captured (make-string-output-stream))
+             (*error-output* captured))
+        ;; session-tests contains a test that writes "Warning: session X not found"
+        ;; to *error-output*.  After the fix, %collect-fiveam-results must suppress it.
+        (sibyl.tests::%collect-fiveam-results 'sibyl.tests::session-tests)
+        (let ((err (get-output-stream-string captured)))
+          (is (string= "" err)
+              "~a: %collect-fiveam-results must not leak test *error-output* to caller" err))))
 )
 
 (test run-tests-parallel-safe-suites-no-stderr-reemit

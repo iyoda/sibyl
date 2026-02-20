@@ -95,13 +95,13 @@ Convenience function equivalent to (setf (config-value KEY) VALUE)."
 (defun set-defaults ()
   "Set default configuration values."
   (let ((defaults '(;; LLM defaults
-                    ("llm.model"                . "claude-sonnet-4-6")
-                    ("llm.max-tokens"           . 4096)
+                    ("llm.model"                . "claude-opus-4-6")
+                    ("llm.max-tokens"           . 8192)
                     ("llm.temperature"          . 0.0)
                     ;; Model selection defaults
                     ("models.preferred-provider" . "anthropic")
                     ("openai.model"             . "gpt-5.2-codex")
-                    ("anthropic.model"          . "claude-sonnet-4-6")
+                    ("anthropic.model"          . "claude-opus-4-6")
                     ;; Agent defaults
                     ("agent.max-steps"          . 50)
                     ("agent.name"               . "Sibyl")
@@ -120,7 +120,7 @@ Convenience function equivalent to (setf (config-value KEY) VALUE)."
                      ;; REPL defaults
                      ("repl.ignore-ctrl-j" . nil)
                      ;; Thinking defaults
-                     ("thinking.effort" . "high"))))
+                      ("thinking.effort" . "max"))))
     (dolist (pair defaults)
       (unless (config-value (car pair))
         (setf (config-value (car pair)) (cdr pair))))))

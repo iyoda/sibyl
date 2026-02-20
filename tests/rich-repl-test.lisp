@@ -307,17 +307,25 @@
            (tc (sibyl.llm:make-tool-call
                 :id "test-id"
                 :name "shell"
-                :arguments (list (cons "command" "ls")))))
+                :arguments (list (cons "command" "ls"))))
+           (orig-supported (symbol-function 'sibyl.repl::%spinner-stream-supported-p)))
       (unwind-protect
            (progn
-              (funcall hook tc)
-              ;; Verify *current-spinner* is restarted after hook invocation
-              (is (not (null sibyl.repl::*current-spinner*))
+             ;; Force spinner restart path for this behavioral test.
+             (setf (symbol-function 'sibyl.repl::%spinner-stream-supported-p)
+                   (lambda (&optional stream)
+                     (declare (ignore stream))
+                     t))
+             (funcall hook tc)
+             ;; Verify *current-spinner* is restarted after hook invocation
+             (is (not (null sibyl.repl::*current-spinner*))
                  "spinner should be restarted after tool call display")
              (is (sibyl.repl.spinner:spinner-active-p sibyl.repl::*current-spinner*)
-                  "restarted spinner should be active"))
-         ;; Cleanup
-         (when sibyl.repl::*current-spinner*
+                 "restarted spinner should be active"))
+        ;; Cleanup
+        (setf (symbol-function 'sibyl.repl::%spinner-stream-supported-p)
+              orig-supported)
+        (when sibyl.repl::*current-spinner*
           (sibyl.repl.spinner:stop-spinner sibyl.repl::*current-spinner*)
           (setf sibyl.repl::*current-spinner* nil))))))
 
@@ -350,26 +358,34 @@
         (sibyl.repl::*current-spinner* nil))
     (let* ((out (make-string-output-stream))
            (*standard-output* out)
-           (hook (sibyl.repl::make-tool-call-hook)))
+           (hook (sibyl.repl::make-tool-call-hook))
+           (orig-supported (symbol-function 'sibyl.repl::%spinner-stream-supported-p)))
        (unwind-protect
             (progn
+              ;; Force spinner restart path for this behavioral test.
+              (setf (symbol-function 'sibyl.repl::%spinner-stream-supported-p)
+                    (lambda (&optional stream)
+                      (declare (ignore stream))
+                      t))
               ;; First tool call
               (funcall hook (sibyl.llm:make-tool-call
-                            :id "tc-1" :name "shell"
-                            :arguments (list (cons "command" "ls"))))
+                             :id "tc-1" :name "shell"
+                             :arguments (list (cons "command" "ls"))))
               (is (not (null sibyl.repl::*current-spinner*))
                   "spinner should exist after first tool call")
               ;; Second tool call (spinner already active)
               (funcall hook (sibyl.llm:make-tool-call
-                            :id "tc-2" :name "read-file"
-                            :arguments (list (cons "path" "src/"))))
-             (is (not (null sibyl.repl::*current-spinner*))
-                 "spinner should still exist after second tool call")
-             (is (sibyl.repl.spinner:spinner-active-p sibyl.repl::*current-spinner*)
-                 "spinner should be active after second tool call"))
-        (when sibyl.repl::*current-spinner*
-          (sibyl.repl.spinner:stop-spinner sibyl.repl::*current-spinner*)
-          (setf sibyl.repl::*current-spinner* nil))))))
+                             :id "tc-2" :name "read-file"
+                             :arguments (list (cons "path" "src/"))))
+              (is (not (null sibyl.repl::*current-spinner*))
+                  "spinner should still exist after second tool call")
+              (is (sibyl.repl.spinner:spinner-active-p sibyl.repl::*current-spinner*)
+                  "spinner should be active after second tool call"))
+         (setf (symbol-function 'sibyl.repl::%spinner-stream-supported-p)
+               orig-supported)
+         (when sibyl.repl::*current-spinner*
+           (sibyl.repl.spinner:stop-spinner sibyl.repl::*current-spinner*)
+           (setf sibyl.repl::*current-spinner* nil))))))
 
 ;;; ============================================================
 ;;; unbind-key integration tests

@@ -163,11 +163,11 @@
 
 (in-suite anthropic-thinking-config-tests)
 
-;; Test 1: thinking.effort config key defaults to "high"
+;; Test 1: thinking.effort config key defaults to "max"
 (test thinking-effort-config-default
-  "thinking.effort config key should default to 'high'"
+  "thinking.effort config key should default to 'max'"
   (sibyl:with-config ()
-    (is (string= "high" (sibyl:config-value "thinking.effort")))))
+    (is (string= "max" (sibyl:config-value "thinking.effort")))))
 
 ;; Test 2: Opus 4-6 has :thinking capability
 (test opus-4-6-has-thinking-capability
@@ -204,14 +204,14 @@
 (in-suite anthropic-thinking-params-tests)
 
 (test anthropic-thinking-params-opus-4-6
-  "Opus 4-6 should include thinking params with high effort"
+  "Opus 4-6 should include thinking params with max effort"
   (sibyl:with-config ()
     (let* ((params (sibyl.llm::anthropic-thinking-params "claude-opus-4-6"))
            (thinking (cdr (assoc "thinking" params :test #'string=)))
            (output-config (cdr (assoc "output_config" params :test #'string=))))
       (is (listp params))
       (is (string= "adaptive" (cdr (assoc "type" thinking :test #'string=))))
-      (is (string= "high" (cdr (assoc "effort" output-config :test #'string=)))))))
+      (is (string= "max" (cdr (assoc "effort" output-config :test #'string=)))))))
 
 (test anthropic-thinking-params-sonnet-4-6
   "Sonnet 4-6 should include thinking params with high effort"

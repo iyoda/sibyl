@@ -32,7 +32,7 @@
                 :documentation "T when using OAuth Bearer authentication."))
   (:default-initargs
    :base-url "https://api.anthropic.com/v1"
-   :model "claude-sonnet-4-6")
+   :model "claude-opus-4-6")
   (:documentation "Client for Anthropic's Claude API."))
 
 (defun oauth-token-p (api-key)
@@ -43,9 +43,9 @@
                 (subseq api-key 0 (length *oauth-token-prefix*)))))
 
 (defun make-anthropic-client (&key api-key
-                                (model "claude-sonnet-4-6")
-                                (max-tokens 4096)
-                                (temperature 0.0))
+                                (model "claude-opus-4-6")
+                                (max-tokens 8192)
+                                (temperature 0.1))
   "Create an Anthropic API client.
    Automatically detects OAuth tokens (sk-ant-oat01-...) and configures
    Bearer authentication with the required beta flags."

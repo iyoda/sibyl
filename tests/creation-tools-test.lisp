@@ -688,21 +688,34 @@
   ;; In that case, skip this test — it can only meaningfully run standalone.
   (if sibyl.tests::*run-tests-parallel-running*
       (pass "Skipped: already inside run-tests-parallel (recursion guard active)")
-      ;; Standalone execution: verify %collect-fiveam-results is called
-      ;; exactly (safe + unsafe) times, not (safe + unsafe + 1) for full suite.
+      ;; Standalone execution: run a minimal curated suite set and verify that
+      ;; only configured UNSAFE suites are executed once each.
       (let ((call-count 0)
+            (called-suites nil)
             (original-fn (symbol-function 'sibyl.tests::%collect-fiveam-results)))
         (unwind-protect
              (progn
-               (setf (symbol-function 'sibyl.tests::%collect-fiveam-results)
-                     (lambda (suite)
-                       (incf call-count)
-                       (funcall original-fn suite)))
-                (sibyl.tests::run-tests-parallel)
-                ;; Only unsafe suites call %collect-fiveam-results
-                ;; (safe suites use %run-suite-isolated in parallel threads)
-                (let ((unsafe-count (length (sibyl.tests::%unsafe-suites-resolved))))
-                  (is (= call-count unsafe-count)
-                      (format nil "Expected ~a unsafe suite calls, got ~a. Full-suite re-run detected!"
-                              unsafe-count call-count))))
-          (setf (symbol-function 'sibyl.tests::%collect-fiveam-results) original-fn)))))
+                (setf (symbol-function 'sibyl.tests::%collect-fiveam-results)
+                      (lambda (suite)
+                        (incf call-count)
+                        (push suite called-suites)
+                        (funcall original-fn suite)))
+                (let ((sibyl.tests::*safe-suites* '(core-tests))
+                      (sibyl.tests::*unsafe-suites* '(cache-lru-tests
+                                                     cache-telemetry-tests)))
+                  (sibyl.tests::run-tests-parallel)
+                  ;; Only unsafe suites call %collect-fiveam-results.
+                  ;; If run-tests-parallel accidentally re-runs the full suite,
+                  ;; this count exceeds the curated unsafe suite count.
+                  (let* ((expected-unsafe (sibyl.tests::%unsafe-suites-resolved))
+                         (unsafe-count (length expected-unsafe))
+                         (unique-called (remove-duplicates called-suites)))
+                    (is (= call-count unsafe-count)
+                        (format nil
+                                "Expected ~a unsafe suite calls, got ~a. Full-suite re-run detected!"
+                                unsafe-count call-count))
+                    (is (null (set-difference expected-unsafe unique-called))
+                        "Some configured unsafe suites were not executed")
+                    (is (null (set-difference unique-called expected-unsafe))
+                        "Unexpected suites were collected by unsafe phase"))))
+           (setf (symbol-function 'sibyl.tests::%collect-fiveam-results) original-fn)))))
