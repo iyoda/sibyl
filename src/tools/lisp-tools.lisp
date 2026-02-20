@@ -754,9 +754,10 @@ wrapped in a timeout to guard against hangs."
                 (%safe-redefine-eval-definition definition package)
                 ;; Compile the newly defined function
                 (compile symbol)
-                ;; Verify compilation succeeded
+                ;; Verify result is executable. Generic functions are valid for defmethod/defgeneric.
                 (let ((fn (symbol-function symbol)))
-                  (unless (compiled-function-p fn)
+                  (unless (or (compiled-function-p fn)
+                              (typep fn 'generic-function))
                     (error "Redefinition did not compile for ~a" name-string)))
                 ;; Check for closure warnings
                 (let ((warning (%safe-redefine-closure-warning name-string force)))

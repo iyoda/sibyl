@@ -1495,6 +1495,13 @@ Failures:  \"✗ 40/42 passed\nFailures:\n  • test-name: reason\""
     (write-string test-code stream)
     (terpri stream)))
 
+(defun %write-test-ensure-test-package (package-name)
+  "Ensure PACKAGE-NAME exists, loading :sibyl/tests once if needed."
+  (or (find-package package-name)
+      (progn
+        (ignore-errors (asdf:load-system :sibyl/tests))
+        (find-package package-name))))
+
 (deftool "write-test"
     (:description "Generate and register a FiveAM test programmatically."
      :category :analysis
@@ -1515,10 +1522,10 @@ Failures:  \"✗ 40/42 passed\nFailures:\n  • test-name: reason\""
                       (asdf:system-relative-pathname :sibyl
                                                      "tests/sexp-tools-test.lisp"))))
            (package-name "SIBYL.TESTS")
-           (package (find-package package-name)))
+           (package (%write-test-ensure-test-package package-name)))
       
       (unless package
-        (error "Package not found: ~a" package-name))
+        (error "Package not found: ~a (try loading :sibyl/tests)" package-name))
       
       ;; Check for duplicate
       (%write-test-check-duplicate name package)

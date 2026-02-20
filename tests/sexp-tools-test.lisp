@@ -572,6 +572,22 @@
     (when (fboundp 'sibyl.tests::safe-redefine-test-fn-002)
       (fmakunbound 'sibyl.tests::safe-redefine-test-fn-002))))
 
+(test safe-redefine-defmethod-on-generic-function
+  "safe-redefine accepts defmethod updates on generic functions."
+  (eval '(defgeneric sibyl.tests::safe-redefine-test-gf-001 (x)))
+  (eval '(defmethod sibyl.tests::safe-redefine-test-gf-001 ((x t)) "original"))
+  (unwind-protect
+       (let ((result (sibyl.tools:execute-tool
+                      "safe-redefine"
+                      '(("name" . "sibyl.tests::safe-redefine-test-gf-001")
+                        ("new-definition" . "(defmethod sibyl.tests::safe-redefine-test-gf-001 ((x t)) \"modified\")")))))
+         (is (search "redefined" (string-downcase result)))
+         (is (string= "modified" (sibyl.tests::safe-redefine-test-gf-001 :anything)))
+         (is (typep (symbol-function 'sibyl.tests::safe-redefine-test-gf-001)
+                    'generic-function)))
+    (when (fboundp 'sibyl.tests::safe-redefine-test-gf-001)
+      (fmakunbound 'sibyl.tests::safe-redefine-test-gf-001))))
+
 (test safe-redefine-rejects-non-sibyl
   "safe-redefine blocks redefinition outside Sibyl packages."
   (signals sibyl.conditions:tool-execution-error
