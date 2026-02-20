@@ -351,6 +351,7 @@
    #:infer-tool-categories
    #:task-required-role
    #:parse-role-annotation
+   #:memory-compaction-callback
    #:agent-reset))
 
 (defpackage #:sibyl.mcp
@@ -396,6 +397,8 @@
    #:start-spinner
    #:stop-spinner
    #:spinner-active-p
+   #:make-tool-result-hook
+   #:*current-spinner*
    #:update-spinner-message))
 
 (defpackage #:sibyl.repl.display
@@ -437,7 +440,9 @@
     #:save-session
     #:load-session
     #:list-sessions
-    #:generate-session-id))
+    #:generate-session-id
+    #:make-tool-result-hook
+    #:*current-spinner*))
 
 (defpackage #:sibyl.cache
   (:use #:cl #:sibyl.util #:sibyl.logging)

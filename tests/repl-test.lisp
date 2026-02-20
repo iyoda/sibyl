@@ -528,6 +528,12 @@
   (is (string= "" (sibyl.repl::format-tool-call-summary tc))))
 )
 
+(def-suite repl-hooks-tests
+  :description "Tests for REPL hook closures (tool-call, compact, etc.)."
+  :in sibyl-tests)
+
+(in-suite repl-hooks-tests)
+
 (test make-tool-call-hook-force-output
   "make-tool-call-hook の出力が即座に取得できることを確認する"
   ;; force-output を SBCL パッケージロックの制約でモックできないため、
@@ -562,3 +568,19 @@
       "tool name must appear in output immediately")
   (is (search "🔧" output)
       "tool execution indicator must appear immediately")))
+
+(test make-compact-hook-captures-summary
+  "make-compact-hook returns a callable that prints a compaction notice."
+  (let ((hook-fn (sibyl.repl::make-compact-hook)))
+    (is (functionp hook-fn) "make-compact-hook should return a function")
+    ;; Invoke the hook and capture stdout
+    (let* ((sibyl.repl::*current-spinner* nil)
+           (sibyl.repl.display:*use-colors* nil)
+           (output (with-output-to-string (*standard-output*)
+                     (funcall hook-fn "test summary"))))
+      ;; Clean up the spinner started by the hook
+      (when sibyl.repl::*current-spinner*
+        (sibyl.repl.spinner:stop-spinner sibyl.repl::*current-spinner*)
+        (setf sibyl.repl::*current-spinner* nil))
+      (is (search "Context compacted" output)
+          "Invoking the hook should print a compaction notice"))))

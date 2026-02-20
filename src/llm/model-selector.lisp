@@ -238,3 +238,21 @@
             (return-from search (model-context-window config)))))
       ;; Fallback for unknown models
       200000)))
+
+;;; ============================================================
+;;; Client factory from model-config
+;;; ============================================================
+
+(defun create-client-for-model (config)
+  "Create an LLM client from a MODEL-CONFIG instance.
+Dispatches on the provider slot (:anthropic, :openai, :ollama)."
+  (ecase (model-provider config)
+    (:anthropic (make-anthropic-client :model (model-name config)
+                                      :max-tokens (model-max-tokens config)
+                                      :temperature (model-temperature config)))
+    (:openai    (make-openai-client :model (model-name config)
+                                   :max-tokens (model-max-tokens config)
+                                   :temperature (model-temperature config)))
+    (:ollama    (make-ollama-client :model (model-name config)
+                                   :max-tokens (model-max-tokens config)
+                                   :temperature (model-temperature config)))))

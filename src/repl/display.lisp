@@ -176,11 +176,15 @@
    Returns a string with ✓ (success) or ✗ (error), tool name, args, time, and size.
    Examples:
      ✓ read-file (src/repl.lisp) 0.02s 14.9 KB
-     ✗ shell (bad-cmd) 1.20s Error"
+     ✗ shell (bad-cmd) 1.20s Error
+
+   Error detection: checks only the first 20 characters of result to avoid
+   false positives when tool output contains 'Error:' as part of code/text."
   (let* ((tool-name (sibyl.llm:tool-call-name tool-call))
          (is-error (and (stringp result)
-                        (or (search "Error:" result)
-                            (search "Error " result))))
+                        (let ((limit (min 20 (length result))))
+                          (or (search "Error:" result :end2 limit)
+                              (search "Error " result :end2 limit)))))
          (icon (if is-error "✗" "✓"))
          (colored-icon (if *use-colors*
                            (with-output-to-string (s)
@@ -248,7 +252,7 @@
       (format-cost cost-usd stream))
     (format stream "    ")
     (format-context-percentage context-percentage stream)
-    (format stream " ctx~%")
+    (format stream " mem~%")
     
     ;; Second line: Tokens In/Out (with optional Thinking)
     (format stream " Tokens  In ")

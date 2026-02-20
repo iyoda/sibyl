@@ -95,7 +95,8 @@ Called at run-tests-parallel invocation time, after all packages are loaded."
               (%resolve-suite 'run-hook-tests          '#:sibyl.agent.tests)
               (%resolve-suite 'memory-compact-tests    '#:sibyl.agent.tests)
                (%resolve-suite 'memory-sanitize-tests   '#:sibyl.agent.tests)
-               (%resolve-suite 'token-tracker-enhancement-tests '#:sibyl.llm))))))
+               (%resolve-suite 'token-tracker-enhancement-tests '#:sibyl.llm)
+               (%resolve-suite 'multi-agent-tests       '#:sibyl.multi-agent.tests))))))
 
 (defparameter *unsafe-suites*
   '(planning-tests
@@ -121,7 +122,8 @@ Called at run-tests-parallel invocation time, after all packages are loaded."
     cache-integration-tests
     ;; Task 1: Newly classified unsafe suites (sleep, threads, timing-sensitive)
     rich-repl-tests               ;; REPL features: spinner threads, sleep calls
-    session-tests)                ;; Session persistence: file I/O, timer threads
+    session-tests                 ;; Session persistence: file I/O, timer threads
+    repl-hooks-tests)             ;; REPL hook closures: spinner threads, global state
   "Test suites in sibyl.tests package that must run sequentially (file I/O, global state, or FiveAM side effects).
 Cross-package suites are resolved at runtime via %unsafe-suites-resolved.")
 

@@ -145,21 +145,22 @@ prompt with an optional system-prompt-hint prefix to save tokens."
 ;;; Agent construction
 ;;; ============================================================
 
-(defun make-agent (&key client
-                     (name "Sibyl")
-                     (system-prompt *default-system-prompt*)
-                     (max-steps 50)
-                     (max-memory-messages 50))
+(defun make-agent (&key client (name "Sibyl") (system-prompt *default-system-prompt*)
+                   (max-steps 50) (max-memory-messages 50))
   "Create a new agent instance."
-  (let ((agent (make-instance 'agent
-                              :client client
-                              :name name
-                              :system-prompt system-prompt
-                              :max-steps max-steps
-                              :memory (make-memory :max-messages max-memory-messages))))
+  (let* ((agent (make-instance 'agent
+                  :client client
+                  :name name
+                  :system-prompt system-prompt
+                  :max-steps max-steps
+                  :memory (make-memory :max-messages max-memory-messages))))
     ;; Propagate the LLM client to memory so :llm compaction strategy works
     (when client
       (setf (memory-compaction-client (agent-memory agent)) client))
+    ;; Wire compaction callback → :on-compact agent hook
+    (setf (memory-compaction-callback (agent-memory agent))
+          (lambda (summary)
+            (run-hook agent :on-compact summary)))
     agent))
 
 ;;; ============================================================

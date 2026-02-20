@@ -173,21 +173,21 @@
         "Missing hook should return NIL without errors")))
 
 (test run-hook-handles-hook-errors
-  "run-hook should warn and continue if hook signals an error."
+  "run-hook should log-warn and continue if hook signals an error."
   (let* ((agent (make-agent :client nil))
-         (warned nil))
+         (log-output nil))
     (setf (agent-hooks agent)
           (list (cons :on-error
                       (lambda (&rest args)
                         (declare (ignore args))
                         (error "boom")))))
-    (handler-bind ((warning (lambda (condition)
-                              (declare (ignore condition))
-                              (setf warned t)
-                              (muffle-warning condition))))
+    ;; Capture log output — log-warn writes to sibyl.logging:*log-stream*
+    (let ((sibyl.logging:*log-stream* (make-string-output-stream)))
       (is (null (run-hook agent :on-error :tool-error))
-          "Errors should not propagate from hooks"))
-    (is (not (null warned)) "Hook errors should emit a warning")))
+          "Errors should not propagate from hooks")
+      (setf log-output (get-output-stream-string sibyl.logging:*log-stream*)))
+    (is (search "error" (string-downcase log-output))
+        "Hook errors should be logged via log-warn")))
 
 (test run-hook-selects-hook-by-name
   "run-hook should execute the hook matching the requested name."

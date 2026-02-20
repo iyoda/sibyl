@@ -680,16 +680,42 @@ Use the package parameter to set the evaluation context (e.g. \"SIBYL.AGENT\")."
            (string= lower "1"))))
     (t t)))
 
-(defun %safe-redefine-eval-definition (definition package)
-  "Evaluate DEFINITION in PACKAGE using eval-form."
-  (let* ((result (execute-tool "eval-form"
-                               (list (cons "form" definition)
-                                     (cons "package" (package-name package)))))
-         (lower (string-downcase result)))
-    (when (or (search "blocked unsafe form" lower)
-              (search "timeout after" lower))
-      (error "Failed to evaluate new definition: ~a" result))
-    result))
+(defparameter *safe-redefine-allowed-operators*
+  '(defun defmethod defmacro defgeneric)
+  "Top-level operators allowed in safe-redefine definitions.")
+
+(defun %safe-redefine-eval-definition (definition package &key (timeout 30))
+  "Evaluate DEFINITION in PACKAGE after safety validation.
+
+The top-level form must be a definition operator (defun, defmethod, etc.).
+The definition body is walked for blocked symbols (sb-ext:exit, run-program,
+etc.) to prevent code injection via the definition text.  Evaluation is
+wrapped in a timeout to guard against hangs."
+  (handler-case
+      (let ((form (with-standard-io-syntax
+                    (let ((*package* package)
+                          (*read-eval* nil))
+                      (read-from-string definition)))))
+        ;; Verify top-level form is a definition
+        (unless (and (consp form)
+                     (member (car form) *safe-redefine-allowed-operators*))
+          (error "Only definition forms are allowed (defun, defmethod, ~
+                  defmacro, defgeneric). Got: ~a"
+                 (if (consp form) (car form) form)))
+        ;; Walk body for blocked symbols
+        (let ((blocked (%eval-form-find-blocked-symbol form)))
+          (when blocked
+            (error "Blocked unsafe symbol in definition body: ~a"
+                   (symbol-name blocked))))
+        ;; Evaluate with timeout
+        (let ((*package* package))
+          (sb-ext:with-timeout timeout
+            (eval form)))
+        "Evaluated successfully")
+    (sb-ext:timeout ()
+      (error "Definition evaluation timed out after ~a seconds" timeout))
+    (error (e)
+      (error "Failed to evaluate new definition: ~a" e))))
 
 (defun %safe-redefine-closure-warning (name-string force)
   "Return a warning string about closure capture when FORCE is NIL."

@@ -26,10 +26,15 @@
                         :type keyword
                         :documentation "Compaction strategy: :simple or :llm")
    (compaction-client :initarg :compaction-client
-                      :accessor memory-compaction-client
-                      :initform nil
-                      :documentation "LLM client for :llm compaction strategy (optional).
-When nil and strategy is :llm, falls back to :simple text summarization."))
+                       :accessor memory-compaction-client
+                       :initform nil
+                       :documentation "LLM client for :llm compaction strategy (optional).
+When nil and strategy is :llm, falls back to :simple text summarization.")
+   (compaction-callback :initarg :compaction-callback
+                        :accessor memory-compaction-callback
+                        :initform nil
+                        :type (or function null)
+                        :documentation "Optional callback invoked after compaction with the summary text."))
   (:documentation "Manages conversation history with context window limits."))
 
 (defun make-memory (&key (max-messages 50) (compaction-strategy :llm))
@@ -150,7 +155,10 @@ Focus on key decisions, facts, and context needed for continuity.~%~%~
         ;; Replace conversation with only the most recent messages
         (conversation-clear (memory-conversation mem))
         (dolist (msg to-keep)
-          (conversation-push (memory-conversation mem) msg))))))
+          (conversation-push (memory-conversation mem) msg))
+        ;; Fire compaction callback if registered
+        (when (memory-compaction-callback mem)
+          (funcall (memory-compaction-callback mem) summary-text))))))
 
 ;;; ============================================================
 ;;; Conversation sanitizer — repair orphaned tool_use

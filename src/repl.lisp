@@ -1126,6 +1126,40 @@ Returns TEXT unchanged when it is not a string."
   (lambda (err)
     (log-error "agent" "Agent error: ~a" err)))
 
+(defun make-compact-hook ()
+  "Return a closure suitable for the :on-compact agent hook.
+   Displays a context compaction notification when the conversation history
+   is compressed.  Mirrors the style of make-tool-result-hook but uses a
+   dedicated 🗜️  prefix and dim ANSI styling so it is visually distinct.
+
+   The closure receives (summary-text) and outputs:
+     🗜️  Context compacted
+
+   If a spinner is currently active it is stopped first (to avoid the
+   spinner's \\r\\e[2K from erasing the message), then a fresh 'Thinking...'
+   spinner is started because a new LLM call is imminent.
+
+   Usage:
+     (cons :on-compact (make-compact-hook))"
+  (lambda (summary)
+    (declare (ignore summary))
+    (bt:with-lock-held (*spinner-output-lock*)
+      (let ((active-spinner *current-spinner*))
+        ;; Stop existing spinner before printing so our message survives.
+        (when (and active-spinner
+                   (sibyl.repl.spinner:spinner-active-p active-spinner))
+          (sibyl.repl.spinner:stop-spinner active-spinner)
+          (setf *current-spinner* nil))
+        ;; Print a clean compaction notice with trailing newline (permanent).
+        (format t "~C~C[2K" #\Return #\Escape)
+        (if *use-colors*
+            (format t "~C[2m🗜️  Context compacted~C[0m~%" #\Escape #\Escape)
+            (format t "🗜️  Context compacted~%"))
+        (force-output)
+        ;; Restart Thinking... spinner — LLM is called right after compaction.
+        (let ((new-spinner (sibyl.repl.spinner:start-spinner "Thinking...")))
+          (setf *current-spinner* new-spinner))))))
+
 (defun make-tool-call-hook-v2 (&optional spinner)
   "Return a closure suitable for the :on-tool-call agent hook (v2).
    Displays '🔧 tool-name ...' during execution.
@@ -1157,27 +1191,33 @@ Returns TEXT unchanged when it is not a string."
 (defun make-tool-result-hook ()
   "Return a closure suitable for the :on-tool-result agent hook.
    Overwrites the current line with a result line showing ✓/✗, tool name, args, time, size.
-   
+   After displaying the result, restarts a 'Thinking...' spinner so the user has
+   visual feedback while the LLM processes the tool result and decides next steps.
+
    The closure receives (tool-call result elapsed-seconds) and displays:
      ✓ read-file (src/repl.lisp) 0.02s 14.9 KB
      ✗ shell (bad-cmd) 1.20s Error
-   
+
    Usage:
      (cons :on-tool-result (make-tool-result-hook))"
   (lambda (tc result elapsed-seconds)
     (let ((bytes (if (stringp result) (length result) 0)))
       (bt:with-lock-held (*spinner-output-lock*)
         (let ((active-spinner *current-spinner*))
-          ;; Stop spinner
+          ;; Stop existing spinner
           (when (and active-spinner
                      (sibyl.repl.spinner:spinner-active-p active-spinner))
             (sibyl.repl.spinner:stop-spinner active-spinner)
             (setf *current-spinner* nil))
-          ;; Clear line and display result
+          ;; Clear line and display result (with trailing newline)
           (format t "~C~C[2K~a~%"
                   #\Return #\Escape
                   (sibyl.repl.display:format-tool-result-line tc result elapsed-seconds bytes))
-          (force-output))))))
+          (force-output)
+          ;; Restart spinner so user has feedback during the next LLM call.
+          ;; The streaming callback or on-tool-call hook will stop it when appropriate.
+          (let ((new-spinner (sibyl.repl.spinner:start-spinner "Thinking...")))
+            (setf *current-spinner* new-spinner)))))))
 
 ;;; ============================================================
 ;;; Elapsed time utilities
@@ -1364,7 +1404,8 @@ Otherwise, use model-specific optimized prompt for Ollama models."
                 (cons :on-tool-result (make-tool-result-hook))
                 (cons :before-step (make-before-step-hook))
                 (cons :after-step (make-after-step-hook))
-                (cons :on-error (make-on-error-hook))))
+                (cons :on-error (make-on-error-hook))
+                (cons :on-compact (make-compact-hook))))
     (let ((*ignore-ctrl-j*
            (not (null (sibyl.config:config-value "repl.ignore-ctrl-j" nil)))))
       ;; When *ignore-ctrl-j* is T, Ctrl+J is unbound from accept-line at the
@@ -1612,12 +1653,16 @@ Otherwise, use model-specific optimized prompt for Ollama models."
                                                      :cache-read-tokens cache-hits-delta
                                                      :cache-write-tokens (- cache-total-delta cache-hits-delta))))
                                       (total-cost (when cost-result (getf cost-result :total)))
-                                      ;; Calculate context percentage
-                                      (context-window (when model-name
-                                                       (sibyl.llm:context-window-for-model model-name)))
-                                      (context-pct (if (and context-window (plusp context-window))
-                                                      (* 100.0 (/ (float in-delta) context-window))
-                                                      0.0)))
+                                      ;; Calculate context percentage from conversation fill ratio
+                                      ;; (using message count / max-messages avoids inflated values
+                                      ;;  when compaction LLM calls are included in in-delta)
+                                      (context-pct (let* ((mem (sibyl.agent:agent-memory agent))
+                                                          (msgs (sibyl.llm:conversation-length
+                                                                 (sibyl.agent:memory-conversation mem)))
+                                                          (max-msgs (sibyl.agent:memory-max-messages mem)))
+                                                     (if (plusp max-msgs)
+                                                         (* 100.0 (/ (float msgs) max-msgs))
+                                                         0.0))))
                                  ;; Accumulate cost in tracker
                                  (when total-cost
                                    (sibyl.llm:tracker-add-cost tracker total-cost))

@@ -102,8 +102,8 @@
   (make-instance 'agent-coordinator :coordination-strategy strategy))
 
 (defun generate-agent-id ()
-  "Generate a unique agent ID"
-  (format nil "agent-~a" (get-universal-time)))
+  "Generate a unique agent ID using timestamp + random suffix."
+  (format nil "agent-~a-~a" (get-universal-time) (random 1000000000)))
 
 (defun generate-task-id ()
   "Generate a unique task ID using timestamp + random suffix."
