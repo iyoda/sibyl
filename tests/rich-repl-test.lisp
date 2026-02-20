@@ -457,7 +457,8 @@
          (sibyl.repl::*ignore-ctrl-j* t))
     ;; Only run if cl-readline is available (skip gracefully otherwise)
     (when (sibyl.repl::readline-available-p)
-      (let ((original-fn (find-symbol "UNBIND-KEY" :cl-readline)))
+      (let* ((unbind-sym (find-symbol "UNBIND-KEY" :cl-readline))
+             (original-fn (symbol-function unbind-sym)))
         ;; Temporarily rebind unbind-key to capture the argument
         (setf (symbol-function (find-symbol "UNBIND-KEY" :cl-readline))
               (lambda (key) (setf captured-key key) nil))
@@ -477,7 +478,8 @@
   (let* ((called-p nil)
          (sibyl.repl::*ignore-ctrl-j* nil))
     (when (sibyl.repl::readline-available-p)
-      (let ((original-fn (find-symbol "UNBIND-KEY" :cl-readline)))
+      (let* ((unbind-sym (find-symbol "UNBIND-KEY" :cl-readline))
+             (original-fn (symbol-function unbind-sym)))
         (setf (symbol-function (find-symbol "UNBIND-KEY" :cl-readline))
               (lambda (key) (declare (ignore key)) (setf called-p t) nil))
         (unwind-protect
