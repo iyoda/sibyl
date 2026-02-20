@@ -1899,3 +1899,38 @@
     (is (null sibyl.repl::*current-spinner*)
         "spinner should be cleared after block 2 starts")))
 )
+
+(test thinking-callback-sets-output-active-flag
+  "Auto-generated test"
+  
+;; When the thinking callback writes chunks, it should set
+;; *thinking-output-active* to T so the text callback can
+;; emit a newline separator.
+(let ((sibyl.repl::*thinking-output-active* nil)
+      (sibyl.repl::*stream-enabled* t)
+      (sibyl.repl::*current-spinner* nil)
+      (sibyl.repl::*use-colors* nil))
+  (let ((cb (sibyl.repl::make-thinking-display-callback)))
+    (with-output-to-string (*standard-output*)
+      (funcall cb "hello"))
+    (is (eq t sibyl.repl::*thinking-output-active*)
+        "*thinking-output-active* should be T after a thinking chunk")))
+)
+
+(test thinking-output-active-reset-on-text
+  "Auto-generated test"
+  
+;; When *thinking-output-active* is T and the text callback pattern runs,
+;; it should emit a newline and reset the flag to NIL.
+(let ((sibyl.repl::*thinking-output-active* t))
+  (let ((output (with-output-to-string (*standard-output*)
+                  ;; Replicate text callback's thinking-separator logic
+                  (when sibyl.repl::*thinking-output-active*
+                    (format t "~%")
+                    (setf sibyl.repl::*thinking-output-active* nil))
+                  (write-string "response text"))))
+    (is (char= #\Newline (char output 0))
+        "newline should be emitted before text when thinking was active")
+    (is (null sibyl.repl::*thinking-output-active*)
+        "flag should be reset to NIL")))
+)

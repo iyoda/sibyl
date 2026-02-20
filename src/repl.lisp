@@ -141,6 +141,11 @@ Returns TEXT unchanged when it is not a string."
 (defvar *current-spinner* nil
   "Currently active spinner for LLM calls, or NIL when idle.")
 
+
+(defvar *thinking-output-active* nil
+  "Set to T by the thinking display callback after writing chunks.
+   Checked and reset by the text streaming callback to emit a newline
+   separator between thinking output and response text.")
 (defvar *spinner-output-lock* (bt:make-lock "spinner-output")
   "Lock serializing spinner stop/start and terminal output in the tool-call hook.
    Prevents garbled escape sequences when parallel tool calls each fire the hook
@@ -1213,6 +1218,7 @@ tests) can trigger SBCL stream corruption warnings."
               (setf *current-spinner* new-spinner))))))))
 
 
+
 (defun make-thinking-display-callback ()
   "Return a lambda suitable for *streaming-thinking-callback*.
 Displays thinking chunks in magenta ANSI style, prefixed with '💭 ' on the
@@ -1221,15 +1227,18 @@ first chunk of EACH thinking block.
 A new thinking block is detected when *current-spinner* is active at the
 time a chunk arrives — indicating that a tool call restarted the spinner
 since the last thinking block ended.  In that case:
-  1. The spinner is stopped (preventing \r\e[2K from overwriting the text).
+  1. The spinner is stopped (preventing \\r\\e[2K from overwriting the text).
   2. The '💭' prefix is re-emitted for the new block.
 
 Newline handling:
   - After stopping a spinner: cursor is already at column 0 of a cleared
-    line (spinner's \r\e[2K), so the prefix is written on that line directly
+    line (spinner's \\r\\e[2K), so the prefix is written on that line directly
     (no leading newline needed, avoids a spurious blank line).
   - Without an active spinner: cursor may be mid-line, so fresh-line is used
     before emitting the prefix.
+
+Sets *thinking-output-active* to T after writing any chunk, so downstream
+callbacks (e.g. text streaming) can emit a newline separator.
 
 Returns NIL when *stream-enabled* is NIL (streaming disabled)."
   (when *stream-enabled*
@@ -1266,6 +1275,9 @@ Returns NIL when *stream-enabled* is NIL (streaming disabled)."
             (if *use-colors*
                 (format t "~C[35m~a~C[0m" #\Escape thinking-chunk #\Escape)
                 (write-string thinking-chunk *standard-output*))
+            ;; Signal that thinking output was produced so the text streaming
+            ;; callback can emit a trailing newline separator.
+            (setf *thinking-output-active* t)
             (force-output *standard-output*)))))))
 
 (defun make-tool-result-hook ()
@@ -1673,7 +1685,8 @@ Otherwise, use model-specific optimized prompt for Ollama models."
                                                   (progn
                                                     (setf start-time (get-internal-real-time)
                                                           spinner (sibyl.repl.spinner:start-spinner "Thinking...")
-                                                          *current-spinner* spinner)
+                                                          *current-spinner* spinner
+                                                          *thinking-output-active* nil)
                             (let* ((first-chunk-p t)
                                    (ollama-client-p (typep (sibyl.agent:agent-client agent)
                                                             'sibyl.llm:ollama-client))
@@ -1682,20 +1695,29 @@ Otherwise, use model-specific optimized prompt for Ollama models."
                                    (sibyl.llm:*streaming-text-callback*
                                      (when *stream-enabled*
                                       (lambda (text)
+                                        (let ((spinner-was-active
+                                                (and *current-spinner*
+                                                     (sibyl.repl.spinner:spinner-active-p *current-spinner*))))
                                           ;; Stop any active spinner before writing streaming text.
                                           ;; Handles both the initial spinner AND spinners restarted
                                           ;; by the tool-call hook between LLM calls.
-                                          (when (and *current-spinner*
-                                                     (sibyl.repl.spinner:spinner-active-p *current-spinner*))
+                                          (when spinner-was-active
                                             (stop-current-spinner)
                                             (format t "~%"))
+                                          ;; Emit newline separator after thinking output.
+                                          ;; When a spinner was active, its stop + ~% already provides
+                                          ;; the line break; otherwise we need an explicit separator.
+                                          (when *thinking-output-active*
+                                            (unless spinner-was-active
+                                              (format t "~%"))
+                                            (setf *thinking-output-active* nil))
                                           (setf first-chunk-p nil)
                                           (let ((clean (if stripper
                                                            (funcall stripper text)
                                                            text)))
                                             (when (and clean (plusp (length clean)))
                                               (write-string clean *standard-output*)
-                                              (force-output *standard-output*))))))
+                                              (force-output *standard-output*)))))))
                                     (sibyl.llm::*streaming-thinking-callback*
                                       (make-thinking-display-callback))
                                     (tracker (sibyl.agent:agent-token-tracker agent))
