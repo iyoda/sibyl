@@ -283,7 +283,10 @@ Returns NIL for providers that don't need an API key (e.g. :ollama)."
     ("gpt-5.2-codex" . "gpt-5.2-codex")
     ("nano"    . "gpt-5-nano")
     ("mini"    . "gpt-5-mini")
-    ("gpt-5-mini" . "gpt-5-mini"))
+    ("gpt-5-mini" . "gpt-5-mini")
+    ("ollama" . "gpt-oss:120b")
+    ("gpt-oss" . "gpt-oss:120b")
+    ("gpt-oss:120b" . "gpt-oss:120b"))
   "Short aliases for model families. Each (alias . prefix) pair maps
 a user-friendly name to a model-name prefix in *model-registry*.")
 

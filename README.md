@@ -4,7 +4,7 @@
 
 A research prototype for a coding agent implemented in Common Lisp.
 
-Explores agent architectures that leverage Lisp macros, the condition system, and CLOS, with LLMs (Claude / GPT) as the backend.
+Explores agent architectures that leverage Lisp macros, the condition system, and CLOS, with LLMs (Claude / GPT / Ollama) as the backend.
 
 ## Features
 
@@ -51,6 +51,12 @@ scripts/start-repl.sh opus-4.6
 
 # soonet-4.6 (legacy alias; sonnet-4.6 も利用可)
 scripts/start-repl.sh soonet-4.6
+
+# Ollama (default: gpt-oss:120b)
+scripts/start-repl.sh ollama
+
+# Ollama with explicit local model
+scripts/start-repl.sh ollama:llama3:8b
 ```
 
 `scripts/start-repl.sh` のデフォルトは `gpt-5.2-codex` です。
@@ -79,6 +85,9 @@ export CLAUDE_CODE_OAUTH_TOKEN="sk-ant-oat01-..."
 
 # Or OpenAI API key
 export OPENAI_API_KEY="sk-..."
+
+# Optional: Ollama host (default: http://localhost:11434)
+export OLLAMA_HOST="http://localhost:11434"
 ```
 
 OAuth tokens are automatically detected and authenticated using `Authorization: Bearer` with the required beta flags. Standard API keys use the `x-api-key` header as usual.

@@ -698,6 +698,20 @@
     (is (string= "gpt-oss:120b" (sibyl.llm::client-model client)))
     (is (= 8192 (sibyl.llm::client-max-tokens client)))))
 
+(test resolve-model-spec-ollama-alias
+  "resolve-model-spec maps 'ollama' alias to the default Ollama model"
+  (let ((config (sibyl.llm::resolve-model-spec "ollama")))
+    (is (not (null config)))
+    (is (eq :ollama (sibyl.llm::model-provider config)))
+    (is (string= "gpt-oss:120b" (sibyl.llm::model-name config)))))
+
+(test resolve-model-spec-gpt-oss-alias
+  "resolve-model-spec maps 'gpt-oss' alias to the Ollama model config"
+  (let ((config (sibyl.llm::resolve-model-spec "gpt-oss")))
+    (is (not (null config)))
+    (is (eq :ollama (sibyl.llm::model-provider config)))
+    (is (string= "gpt-oss:120b" (sibyl.llm::model-name config)))))
+
 
 
 ;;; ============================================================
