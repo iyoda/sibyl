@@ -1365,6 +1365,30 @@ Failures:  \"✗ 40/42 passed\nFailures:\n  • test-name: reason\""
                     (reason    (gethash "reason" f "")))
                 (format s "~%  • ~a: ~a" test-name reason))))))))
 
+(defun %run-tests-preflight-guard ()
+  "Run the same static guard as pre-push before executing tests."
+  (let ((script (asdf:system-relative-pathname
+                 :sibyl
+                 "scripts/check-no-test-packages-in-src.lisp")))
+    (unless (probe-file script)
+      (error "Pre-test guard script not found: ~a" (namestring script)))
+    (destructuring-bind (stdout stderr exit-code)
+        (multiple-value-list
+         (uiop:run-program
+          (list "sbcl" "--noinform" "--non-interactive" "--script"
+                (uiop:native-namestring script))
+          :output :string
+          :error-output :string
+          :ignore-error-status t))
+      (unless (zerop exit-code)
+        (let* ((stderr-text (string-trim-whitespace (or stderr "")))
+               (stdout-text (string-trim-whitespace (or stdout "")))
+               (detail (cond ((string/= stderr-text "") stderr-text)
+                             ((string/= stdout-text "") stdout-text)
+                             (t nil))))
+          (error "Pre-test guard failed (~a).~@[ ~a~]"
+                 "scripts/check-no-test-packages-in-src.lisp"
+                 detail))))))
 
 (deftool "run-tests"
  (:description
@@ -1377,6 +1401,7 @@ Failures:  \"✗ 40/42 passed\nFailures:\n  • test-name: reason\""
    (:name "files" :type "string" :required nil :description
     "Comma-separated source file paths; runs only their mapped test suites")))
  (block run-tests
+   (%run-tests-preflight-guard)
    (let* ((suite-name (getf args :suite))
           (test-name (getf args :test))
           (files-str (getf args :files))

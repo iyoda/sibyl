@@ -417,6 +417,31 @@
     (is (integerp total))
     (is (> total 0))))
 
+(test run-tests-aborts-when-preflight-guard-fails
+  "run-tests aborts before suite resolution when the preflight guard fails."
+  (let* ((original-guard (symbol-function 'sibyl.tools::%run-tests-preflight-guard))
+         (original-resolve (symbol-function 'sibyl.tools::%run-tests-resolve-target))
+         (resolve-called nil))
+    (unwind-protect
+         (progn
+           (setf (symbol-function 'sibyl.tools::%run-tests-preflight-guard)
+                 (lambda ()
+                   (error "forced guard failure")))
+           (setf (symbol-function 'sibyl.tools::%run-tests-resolve-target)
+                 (lambda (&rest args)
+                   (declare (ignore args))
+                   (setf resolve-called t)
+                   (error "run-tests-resolve-target should not be called when guard fails")))
+           (signals sibyl.conditions:tool-execution-error
+             (sibyl.tools:execute-tool
+              "run-tests"
+              '(("suite" . "describe-symbol-tests"))))
+           (is (not resolve-called)))
+      (setf (symbol-function 'sibyl.tools::%run-tests-preflight-guard)
+            original-guard)
+      (setf (symbol-function 'sibyl.tools::%run-tests-resolve-target)
+            original-resolve))))
+
 (test run-tests-detects-failures
   "run-tests detects and reports test failures."
   ;; Define a failing test
