@@ -781,8 +781,6 @@ tests) can trigger SBCL stream corruption warnings."
                              i hour min sec model
                              (string-downcase (symbol-name provider)))))))))
 
-
-
 (defun %model-switch (agent spec)
   "Switch agent's model based on user SPEC string.
 Uses resolve-model-spec for fuzzy matching, then creates client and switches.

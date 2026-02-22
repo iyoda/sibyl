@@ -10,6 +10,7 @@
                 ;; coordinator
                 #:make-agent-coordinator
                 #:add-agent
+                #:remove-agent
                 #:find-agent
                 #:list-agents
                 #:create-task
@@ -68,14 +69,21 @@
 (defclass mock-specialized-agent (specialized-agent)
   ((run-called-p  :initform nil  :accessor mock-run-called-p)
    (run-input     :initform nil  :accessor mock-run-input)
-   (run-response  :initform "mock-llm-response" :accessor mock-run-response))
+   (run-response  :initform "mock-llm-response" :accessor mock-run-response)
+   (run-responses :initform nil :accessor mock-run-responses)
+   (run-call-count :initform 0 :accessor mock-run-call-count))
   (:documentation "Specialized-agent subclass that mocks agent-run for unit tests."))
 
 ;;; Override agent-run to record the call without hitting a real LLM.
 (defmethod agent-run ((agent mock-specialized-agent) input)
   (setf (mock-run-called-p agent) t)
   (setf (mock-run-input    agent) input)
-  (mock-run-response agent))
+  (incf (mock-run-call-count agent))
+  (let ((scripted (mock-run-responses agent)))
+    (if scripted
+        (prog1 (first scripted)
+          (setf (mock-run-responses agent) (rest scripted)))
+        (mock-run-response agent))))
 
 (defun make-test-role (&key (name "coder")
                             (tools '("read-file" "write-file" "eval-form"))
@@ -93,6 +101,7 @@
                               (tools '("read-file" "write-file" "eval-form"))
                               (capabilities '(:code-generation))
                               (response "mock-llm-response")
+                              (responses nil)
                               (agent-id (sibyl.agent:generate-agent-id)))
   "Create a mock-specialized-agent for testing."
   (let* ((role  (make-test-role :name role-name
@@ -105,6 +114,7 @@
                                :client nil
                                :system-prompt (role-system-prompt role))))
     (setf (mock-run-response agent) response)
+    (setf (mock-run-responses agent) responses)
     agent))
 
 (defun make-test-task (description &key dependencies)
@@ -113,6 +123,20 @@
                  :id (sibyl.agent:generate-task-id)
                  :description description
                  :dependencies dependencies))
+
+(test remove-agent-removes-agent-from-coordinator
+  "remove-agent should delete the agent from the coordinator registry."
+  (let* ((coordinator (make-agent-coordinator))
+         (agent (make-mock-agent :agent-id "agent-to-remove")))
+    (add-agent coordinator agent)
+    (is (not (null (find-agent coordinator "agent-to-remove")))
+        "Agent should be present after add-agent")
+    (is-true (remove-agent coordinator "agent-to-remove")
+             "remove-agent should return true when the agent existed")
+    (is (null (find-agent coordinator "agent-to-remove"))
+        "Agent should no longer be present after remove-agent")
+    (is (= 0 (length (list-agents coordinator)))
+        "Coordinator should have no agents after removal")))
 
 ;;; ============================================================
 ;;; Phase 1 – LLM Connection
@@ -294,6 +318,58 @@
     (let ((tasks (coordinator-task-queue coordinator)))
       (is (every (lambda (task) (eq :completed (task-status task))) tasks)
           "All tasks must be :completed under hierarchical strategy"))))
+
+(test hierarchical-triangle-consensus-send-back-once-then-unanimous
+  "Triangle Consensus Flow retries once when round 1 lacks unanimous approval."
+  (let* ((coordinator (make-agent-coordinator :strategy :hierarchical))
+         (architect (make-mock-agent :role-name "architect"
+                                     :responses '("[approve] design ok"
+                                                  "[approve] design ok after feedback")))
+         (coder (make-mock-agent :role-name "coder"
+                                 :responses '("[approve] implementation ok"
+                                              "[approve] implementation updated")))
+         (tester (make-mock-agent :role-name "tester"
+                                  :responses '("[reject] tests missing"
+                                               "[approve] tests pass"))))
+    (add-agent coordinator architect)
+    (add-agent coordinator coder)
+    (add-agent coordinator tester)
+    (create-task coordinator "Implement and validate feature Y")
+    (execute-tasks coordinator)
+    (let ((task (first (coordinator-task-queue coordinator))))
+      (is (eq :completed (task-status task))
+          "Task should complete after one send-back and second round agreement")
+      (is (search "round 2" (string-downcase (task-result task)))
+          "Task result should record second-round completion")
+      (is (= 2 (mock-run-call-count architect)))
+      (is (= 2 (mock-run-call-count coder)))
+      (is (= 2 (mock-run-call-count tester))))))
+
+(test hierarchical-triangle-consensus-two-party-agreement-fallback
+  "Triangle Consensus Flow falls back to two-party agreement after one send-back."
+  (let* ((coordinator (make-agent-coordinator :strategy :hierarchical))
+         (architect (make-mock-agent :role-name "architect"
+                                     :responses '("[approve] architecture acceptable"
+                                                  "[approve] architecture acceptable")))
+         (coder (make-mock-agent :role-name "coder"
+                                 :responses '("[approve] code acceptable"
+                                              "[approve] code acceptable")))
+         (tester (make-mock-agent :role-name "tester"
+                                  :responses '("[reject] test plan insufficient"
+                                               "[reject] still insufficient"))))
+    (add-agent coordinator architect)
+    (add-agent coordinator coder)
+    (add-agent coordinator tester)
+    (create-task coordinator "Implement and validate feature Z")
+    (execute-tasks coordinator)
+    (let ((task (first (coordinator-task-queue coordinator))))
+      (is (eq :completed (task-status task))
+          "Task should complete via two-party agreement fallback")
+      (is (search "two-party agreement" (string-downcase (task-result task)))
+          "Task result should record two-party fallback")
+      (is (= 2 (mock-run-call-count tester)))
+      (is (= 2 (mock-run-call-count architect)))
+      (is (= 2 (mock-run-call-count coder))))))
 
 ;;; ============================================================
 ;;; Phase 1 – Integration test (Phase 1, task 4)

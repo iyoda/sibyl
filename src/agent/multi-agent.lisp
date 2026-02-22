@@ -229,11 +229,11 @@ in DESCRIPTION (e.g. \"[tester] Write tests\" → required-role \"tester\")."
 (defmethod execute-tasks ((coordinator agent-coordinator) &key (task-fn nil))
   "Execute tasks based on coordination strategy.
    :task-fn — optional (lambda (task) result) for custom task execution.
-              Passed through to execute-tasks-parallel."
+              Passed through to execute-tasks-parallel and execute-tasks-hierarchical."
   (case (coordinator-strategy coordinator)
     (:sequential   (execute-tasks-sequential coordinator))
     (:parallel     (execute-tasks-parallel coordinator :task-fn task-fn))
-    (:hierarchical (execute-tasks-hierarchical coordinator))))
+    (:hierarchical (execute-tasks-hierarchical coordinator :task-fn task-fn))))
 
 (defmethod execute-tasks-sequential ((coordinator agent-coordinator))
   "Execute tasks one by one"
@@ -327,9 +327,161 @@ the completed-ids accumulator."
     (remove-if-not (lambda (task) (eq :completed (task-status task)))
                    (coordinator-task-queue coordinator))))
 
-(defmethod execute-tasks-hierarchical ((coordinator agent-coordinator))
-  "Hierarchical execution strategy (currently delegates to sequential)."
-  (execute-tasks-sequential coordinator))
+(defparameter *triangle-consensus-role-order*
+  '("architect" "coder" "tester")
+  "Preferred role order for hierarchical Triangle Consensus Flow execution.")
+
+(defun %triangle-consensus-role-agents (coordinator)
+  "Return triangle agents in canonical role order, or NIL if any role is missing."
+  (let ((selected nil))
+    (dolist (role-name *triangle-consensus-role-order* (nreverse selected))
+      (let ((agent (find role-name (list-agents coordinator)
+                         :test #'string=
+                         :key (lambda (a)
+                                (role-name (agent-role a))))))
+        (unless agent
+          (return-from %triangle-consensus-role-agents nil))
+        (push agent selected)))))
+
+(defun %triangle-consensus-result-verdict (result)
+  "Classify RESULT as :approve or :reject for Triangle Consensus Flow.
+Defaults to :approve when no explicit signal is detected for backward compatibility."
+  (let* ((text (string-downcase (princ-to-string (or result "")))))
+    (cond
+      ((or (search "[reject]" text)
+           (search "reject" text)
+           (search "needs changes" text)
+           (search "changes required" text)
+           (search "fail" text)
+           (search "差し戻" text)
+           (search "修正必要" text)
+           (search "不合格" text))
+       :reject)
+      ((or (search "[approve]" text)
+           (search "approve" text)
+           (search "approved" text)
+           (search "pass" text)
+           (search "問題なし" text)
+           (search "合意" text))
+       :approve)
+      (t :approve))))
+
+(defun %triangle-consensus-run-agent-step (agent task)
+  "Run TASK through AGENT while maintaining agent/task status bookkeeping."
+  (setf (task-assigned-agent task) (agent-id agent))
+  (setf (agent-status agent) :working)
+  (unwind-protect
+       (execute-agent-task agent task)
+    (setf (agent-status agent) :idle)))
+
+(defun %triangle-consensus-execute-round (coordinator task agents &key (task-fn nil))
+  "Execute one triangle review round and return a list of step plists."
+  (let ((steps nil))
+    (dolist (agent agents (nreverse steps))
+      (let* ((result (if task-fn
+                         (funcall task-fn task)
+                         (%triangle-consensus-run-agent-step agent task)))
+             (verdict (if (eq (task-status task) :failed)
+                          :reject
+                          (%triangle-consensus-result-verdict result))))
+        (push (list :agent-id (agent-id agent)
+                    :role (role-name (agent-role agent))
+                    :verdict verdict
+                    :result result)
+              steps)
+        ;; Keep the task moving through the triangle even if one reviewer rejects.
+        (when (eq (task-status task) :failed)
+          (setf (task-status task) :in-progress))))))
+
+(defun %triangle-consensus-round-summary (round)
+  "Format ROUND results into a short summary string."
+  (with-output-to-string (s)
+    (dolist (step round)
+      (format s "- ~a (~a): ~a~%"
+              (getf step :role)
+              (getf step :verdict)
+              (getf step :result)))))
+
+(defun %triangle-consensus-unanimous-approve-p (round)
+  (every (lambda (step) (eq :approve (getf step :verdict))) round))
+
+(defun %triangle-consensus-approval-count (round)
+  (count :approve round :key (lambda (step) (getf step :verdict))))
+
+(defun %triangle-consensus-push-feedback (coordinator agents round)
+  "Push round feedback to all triangle agents so the retry round sees shared context."
+  (let ((summary (%triangle-consensus-round-summary round)))
+    (dolist (agent agents)
+      (send-message coordinator
+                    "triangle-consensus-review"
+                    (agent-id agent)
+                    (format nil "Triangle Consensus Flow 差し戻しレビュー要約:~%~a" summary)
+                    :notification))))
+
+(defmethod execute-tasks-hierarchical ((coordinator agent-coordinator) &key (task-fn nil))
+  "Hierarchical Triangle Consensus Flow execution.
+
+Flow:
+  1. architect -> coder -> tester (one round)
+  2. If not unanimous, send back exactly once and rerun the triangle
+  3. If still not unanimous, complete with two-party agreement (>=2 approvals)
+
+If the triangle roles are not all present, falls back to sequential execution."
+  (let ((triangle-agents (%triangle-consensus-role-agents coordinator)))
+    (unless triangle-agents
+      (return-from execute-tasks-hierarchical
+        (execute-tasks-sequential coordinator)))
+
+    (dolist (task (reverse (coordinator-task-queue coordinator)))
+      (when (eq (task-status task) :pending)
+        (let* ((original-description (task-description task))
+               (round1 nil)
+               (round2 nil))
+          (setf (task-status task) :in-progress)
+          (setf round1 (%triangle-consensus-execute-round coordinator task triangle-agents
+                                                         :task-fn task-fn))
+          (cond
+            ((%triangle-consensus-unanimous-approve-p round1)
+             (setf (task-status task) :completed)
+             (setf (task-result task)
+                   (format nil "triangle-consensus: unanimous (round 1)~%~a"
+                           (%triangle-consensus-round-summary round1))))
+            (t
+             ;; One-time send-back with shared feedback context.
+             (%triangle-consensus-push-feedback coordinator triangle-agents round1)
+             (setf (task-description task)
+                   (format nil "~a~%~%[Triangle retry context]~%~a"
+                           original-description
+                           (%triangle-consensus-round-summary round1)))
+             (setf round2 (%triangle-consensus-execute-round coordinator task triangle-agents
+                                                            :task-fn task-fn))
+             (setf (task-description task) original-description)
+             (cond
+               ((%triangle-consensus-unanimous-approve-p round2)
+                (setf (task-status task) :completed)
+                (setf (task-result task)
+                      (format nil "triangle-consensus: unanimous (round 2 after send-back)~%round1:~%~a~%round2:~%~a"
+                              (%triangle-consensus-round-summary round1)
+                              (%triangle-consensus-round-summary round2))))
+               ((>= (%triangle-consensus-approval-count round2) 2)
+                (setf (task-status task) :completed)
+                (setf (task-result task)
+                      (format nil "triangle-consensus: two-party agreement (round 2 fallback)~%round1:~%~a~%round2:~%~a"
+                              (%triangle-consensus-round-summary round1)
+                              (%triangle-consensus-round-summary round2))))
+               (t
+                (setf (task-status task) :failed)
+                (setf (task-result task)
+                      (format nil "triangle-consensus: no agreement after one send-back~%round1:~%~a~%round2:~%~a"
+                              (%triangle-consensus-round-summary round1)
+                              (%triangle-consensus-round-summary round2)))))))
+          (setf (task-completed-at task)
+                (when (eq (task-status task) :completed)
+                  (get-universal-time))))))
+
+    (remove-if-not (lambda (task)
+                     (member (task-status task) '(:completed :failed)))
+                   (coordinator-task-queue coordinator))))
 
 (defmethod find-suitable-agent ((coordinator agent-coordinator) (task agent-task))
   "Find the most suitable agent for a task.
@@ -366,4 +518,3 @@ Injects inbox messages as context. Marks the task :failed on error."
             (let ((msg (format nil "ERROR: ~a" e)))
               (setf (task-result task) msg)
               msg)))))
-

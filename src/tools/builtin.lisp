@@ -129,13 +129,19 @@
 (defvar *current-coordinator* nil
   "Current active agent coordinator")
 
+(defun %coordination-strategy-display-name (strategy)
+  "User-facing display label for multi-agent coordination STRATEGY."
+  (case strategy
+    (:hierarchical "Triangle Consensus Flow")
+    (otherwise (string-downcase (symbol-name strategy)))))
+
 (deftool "create-agent-team"
     (:description "Create a team of specialized agents for collaborative work"
      :category :general
      :parameters ((:name "roles" :type "string" :required t 
                    :description "Comma-separated list of agent roles (coder,tester,architect,coordinator)")
                   (:name "strategy" :type "string" :required nil
-                   :description "Coordination strategy: sequential, parallel, or hierarchical")))
+                   :description "Coordination strategy: sequential, parallel, or hierarchical (Triangle Consensus Flow)")))
   (let* ((role-names (mapcar (lambda (s) (string-trim '(#\Space #\Tab) s))
                              (cl-ppcre:split "," (getf args :roles))))
          (strategy-keyword (if (getf args :strategy)
@@ -159,7 +165,7 @@
     
     (format nil "Created agent team with ~a agents using ~a strategy:~%~{- ~a~%~}"
             (length (sibyl.agent:list-agents coordinator))
-            strategy-keyword
+            (%coordination-strategy-display-name strategy-keyword)
             (mapcar (lambda (agent) 
                       (format nil "~a (~a)" 
                               (sibyl.agent:agent-name agent)
@@ -210,14 +216,18 @@
     (if coordinator
         (let ((agents (sibyl.agent:list-agents coordinator)))
           (if agents
-              (format nil "Agent Team Status:~%~{~a~%~}"
+              (format nil "Agent Team Status (~a):~%~{~a~%~}"
+                      (%coordination-strategy-display-name
+                       (sibyl.agent:coordinator-strategy coordinator))
                       (mapcar (lambda (agent)
                                 (format nil "- ~a (~a): ~a" 
                                         (sibyl.agent:agent-name agent)
                                         (sibyl.agent:role-name (sibyl.agent:agent-role agent))
                                         (sibyl.agent:agent-status agent)))
                               agents))
-              "No agents in the current team."))
+              (format nil "No agents in the current team. (strategy: ~a)"
+                      (%coordination-strategy-display-name
+                       (sibyl.agent:coordinator-strategy coordinator)))))
         "No active agent coordinator. Create a team first with create-agent-team.")))
 
 (deftool "execute-team-task"
@@ -237,7 +247,10 @@
                             (sibyl.agent:execute-agent-task agent task)
                             (format nil "No suitable agent for: ~a"
                                     (sibyl.agent:task-description task))))))
-          (format nil "Team task execution completed: ~a" (getf args :task-description)))
+          (format nil "Team task execution completed via ~a: ~a"
+                  (%coordination-strategy-display-name
+                   (sibyl.agent:coordinator-strategy coordinator))
+                  (getf args :task-description)))
         "No active agent coordinator. Create a team first with create-agent-team.")))
 
 (deftool "send-agent-message"
